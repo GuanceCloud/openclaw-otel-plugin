@@ -24,7 +24,16 @@
 ```bash
 cd ~/.openclaw/extensions
 git clone https://github.com/GuanceDemo/openclaw-otel-plugin.git
+cd openclaw-otel-plugin
+npm install
+npm run build
 ```
+
+说明：
+
+- `npm install`：安装插件运行所需依赖
+- `npm run build`：将 `index.ts` 与 `src/*.ts` 编译到 `dist/`
+- 首次安装必须执行以上两步，否则插件可能无法被正常加载
 
 ## 配置方式
 
@@ -69,9 +78,16 @@ git clone https://github.com/GuanceDemo/openclaw-otel-plugin.git
 
 ## 重启网关
 
-修改配置或插件代码后，重启官方 OpenClaw 网关：
+修改配置后，重启官方 OpenClaw 网关：
 
 ```bash
+launchctl kickstart -k gui/$UID/ai.openclaw.gateway
+```
+
+如果你改动了插件 TypeScript 代码，先重新编译再重启网关：
+
+```bash
+npm run build
 launchctl kickstart -k gui/$UID/ai.openclaw.gateway
 ```
 

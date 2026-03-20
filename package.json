@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build": "esbuild index.ts src/config.ts src/service.ts --platform=node --format=esm --target=node22 --outdir=dist --outbase=. && mkdir -p dist/src && cp src/trace-runtime.js dist/src/trace-runtime.js"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
@@ -16,7 +17,10 @@
   },
   "openclaw": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ]
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.4"
   }
 }
