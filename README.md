@@ -78,17 +78,17 @@ npm run build
 
 ## 重启网关
 
-修改配置后，重启官方 OpenClaw 网关：
+修改配置后，优先使用 OpenClaw 官方 CLI 重启网关服务：
 
 ```bash
-launchctl kickstart -k gui/$UID/ai.openclaw.gateway
+openclaw gateway restart
 ```
 
 如果你改动了插件 TypeScript 代码，先重新编译再重启网关：
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$UID/ai.openclaw.gateway
+openclaw gateway restart
 ```
 
 ## 验证方式
