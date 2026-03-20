@@ -1,0 +1,47 @@
+{
+  "id": "openclaw-otel-plugin",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "endpoint": {
+        "type": "string"
+      },
+      "protocol": {
+        "type": "string",
+        "enum": ["http/protobuf"]
+      },
+      "serviceName": {
+        "type": "string"
+      },
+      "headers": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
+      "sampleRate": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "flushIntervalMs": {
+        "type": "number",
+        "minimum": 1000
+      },
+      "rootSpanTtlMs": {
+        "type": "number",
+        "minimum": 1000
+      },
+      "resourceAttributes": {
+        "type": "object",
+        "additionalProperties": {
+          "type": ["string", "number", "boolean"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,93 @@
+export type OtelPluginConfig = {
+  enabled: boolean;
+  endpoint: string;
+  protocol: "http/protobuf";
+  serviceName: string;
+  headers?: Record<string, string>;
+  sampleRate?: number;
+  flushIntervalMs: number;
+  rootSpanTtlMs: number;
+  resourceAttributes?: Record<string, string | number | boolean>;
+};
+
+const DEFAULT_ENDPOINT = "http://127.0.0.1:9529/otel";
+const DEFAULT_SERVICE_NAME = "openclaw-otel-plugin";
+const DEFAULT_FLUSH_INTERVAL_MS = 15000;
+const DEFAULT_ROOT_SPAN_TTL_MS = 10 * 60 * 1000;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asStringMap(
+  value: unknown,
+): Record<string, string> | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const mapped = Object.fromEntries(
+    Object.entries(record)
+      .filter(([, item]) => typeof item === "string" && item.trim())
+      .map(([key, item]) => [key, String(item).trim()]),
+  );
+  return Object.keys(mapped).length > 0 ? mapped : undefined;
+}
+
+function asResourceAttributes(
+  value: unknown,
+): Record<string, string | number | boolean> | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const mapped = Object.fromEntries(
+    Object.entries(record).filter(
+      ([, item]) =>
+        typeof item === "string" || typeof item === "number" || typeof item === "boolean",
+    ),
+  ) as Record<string, string | number | boolean>;
+  return Object.keys(mapped).length > 0 ? mapped : undefined;
+}
+
+function normalizeEndpoint(endpoint: string | undefined): string {
+  const trimmed = endpoint?.trim();
+  return trimmed ? trimmed.replace(/\/+$/, "") : DEFAULT_ENDPOINT;
+}
+
+function normalizeRate(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value < 0 || value > 1) {
+    return undefined;
+  }
+  return value;
+}
+
+function normalizeMs(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(1000, Math.floor(value));
+}
+
+export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {
+  const raw = asRecord(rawConfig) ?? {};
+  return {
+    enabled: raw.enabled !== false,
+    endpoint: normalizeEndpoint(typeof raw.endpoint === "string" ? raw.endpoint : undefined),
+    protocol: "http/protobuf",
+    serviceName:
+      typeof raw.serviceName === "string" && raw.serviceName.trim()
+        ? raw.serviceName.trim()
+        : DEFAULT_SERVICE_NAME,
+    headers: asStringMap(raw.headers),
+    sampleRate: normalizeRate(raw.sampleRate),
+    flushIntervalMs: normalizeMs(raw.flushIntervalMs, DEFAULT_FLUSH_INTERVAL_MS),
+    rootSpanTtlMs: normalizeMs(raw.rootSpanTtlMs, DEFAULT_ROOT_SPAN_TTL_MS),
+    resourceAttributes: asResourceAttributes(raw.resourceAttributes),
+  };
+}
