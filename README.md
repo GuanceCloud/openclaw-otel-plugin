@@ -86,7 +86,7 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 正常情况下可以看到：
 
 ```text
-[otel-plugin] trace exporter enabled (http/protobuf) -> http://127.0.0.1:9529/otel/v1/traces
+[openclaw-otel-plugin] trace exporter enabled (http/protobuf) -> http://127.0.0.1:9529/otel/v1/traces
 ```
 
 然后在 OpenClaw 中发送一条测试消息，再到链路平台中按以下条件查询：
@@ -97,7 +97,6 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 ## 链路说明
 
 - `openclaw.session.stuck` 当前作为诊断告警上报，不再标记为错误
-- 某些子 span 可能会早于根 span 到达，因此界面上短时间内可能看到“顶层 span 缺失”
 - skill 识别会综合 session 元数据、transcript 内容和本地 `~/.openclaw/workspace/skills` 下的 skill 信息
 
 ## 常见问题
