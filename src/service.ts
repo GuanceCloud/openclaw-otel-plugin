@@ -31,6 +31,19 @@ type ActiveSkillSpan = {
   source: "runtime" | "transcript";
 };
 
+type ActiveToolSpan = {
+  toolCallId: string;
+  name: string;
+  span: any;
+  ctx: any;
+  startedAt: number;
+  skillName?: string;
+  hasError?: boolean;
+  argKeys?: string;
+  target?: string;
+  command?: string;
+};
+
 type ActiveRunSpan = {
   span: any;
   ctx: any;
@@ -40,7 +53,11 @@ type ActiveRunSpan = {
   modelSpanEmitted: boolean;
   usedSkillNames: Set<string>;
   usedToolNames: Set<string>;
+  usedToolTargets: Set<string>;
+  usedToolCommands: Set<string>;
+  usedToolResultStatuses: Set<string>;
   skillSpans: Map<string, ActiveSkillSpan>;
+  toolSpans: Map<string, ActiveToolSpan>;
   activeSkillName?: string;
   userSpan?: any;
   userCtx?: any;
@@ -104,6 +121,7 @@ type SkillCatalogEntry = {
 };
 
 const PREVIEW_LIMIT = 1200;
+const REASONING_PREVIEW_LIMIT = 360;
 const MIN_VISIBLE_CHILD_MS = 120;
 const MIN_VISIBLE_MODEL_MS = 800;
 
@@ -176,6 +194,236 @@ function clipPreview(text: string | undefined): string | undefined {
     ? `${normalized.slice(0, PREVIEW_LIMIT - 3)}...`
     : normalized;
   return redactSensitiveText(clipped);
+}
+
+function normalizeUserInputPreview(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  let normalized = stripAnsiEscapeCodes(text).trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  // OpenClaw webchat/user transcript may prepend sender metadata and a timestamp block.
+  normalized = normalized
+    .replace(/^Sender \(untrusted metadata\):\s*```json[\s\S]*?```\s*/i, "")
+    .replace(/^\[[^\]]+\]\s*/, "")
+    .trim();
+
+  return clipPreview(normalized) ?? clipPreview(text);
+}
+
+function normalizeReasoningPreview(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const normalized = stripAnsiEscapeCodes(text).replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const sentences = normalized
+    .split(/(?<=[。！？.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const deduped: string[] = [];
+  for (const sentence of sentences) {
+    const previous = deduped[deduped.length - 1];
+    if (previous && previous === sentence) {
+      continue;
+    }
+    deduped.push(sentence);
+  }
+
+  const compact = deduped.join(" ").trim();
+  if (!compact) {
+    return undefined;
+  }
+  const clipped = compact.length > REASONING_PREVIEW_LIMIT
+    ? `${compact.slice(0, REASONING_PREVIEW_LIMIT - 3)}...`
+    : compact;
+  return redactSensitiveText(clipped);
+}
+
+function clipValuePreview(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    return clipPreview(value);
+  }
+  try {
+    return clipPreview(JSON.stringify(value));
+  } catch {
+    return clipPreview(String(value));
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function summarizeToolArgKeys(args: unknown): string | undefined {
+  if (!isRecord(args)) {
+    return undefined;
+  }
+  const keys = Object.keys(args).sort();
+  return keys.length > 0 ? keys.join(", ") : undefined;
+}
+
+function extractUrlLikeTarget(text: string): string | undefined {
+  const match = text.match(/https?:\/\/[^\s"'`]+/i);
+  if (!match) {
+    return undefined;
+  }
+  const candidate = match[0];
+  try {
+    const url = new URL(candidate);
+    return clipPreview(`${url.host}${url.pathname}${url.search}`);
+  } catch {
+    return clipPreview(candidate);
+  }
+}
+
+function extractPathLikeTarget(text: string): string | undefined {
+  const match = text.match(/(?:~|\/)[^\s"'`]+/);
+  return match ? clipPreview(match[0]) : undefined;
+}
+
+function extractExecTarget(command: string): string | undefined {
+  const urlTarget = extractUrlLikeTarget(command);
+  if (urlTarget) {
+    return urlTarget;
+  }
+  const pathTarget = extractPathLikeTarget(command);
+  if (pathTarget) {
+    return pathTarget;
+  }
+  const compact = command.trim().replace(/\s+/g, " ");
+  if (!compact) {
+    return undefined;
+  }
+  const match = compact.match(/^([^\s]+)\s+(.+)$/);
+  if (!match) {
+    return clipPreview(compact);
+  }
+  const [, executable, remainder] = match;
+  const firstArg = remainder.match(/^("[^"]+"|'[^']+'|`[^`]+`|[^\s]+)/)?.[0];
+  const normalizedArg = firstArg?.replace(/^["'`]|["'`]$/g, "");
+  return clipPreview(normalizedArg || executable);
+}
+
+function extractToolTarget(toolName: string, args: unknown, meta: unknown): string | undefined {
+  const normalizedToolName = toolName.trim().toLowerCase();
+  const argsRecord = isRecord(args) ? args : undefined;
+  const metaPreview = clipValuePreview(meta);
+
+  if (normalizedToolName === "exec" && typeof argsRecord?.command === "string") {
+    return extractExecTarget(argsRecord.command);
+  }
+  if (normalizedToolName === "process") {
+    if (typeof argsRecord?.sessionId === "string") return argsRecord.sessionId;
+    if (typeof argsRecord?.action === "string") return argsRecord.action;
+  }
+  if (normalizedToolName === "read" && typeof argsRecord?.path === "string") {
+    return argsRecord.path;
+  }
+  if (normalizedToolName === "write" && typeof argsRecord?.path === "string") {
+    return argsRecord.path;
+  }
+  if (normalizedToolName === "grep" && typeof argsRecord?.pattern === "string") {
+    return argsRecord.pattern;
+  }
+  if (normalizedToolName === "glob" && typeof argsRecord?.pattern === "string") {
+    return argsRecord.pattern;
+  }
+  return metaPreview;
+}
+
+function extractToolCommand(toolName: string, args: unknown): string | undefined {
+  const normalizedToolName = toolName.trim().toLowerCase();
+  const argsRecord = isRecord(args) ? args : undefined;
+  if (normalizedToolName === "exec" && typeof argsRecord?.command === "string") {
+    return clipPreview(argsRecord.command);
+  }
+  return undefined;
+}
+
+function extractToolResultStatus(result: unknown): string | undefined {
+  if (!isRecord(result)) {
+    return undefined;
+  }
+  if (isRecord(result.details) && typeof result.details.status === "string") {
+    return result.details.status;
+  }
+  if (typeof result.status === "string") {
+    return result.status;
+  }
+  if (typeof result.outcome === "string") {
+    return result.outcome;
+  }
+  return undefined;
+}
+
+function buildToolAttrs(
+  toolName: string,
+  toolCallId: string,
+  options?: {
+    args?: unknown;
+    meta?: unknown;
+    result?: unknown;
+    partialResult?: unknown;
+    phase?: string;
+    outcome?: string;
+    skillName?: string;
+  },
+): Record<string, string | number | boolean | undefined> {
+  return {
+    "span.kind": "tool",
+    "openclaw.tool.name": toolName,
+    "openclaw.tool.call_id": toolCallId,
+    "openclaw.skill.name": options?.skillName,
+    "openclaw.tool.phase": options?.phase,
+    "openclaw.tool.outcome": options?.outcome,
+    "openclaw.tool.arg_keys": summarizeToolArgKeys(options?.args),
+    "openclaw.tool.target": extractToolTarget(toolName, options?.args, options?.meta),
+    "openclaw.tool.command": extractToolCommand(toolName, options?.args),
+    "openclaw.tool.args.preview": clipValuePreview(options?.args),
+    "openclaw.tool.meta.preview": clipValuePreview(options?.meta),
+    "openclaw.tool.result.preview": clipValuePreview(options?.result),
+    "openclaw.tool.partial_result.preview": clipValuePreview(options?.partialResult),
+    "openclaw.tool.result_status": extractToolResultStatus(options?.result ?? options?.partialResult),
+  };
+}
+
+function collectToolSummaryValues(
+  toolName: string,
+  options?: {
+    args?: unknown;
+    meta?: unknown;
+    result?: unknown;
+    partialResult?: unknown;
+  },
+) {
+  return {
+    target: extractToolTarget(toolName, options?.args, options?.meta),
+    command: extractToolCommand(toolName, options?.args),
+    resultStatus: extractToolResultStatus(options?.result ?? options?.partialResult),
+  };
+}
+
+function mergeToolIdentity(
+  tool: Pick<ActiveToolSpan, "name" | "argKeys" | "target" | "command">,
+  options?: { args?: unknown; meta?: unknown; result?: unknown; partialResult?: unknown },
+) {
+  const summary = collectToolSummaryValues(tool.name, options);
+  return {
+    argKeys: tool.argKeys ?? summarizeToolArgKeys(options?.args),
+    target: tool.target ?? summary.target,
+    command: tool.command ?? summary.command,
+    resultStatus: summary.resultStatus,
+  };
 }
 
 function inferSkillNameFromTool(toolName: string | undefined): string | undefined {
@@ -618,9 +866,9 @@ export function createOtelPluginService(
           "openclaw.session.origin.provider": snapshot.originProvider,
           "openclaw.session.origin.surface": snapshot.originSurface,
           "openclaw.session.cwd": snapshot.sessionCwd,
-          "openclaw.input.preview": clipPreview(snapshot.lastUserText),
+          "openclaw.input.preview": normalizeUserInputPreview(snapshot.lastUserText),
           "openclaw.output.preview": clipPreview(snapshot.lastAssistantText),
-          "openclaw.reasoning.preview": clipPreview(snapshot.lastAssistantThinking),
+          "openclaw.reasoning.preview": normalizeReasoningPreview(snapshot.lastAssistantThinking),
           "openclaw.provider": attrs["openclaw.provider"] ?? snapshot.lastProvider,
           "openclaw.model": attrs["openclaw.model"] ?? snapshot.lastModel,
         };
@@ -637,6 +885,24 @@ export function createOtelPluginService(
           current.modelCtx = undefined;
           current.modelStartTs = undefined;
         }
+        for (const tool of current.toolSpans.values()) {
+          tool.span.setAttributes(stringAttrs({
+            ...buildToolAttrs(tool.name, tool.toolCallId, {
+              skillName: tool.skillName,
+              outcome: tool.hasError ? "error" : "completed",
+            }),
+            "openclaw.tool.arg_keys": tool.argKeys,
+            "openclaw.tool.target": tool.target,
+            "openclaw.tool.command": tool.command,
+          }));
+          if (tool.hasError) {
+            tool.span.setStatus({ code: SpanStatusCode.ERROR, message: "tool error" });
+          } else {
+            tool.span.setStatus({ code: SpanStatusCode.OK });
+          }
+          endSpanSafely(tool.span, endTime);
+        }
+        current.toolSpans.clear();
         for (const skill of current.skillSpans.values()) {
           skill.span.setAttributes(stringAttrs({
             "span.kind": "skill",
@@ -751,7 +1017,11 @@ export function createOtelPluginService(
           },
           usedSkillNames: new Set<string>(),
           usedToolNames: new Set<string>(),
+          usedToolTargets: new Set<string>(),
+          usedToolCommands: new Set<string>(),
+          usedToolResultStatuses: new Set<string>(),
           skillSpans: new Map<string, ActiveSkillSpan>(),
+          toolSpans: new Map<string, ActiveToolSpan>(),
         };
         run.span = span;
         run.ctx = trace.setSpan(userCtx ?? root.ctx, span);
@@ -785,7 +1055,7 @@ export function createOtelPluginService(
               "openclaw.source": evt.source,
               "openclaw.queueDepth": evt.queueDepth,
               "span.kind": "input",
-              "openclaw.input.preview": clipPreview(snapshot?.lastUserText),
+              "openclaw.input.preview": normalizeUserInputPreview(snapshot?.lastUserText),
               "openclaw.input.length": snapshot?.lastUserText?.length,
             }),
           },
@@ -812,7 +1082,11 @@ export function createOtelPluginService(
           },
           usedSkillNames: new Set<string>(),
           usedToolNames: new Set<string>(),
+          usedToolTargets: new Set<string>(),
+          usedToolCommands: new Set<string>(),
+          usedToolResultStatuses: new Set<string>(),
           skillSpans: new Map<string, ActiveSkillSpan>(),
+          toolSpans: new Map<string, ActiveToolSpan>(),
         };
         run.userSpan = userSpan;
         run.userCtx = userCtx;
@@ -839,6 +1113,9 @@ export function createOtelPluginService(
           "openclaw.skill.count": run ? run.usedSkillNames.size : undefined,
           "openclaw.tools": run ? Array.from(run.usedToolNames).join(", ") : undefined,
           "openclaw.tool.count": run ? run.usedToolNames.size : undefined,
+          "openclaw.tool.targets": run ? Array.from(run.usedToolTargets).join(" | ") : undefined,
+          "openclaw.tool.commands": run ? Array.from(run.usedToolCommands).join(" | ") : undefined,
+          "openclaw.tool.result_statuses": run ? Array.from(run.usedToolResultStatuses).join(", ") : undefined,
         });
         if (Object.keys(finalAttrs).length > 0) {
           current.span.setAttributes(finalAttrs);
@@ -883,6 +1160,9 @@ export function createOtelPluginService(
           "openclaw.skill.count": run.usedSkillNames.size,
           "openclaw.tools": Array.from(run.usedToolNames).join(", "),
           "openclaw.tool.count": run.usedToolNames.size,
+          "openclaw.tool.targets": Array.from(run.usedToolTargets).join(" | "),
+          "openclaw.tool.commands": Array.from(run.usedToolCommands).join(" | "),
+          "openclaw.tool.result_statuses": Array.from(run.usedToolResultStatuses).join(", "),
         }));
       };
 
@@ -942,6 +1222,9 @@ export function createOtelPluginService(
           "openclaw.skill.count": current.usedSkillNames.size,
           "openclaw.tools": Array.from(current.usedToolNames).join(", "),
           "openclaw.tool.count": current.usedToolNames.size,
+          "openclaw.tool.targets": Array.from(current.usedToolTargets).join(" | "),
+          "openclaw.tool.commands": Array.from(current.usedToolCommands).join(" | "),
+          "openclaw.tool.result_statuses": Array.from(current.usedToolResultStatuses).join(", "),
         });
         if (current.span && Object.keys(finalAttrs).length > 0) {
           current.span.setAttributes(finalAttrs);
@@ -1052,6 +1335,9 @@ export function createOtelPluginService(
           "openclaw.model": run.aggregate.lastModel,
           "openclaw.tools": Array.from(run.usedToolNames).join(", "),
           "openclaw.tool.count": run.usedToolNames.size,
+          "openclaw.tool.targets": Array.from(run.usedToolTargets).join(" | "),
+          "openclaw.tool.commands": Array.from(run.usedToolCommands).join(" | "),
+          "openclaw.tool.result_statuses": Array.from(run.usedToolResultStatuses).join(", "),
           "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
           "openclaw.skill.count": run.usedSkillNames.size,
           "llm.provider": run.aggregate.lastProvider,
@@ -1072,6 +1358,23 @@ export function createOtelPluginService(
           return undefined;
         }
         return run.skillSpans.get(run.activeSkillName)?.ctx;
+      };
+
+      const syncToolSummaryAttrs = (
+        evt: { sessionKey?: string; sessionId?: string },
+        run: ActiveRunSpan,
+      ) => {
+        const attrs = stringAttrs({
+          "openclaw.tools": Array.from(run.usedToolNames).join(", "),
+          "openclaw.tool.count": run.usedToolNames.size,
+          "openclaw.tool.targets": Array.from(run.usedToolTargets).join(" | "),
+          "openclaw.tool.commands": Array.from(run.usedToolCommands).join(" | "),
+          "openclaw.tool.result_statuses": Array.from(run.usedToolResultStatuses).join(", "),
+          "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
+          "openclaw.skill.count": run.usedSkillNames.size,
+        });
+        run.span?.setAttributes(attrs);
+        getRoot(evt, false)?.span.setAttributes(attrs);
       };
 
       const ensureTranscriptSkillSpans = (
@@ -1149,6 +1452,239 @@ export function createOtelPluginService(
         return skillState;
       };
 
+      const ensureToolSpan = (
+        evt: { sessionKey?: string; sessionId?: string; ts?: number },
+        toolName: string,
+        toolCallId: string,
+        attrs?: Record<string, string | number | boolean | undefined>,
+      ) => {
+        const run = getRun(evt, false) ?? ensureUserSpan({ sessionKey: evt.sessionKey, sessionId: evt.sessionId, ts: evt.ts ?? Date.now() });
+        if (!run) {
+          return undefined;
+        }
+        const normalizedToolName = toolName.trim();
+        const normalizedToolCallId = toolCallId.trim();
+        if (!normalizedToolName || !normalizedToolCallId) {
+          return undefined;
+        }
+        run.usedToolNames.add(normalizedToolName);
+        const summary = collectToolSummaryValues(normalizedToolName);
+        if (summary.target) run.usedToolTargets.add(summary.target);
+        if (summary.command) run.usedToolCommands.add(summary.command);
+        if (summary.resultStatus) run.usedToolResultStatuses.add(summary.resultStatus);
+        const skillName = inferSkillNameFromTool(normalizedToolName);
+        if (skillName) {
+          ensureSkillSpan(evt, skillName, "runtime");
+        }
+        const existing = run.toolSpans.get(normalizedToolCallId);
+        if (existing) {
+          const merged = mergeToolIdentity(existing);
+          existing.span.setAttributes(stringAttrs({
+            ...buildToolAttrs(normalizedToolName, normalizedToolCallId, {
+              skillName: existing.skillName,
+            }),
+            "openclaw.tool.arg_keys": merged.argKeys,
+            "openclaw.tool.target": merged.target,
+            "openclaw.tool.command": merged.command,
+            ...attrs,
+          }));
+          syncToolSummaryAttrs(evt, run);
+          return existing;
+        }
+        const merged = {
+          argKeys: typeof attrs?.["openclaw.tool.arg_keys"] === "string"
+            ? attrs["openclaw.tool.arg_keys"]
+            : undefined,
+          target: typeof attrs?.["openclaw.tool.target"] === "string"
+            ? attrs["openclaw.tool.target"]
+            : undefined,
+          command: typeof attrs?.["openclaw.tool.command"] === "string"
+            ? attrs["openclaw.tool.command"]
+            : undefined,
+        };
+        const parentCtx = skillName
+          ? run.skillSpans.get(skillName)?.ctx ?? getActiveSkillCtx(run) ?? run.ctx
+          : getActiveSkillCtx(run) ?? run.ctx;
+        const startTs = typeof evt.ts === "number"
+          ? Math.max(evt.ts, run.mainStartTs + MIN_VISIBLE_CHILD_MS)
+          : Date.now();
+        const span = tracer.startSpan(
+          `tool:${normalizedToolName}`,
+          {
+            startTime: new Date(startTs),
+            kind: SpanKind.CLIENT,
+            attributes: stringAttrs({
+              ...buildToolAttrs(normalizedToolName, normalizedToolCallId, {
+                skillName,
+              }),
+              ...attrs,
+            }),
+          },
+          parentCtx,
+        );
+        const toolState: ActiveToolSpan = {
+          toolCallId: normalizedToolCallId,
+          name: normalizedToolName,
+          span,
+          ctx: trace.setSpan(parentCtx, span),
+          startedAt: startTs,
+          skillName,
+          argKeys: merged.argKeys,
+          target: merged.target,
+          command: merged.command,
+        };
+        run.toolSpans.set(normalizedToolCallId, toolState);
+        syncToolSummaryAttrs(evt, run);
+        return toolState;
+      };
+
+      const updateToolSpan = (
+        evt: { sessionKey?: string; sessionId?: string; ts?: number },
+        toolName: string,
+        toolCallId: string,
+        partialResult: unknown,
+      ) => {
+        const tool = ensureToolSpan(evt, toolName, toolCallId);
+        if (!tool) {
+          return;
+        }
+        const preview = clipValuePreview(partialResult);
+        const merged = mergeToolIdentity(tool, { partialResult });
+        tool.argKeys = merged.argKeys;
+        tool.target = merged.target;
+        tool.command = merged.command;
+        if (merged.resultStatus) {
+          const run = getRun(evt, false);
+          if (run) {
+            run.usedToolResultStatuses.add(merged.resultStatus);
+            syncToolSummaryAttrs(evt, run);
+          }
+        }
+        if (preview) {
+          tool.span.setAttributes(stringAttrs({
+            ...buildToolAttrs(tool.name, tool.toolCallId, {
+              skillName: tool.skillName,
+              partialResult,
+            }),
+            "openclaw.tool.arg_keys": tool.argKeys,
+            "openclaw.tool.target": tool.target,
+            "openclaw.tool.command": tool.command,
+          }));
+          addEvent(tool.span, "tool.update", {
+            "openclaw.tool.name": tool.name,
+            "openclaw.tool.call_id": tool.toolCallId,
+            "openclaw.tool.partial_result.preview": preview,
+          });
+        } else {
+          addEvent(tool.span, "tool.update", {
+            "openclaw.tool.name": tool.name,
+            "openclaw.tool.call_id": tool.toolCallId,
+          });
+        }
+      };
+
+      const findActiveToolSpanByName = (
+        evt: { sessionKey?: string; sessionId?: string },
+        toolName: string,
+      ) => {
+        const run = getRun(evt, false);
+        if (!run) {
+          return undefined;
+        }
+        const normalizedToolName = toolName.trim();
+        if (!normalizedToolName) {
+          return undefined;
+        }
+        const matches = Array.from(run.toolSpans.values())
+          .filter((tool) => tool.name === normalizedToolName)
+          .sort((a, b) => b.startedAt - a.startedAt);
+        return matches[0];
+      };
+
+      const endToolSpan = (
+        evt: { sessionKey?: string; sessionId?: string; ts?: number },
+        toolName: string,
+        toolCallId: string,
+        payload?: { result?: unknown; meta?: unknown; isError?: boolean },
+      ) => {
+        const tool = ensureToolSpan(evt, toolName, toolCallId, {
+          "openclaw.tool.args.preview": undefined,
+        });
+        const run = getRun(evt, false);
+        if (!tool || !run) {
+          return;
+        }
+        const resultPreview = clipValuePreview(payload?.result);
+        const metaPreview = clipValuePreview(payload?.meta);
+        const isError = payload?.isError === true;
+        const merged = mergeToolIdentity(tool, {
+          meta: payload?.meta,
+          result: payload?.result,
+        });
+        tool.argKeys = merged.argKeys;
+        tool.target = merged.target;
+        tool.command = merged.command;
+        if (merged.target) run.usedToolTargets.add(merged.target);
+        if (merged.command) run.usedToolCommands.add(merged.command);
+        if (merged.resultStatus) run.usedToolResultStatuses.add(merged.resultStatus);
+        syncToolSummaryAttrs(evt, run);
+        tool.hasError = isError;
+        tool.span.setAttributes(stringAttrs({
+          ...buildToolAttrs(tool.name, tool.toolCallId, {
+            skillName: tool.skillName,
+            meta: payload?.meta,
+            result: payload?.result,
+            outcome: isError ? "error" : "completed",
+          }),
+          "openclaw.tool.arg_keys": tool.argKeys,
+          "openclaw.tool.target": tool.target,
+          "openclaw.tool.command": tool.command,
+        }));
+        addEvent(tool.span, "tool.result", stringAttrs({
+          "openclaw.tool.name": tool.name,
+          "openclaw.tool.call_id": tool.toolCallId,
+          "openclaw.tool.outcome": isError ? "error" : "completed",
+          "openclaw.tool.result.preview": resultPreview,
+          "openclaw.tool.result_status": extractToolResultStatus(payload?.result),
+        }));
+        if (isError) {
+          setError(tool.span, SpanStatusCode.ERROR, resultPreview ?? "tool error");
+        } else {
+          tool.span.setStatus({ code: SpanStatusCode.OK });
+        }
+        const endTs = typeof evt.ts === "number"
+          ? new Date(Math.max(evt.ts, tool.startedAt + MIN_VISIBLE_CHILD_MS))
+          : undefined;
+        endSpanSafely(tool.span, endTs);
+        run.toolSpans.delete(tool.toolCallId);
+      };
+
+      const annotateToolLoop = (
+        evt: Extract<DiagnosticEventPayload, { type: "tool.loop" }>,
+      ) => {
+        const tool = findActiveToolSpanByName(evt, evt.toolName);
+        if (!tool) {
+          return false;
+        }
+        const loopAttrs = stringAttrs({
+          "openclaw.tool.name": evt.toolName,
+          "openclaw.tool.call_id": tool.toolCallId,
+          "openclaw.tool.loop.level": evt.level,
+          "openclaw.tool.loop.action": evt.action,
+          "openclaw.tool.loop.detector": evt.detector,
+          "openclaw.tool.loop.count": evt.count,
+          "openclaw.tool.loop.paired_tool": evt.pairedToolName,
+          "openclaw.tool.loop.message": evt.message ? redactSensitiveText(evt.message) : undefined,
+        });
+        tool.span.setAttributes(loopAttrs);
+        addEvent(tool.span, "tool.loop", loopAttrs);
+        if (evt.level === "critical") {
+          tool.hasError = true;
+          setError(tool.span, SpanStatusCode.ERROR, evt.message ?? "tool loop detected");
+        }
+        return true;
+      };
+
       const emitSyntheticModelSpan = (
         evt: Extract<DiagnosticEventPayload, { type: "message.processed" }>,
       ) => {
@@ -1216,17 +1752,19 @@ export function createOtelPluginService(
           const run = getRun({ sessionKey }, false) ?? ensureUserSpan({ sessionKey, ts: evt.ts ?? Date.now() });
           if (run && toolName) {
             run.usedToolNames.add(toolName);
+            const summary = collectToolSummaryValues(toolName, {
+              args: evt.data.args,
+              meta: evt.data.meta,
+              result: evt.data.result,
+              partialResult: evt.data.partialResult,
+            });
+            if (summary.target) run.usedToolTargets.add(summary.target);
+            if (summary.command) run.usedToolCommands.add(summary.command);
+            if (summary.resultStatus) run.usedToolResultStatuses.add(summary.resultStatus);
             if (skillName) {
               ensureSkillSpan({ sessionKey, ts: evt.ts ?? Date.now() }, skillName, "runtime");
             }
-            const attrs = stringAttrs({
-              "openclaw.tools": Array.from(run.usedToolNames).join(", "),
-              "openclaw.tool.count": run.usedToolNames.size,
-              "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
-              "openclaw.skill.count": run.usedSkillNames.size,
-            });
-            run.span?.setAttributes(attrs);
-            getRoot({ sessionKey }, false)?.span.setAttributes(attrs);
+            syncToolSummaryAttrs({ sessionKey }, run);
             if (skillName) {
               run.skillSpans.get(skillName)?.span.setAttributes(stringAttrs({
                 "span.kind": "skill",
@@ -1235,6 +1773,34 @@ export function createOtelPluginService(
                 "openclaw.tools": Array.from(run.usedToolNames).join(", "),
                 "openclaw.tool.count": run.usedToolNames.size,
               }));
+            }
+            const toolCallId = typeof evt.data.toolCallId === "string" ? evt.data.toolCallId : undefined;
+            if (toolCallId) {
+              const toolEvt = { sessionKey, ts: evt.ts ?? Date.now() };
+              if (evt.data.phase === "start") {
+                ensureToolSpan(toolEvt, toolName, toolCallId, {
+                  ...buildToolAttrs(toolName, toolCallId, {
+                    args: evt.data.args,
+                    phase: "start",
+                    skillName,
+                  }),
+                });
+              } else if (evt.data.phase === "update") {
+                updateToolSpan(toolEvt, toolName, toolCallId, evt.data.partialResult);
+              } else if (evt.data.phase === "result") {
+                endToolSpan(toolEvt, toolName, toolCallId, {
+                  result: evt.data.result,
+                  meta: evt.data.meta,
+                  isError: evt.data.isError === true,
+                });
+              } else {
+                ensureToolSpan(toolEvt, toolName, toolCallId, {
+                  ...buildToolAttrs(toolName, toolCallId, {
+                    phase: String(evt.data.phase ?? "unknown"),
+                    skillName,
+                  }),
+                });
+              }
             }
           }
         }
@@ -1463,6 +2029,9 @@ export function createOtelPluginService(
           case "queue.lane.dequeue":
           case "diagnostic.heartbeat":
           case "tool.loop": {
+            if (evt.type === "tool.loop" && annotateToolLoop(evt)) {
+              break;
+            }
             const span = tracer.startSpan(evt.type, {
               startTime: eventTime(evt.ts),
               kind: SpanKind.INTERNAL,

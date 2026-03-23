@@ -91,6 +91,17 @@ npm run build
 openclaw gateway restart
 ```
 
+如果你正在本地开发插件，可以直接运行监听脚本，源码变更后会自动重新编译并重启网关：
+
+```bash
+npm run dev
+```
+
+说明：
+
+- `npm run dev` 会监听 `index.ts`、`src/` 和 `openclaw.plugin.json`
+- 每次检测到变更后，会自动执行 `npm run build` 和 `openclaw gateway restart`
+
 ## 验证方式
 
 查看网关日志：
@@ -112,6 +123,8 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 
 ## 链路说明
 
+- 主要 trace 层级为 `openclaw_request -> user_message -> main -> skill:* -> tool:* / provider:model -> assistant_message`
+- tool 执行会导出独立的 `tool:<name>` span，并附带 `openclaw.tool.call_id`、`openclaw.tool.outcome` 等属性
 - `openclaw.session.stuck` 当前作为诊断告警上报，不再标记为错误
 - skill 识别会综合 session 元数据、transcript 内容和本地 `~/.openclaw/workspace/skills` 下的 skill 信息
 
