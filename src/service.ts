@@ -4,8 +4,8 @@ import path from "node:path";
 import type {
   DiagnosticEventPayload,
   OpenClawPluginService,
-} from "openclaw/plugin-sdk/diagnostics-otel";
-import { onDiagnosticEvent, redactSensitiveText } from "openclaw/plugin-sdk/diagnostics-otel";
+} from "openclaw/plugin-sdk";
+import { onDiagnosticEvent } from "openclaw/plugin-sdk";
 import type { OtelPluginConfig } from "./config.js";
 import {
   normalizeTerminalSpanAttrs,
@@ -15,6 +15,10 @@ import {
   shouldSyncRootForSessionState,
   stripAnsiEscapeCodes,
 } from "./trace-runtime.js";
+
+function redactSensitiveText(text: string): string {
+  return text;
+}
 
 type ActiveRootSpan = {
   span: any;
@@ -86,6 +90,34 @@ type RuntimeEvents = {
 
 type RuntimeLike = {
   events?: RuntimeEvents;
+};
+
+type MetricInstruments = {
+  requestCounter: any;
+  requestDuration: any;
+  toolCallCounter: any;
+  toolErrorCounter: any;
+  toolDuration: any;
+  skillActivationCounter: any;
+  modelCallCounter: any;
+  diagnosticsTokensCounter: any;
+  diagnosticsCostUsdCounter: any;
+  diagnosticsRunDurationMs: any;
+  diagnosticsContextTokens: any;
+  diagnosticsWebhookReceivedCounter: any;
+  diagnosticsWebhookErrorCounter: any;
+  diagnosticsWebhookDurationMs: any;
+  diagnosticsMessageQueuedCounter: any;
+  diagnosticsMessageProcessedCounter: any;
+  diagnosticsMessageDurationMs: any;
+  diagnosticsQueueLaneEnqueueCounter: any;
+  diagnosticsQueueLaneDequeueCounter: any;
+  diagnosticsQueueDepth: any;
+  diagnosticsQueueWaitMs: any;
+  diagnosticsSessionStateCounter: any;
+  diagnosticsSessionStuckCounter: any;
+  diagnosticsSessionStuckAgeMs: any;
+  diagnosticsRunAttemptCounter: any;
 };
 
 type SessionSnapshot = {
@@ -413,6 +445,112 @@ function collectToolSummaryValues(
   };
 }
 
+function buildRequestMetricAttrs(
+  snapshot: SessionSnapshot | undefined,
+  summaryAttrs?: Record<string, string | number | boolean>,
+) {
+  return stringAttrs({
+    "openclaw.channel": snapshot?.lastChannel,
+    "openclaw.chat_type": snapshot?.chatType,
+    "openclaw.provider": snapshot?.lastProvider,
+    "openclaw.model": snapshot?.lastModel,
+    "openclaw.final_state":
+      typeof summaryAttrs?.["openclaw.final_state"] === "string"
+        ? summaryAttrs["openclaw.final_state"]
+        : typeof summaryAttrs?.["openclaw.state"] === "string"
+          ? summaryAttrs["openclaw.state"]
+          : undefined,
+    "openclaw.outcome":
+      typeof summaryAttrs?.["openclaw.outcome"] === "string"
+        ? summaryAttrs["openclaw.outcome"]
+        : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
+          ? summaryAttrs["openclaw.final_reason"]
+          : typeof summaryAttrs?.["openclaw.reason"] === "string"
+            ? summaryAttrs["openclaw.reason"]
+            : undefined,
+  });
+}
+
+function buildToolMetricAttrs(
+  tool: Pick<ActiveToolSpan, "name" | "skillName">,
+  outcome?: string,
+  resultStatus?: string,
+) {
+  return stringAttrs({
+    "openclaw.tool_name": tool.name,
+    "openclaw.skill_name": tool.skillName,
+    "openclaw.tool_outcome": outcome,
+    "openclaw.tool_result_status": resultStatus,
+  });
+}
+
+function buildSkillMetricAttrs(skillName: string, source: "runtime" | "transcript") {
+  return stringAttrs({
+    "openclaw.skill_name": skillName,
+    "openclaw.skill_source": source,
+  });
+}
+
+function buildModelMetricAttrs(provider?: string, model?: string) {
+  return stringAttrs({
+    "openclaw.provider": provider,
+    "openclaw.model": model,
+  });
+}
+
+function buildDiagnosticsModelMetricAttrs(
+  channel?: string,
+  provider?: string,
+  model?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    "openclaw.channel": channel,
+    "openclaw.provider": provider,
+    "openclaw.model": model,
+    ...(extra ?? {}),
+  });
+}
+
+function buildDiagnosticsWebhookMetricAttrs(channel?: string, webhook?: string) {
+  return stringAttrs({
+    "openclaw.channel": channel,
+    "openclaw.webhook": webhook,
+  });
+}
+
+function buildDiagnosticsMessageMetricAttrs(
+  channel?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    "openclaw.channel": channel,
+    ...(extra ?? {}),
+  });
+}
+
+function buildDiagnosticsQueueMetricAttrs(
+  lane?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    "openclaw.lane": lane,
+    ...(extra ?? {}),
+  });
+}
+
+function buildDiagnosticsSessionMetricAttrs(
+  state?: string,
+  reason?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    "openclaw.state": state,
+    "openclaw.reason": reason,
+    ...(extra ?? {}),
+  });
+}
+
 function mergeToolIdentity(
   tool: Pick<ActiveToolSpan, "name" | "argKeys" | "target" | "command">,
   options?: { args?: unknown; meta?: unknown; result?: unknown; partialResult?: unknown },
@@ -602,10 +740,12 @@ export function createOtelPluginService(
       }
 
       const require = createRequire(import.meta.url);
-      const { context, trace, SpanKind, SpanStatusCode } = require("@opentelemetry/api");
+      const { context, metrics, trace, SpanKind, SpanStatusCode } = require("@opentelemetry/api");
+      const { OTLPMetricExporter } = require("@opentelemetry/exporter-metrics-otlp-proto");
       const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-proto");
       const { resourceFromAttributes } = require("@opentelemetry/resources");
       const { NodeSDK } = require("@opentelemetry/sdk-node");
+      const { PeriodicExportingMetricReader } = require("@opentelemetry/sdk-metrics");
       const {
         ParentBasedSampler,
         TraceIdRatioBasedSampler,
@@ -614,6 +754,10 @@ export function createOtelPluginService(
 
       const traceExporter = new OTLPTraceExporter({
         url: resolveOtelUrl(config.endpoint, "v1/traces"),
+        ...(config.headers ? { headers: config.headers } : {}),
+      });
+      const metricExporter = new OTLPMetricExporter({
+        url: resolveOtelUrl(config.endpoint, "v1/metrics"),
         ...(config.headers ? { headers: config.headers } : {}),
       });
 
@@ -625,6 +769,10 @@ export function createOtelPluginService(
       sdk = new NodeSDK({
         resource,
         traceExporter,
+        metricReader: new PeriodicExportingMetricReader({
+          exporter: metricExporter,
+          exportIntervalMillis: config.flushIntervalMs,
+        }),
         ...(config.sampleRate !== undefined
           ? {
               sampler: new ParentBasedSampler({
@@ -636,6 +784,91 @@ export function createOtelPluginService(
 
       await sdk.start();
       const tracer = trace.getTracer("openclaw-otel-plugin");
+      const meter = metrics.getMeter("openclaw-otel-plugin");
+      const instruments: MetricInstruments = {
+        requestCounter: meter.createCounter("openclaw.requests", {
+          description: "Total OpenClaw requests observed by the plugin",
+        }),
+        requestDuration: meter.createHistogram("openclaw.request.duration", {
+          description: "OpenClaw request duration in milliseconds",
+          unit: "ms",
+        }),
+        toolCallCounter: meter.createCounter("openclaw.tool.calls", {
+          description: "Total OpenClaw tool calls observed by the plugin",
+        }),
+        toolErrorCounter: meter.createCounter("openclaw.tool.errors", {
+          description: "Total OpenClaw tool call errors observed by the plugin",
+        }),
+        toolDuration: meter.createHistogram("openclaw.tool.duration", {
+          description: "OpenClaw tool call duration in milliseconds",
+          unit: "ms",
+        }),
+        skillActivationCounter: meter.createCounter("openclaw.skill.activations", {
+          description: "Total OpenClaw skill activations observed by the plugin",
+        }),
+        modelCallCounter: meter.createCounter("openclaw.model.calls", {
+          description: "Total OpenClaw model usage events observed by the plugin",
+        }),
+        diagnosticsTokensCounter: meter.createCounter("openclaw.tokens", {
+          description: "Model token usage emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsCostUsdCounter: meter.createCounter("openclaw.cost.usd", {
+          description: "Model cost in USD emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsRunDurationMs: meter.createHistogram("openclaw.run.duration_ms", {
+          description: "Model run duration in milliseconds emitted from OpenClaw diagnostics events",
+          unit: "ms",
+        }),
+        diagnosticsContextTokens: meter.createHistogram("openclaw.context.tokens", {
+          description: "Context token usage emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsWebhookReceivedCounter: meter.createCounter("openclaw.webhook.received", {
+          description: "Webhook receive events emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsWebhookErrorCounter: meter.createCounter("openclaw.webhook.error", {
+          description: "Webhook error events emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsWebhookDurationMs: meter.createHistogram("openclaw.webhook.duration_ms", {
+          description: "Webhook processing duration in milliseconds emitted from OpenClaw diagnostics events",
+          unit: "ms",
+        }),
+        diagnosticsMessageQueuedCounter: meter.createCounter("openclaw.message.queued", {
+          description: "Message queued events emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsMessageProcessedCounter: meter.createCounter("openclaw.message.processed", {
+          description: "Message processed events emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsMessageDurationMs: meter.createHistogram("openclaw.message.duration_ms", {
+          description: "Message processing duration in milliseconds emitted from OpenClaw diagnostics events",
+          unit: "ms",
+        }),
+        diagnosticsQueueLaneEnqueueCounter: meter.createCounter("openclaw.queue.lane.enqueue", {
+          description: "Queue enqueue events emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsQueueLaneDequeueCounter: meter.createCounter("openclaw.queue.lane.dequeue", {
+          description: "Queue dequeue events emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsQueueDepth: meter.createHistogram("openclaw.queue.depth", {
+          description: "Queue depth emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsQueueWaitMs: meter.createHistogram("openclaw.queue.wait_ms", {
+          description: "Queue wait time in milliseconds emitted from OpenClaw diagnostics events",
+          unit: "ms",
+        }),
+        diagnosticsSessionStateCounter: meter.createCounter("openclaw.session.state", {
+          description: "Session state transitions emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsSessionStuckCounter: meter.createCounter("openclaw.session.stuck", {
+          description: "Stuck session detections emitted from OpenClaw diagnostics events",
+        }),
+        diagnosticsSessionStuckAgeMs: meter.createHistogram("openclaw.session.stuck_age_ms", {
+          description: "Age in milliseconds for stuck sessions emitted from OpenClaw diagnostics events",
+          unit: "ms",
+        }),
+        diagnosticsRunAttemptCounter: meter.createCounter("openclaw.run.attempt", {
+          description: "Run attempts emitted from OpenClaw diagnostics events",
+        }),
+      };
       const sessionsIndexPath = path.join(ctx.stateDir, "agents", "main-agent", "sessions", "sessions.json");
       const workspaceSkillsDir = path.join(ctx.stateDir, "workspace", "skills");
 
@@ -1232,6 +1465,12 @@ export function createOtelPluginService(
         if (attrs) {
           current.span && addEvent(current.span, "run.finish", summaryAttrs);
         }
+        const requestMetricAttrs = buildRequestMetricAttrs(snapshot, summaryAttrs);
+        instruments.requestCounter.add(1, requestMetricAttrs);
+        instruments.requestDuration.record(
+          Math.max(0, eventTimestamp(evt).getTime() - current.startedAt),
+          requestMetricAttrs,
+        );
         finalizeRunSpans(current, eventTimestamp(evt));
       };
 
@@ -1321,6 +1560,13 @@ export function createOtelPluginService(
         run.aggregate.modelCalls += 1;
         run.aggregate.lastProvider = evt.provider ?? run.aggregate.lastProvider;
         run.aggregate.lastModel = evt.model ?? run.aggregate.lastModel;
+        instruments.modelCallCounter.add(
+          1,
+          buildModelMetricAttrs(
+            evt.provider ?? run.aggregate.lastProvider,
+            evt.model ?? run.aggregate.lastModel,
+          ),
+        );
 
         const summaryAttrs = stringAttrs({
           "openclaw.tokens.input": run.aggregate.inputTokens,
@@ -1443,6 +1689,7 @@ export function createOtelPluginService(
         };
         run.skillSpans.set(normalizedSkillName, skillState);
         run.activeSkillName = normalizedSkillName;
+        instruments.skillActivationCounter.add(1, buildSkillMetricAttrs(normalizedSkillName, source));
         const attrs = stringAttrs({
           "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
           "openclaw.skill.count": run.usedSkillNames.size,
@@ -1647,6 +1894,19 @@ export function createOtelPluginService(
           "openclaw.tool.result.preview": resultPreview,
           "openclaw.tool.result_status": extractToolResultStatus(payload?.result),
         }));
+        const toolMetricAttrs = buildToolMetricAttrs(
+          tool,
+          isError ? "error" : "completed",
+          merged.resultStatus,
+        );
+        instruments.toolCallCounter.add(1, toolMetricAttrs);
+        instruments.toolDuration.record(
+          Math.max(0, eventTimestamp(evt).getTime() - tool.startedAt),
+          toolMetricAttrs,
+        );
+        if (isError) {
+          instruments.toolErrorCounter.add(1, toolMetricAttrs);
+        }
         if (isError) {
           setError(tool.span, SpanStatusCode.ERROR, resultPreview ?? "tool error");
         } else {
@@ -1820,6 +2080,16 @@ export function createOtelPluginService(
 
         switch (evt.type) {
           case "session.state": {
+            instruments.diagnosticsSessionStateCounter.add(
+              1,
+              buildDiagnosticsSessionMetricAttrs(evt.state, evt.reason),
+            );
+            if (typeof evt.queueDepth === "number") {
+              instruments.diagnosticsQueueDepth.record(
+                evt.queueDepth,
+                buildDiagnosticsSessionMetricAttrs(evt.state, evt.reason),
+              );
+            }
             const root = getRoot(evt, shouldCreateRootForSessionState(evt.state));
             if (root) {
               addEvent(root.span, "session.state", stringAttrs({
@@ -1857,6 +2127,10 @@ export function createOtelPluginService(
             break;
           }
           case "run.attempt": {
+            instruments.diagnosticsRunAttemptCounter.add(
+              1,
+              stringAttrs({ "openclaw.attempt": evt.attempt }),
+            );
             const root = getRoot(evt, true);
             if (root) {
               addEvent(root.span, "run.attempt", {
@@ -1867,6 +2141,18 @@ export function createOtelPluginService(
             break;
           }
           case "message.queued": {
+            instruments.diagnosticsMessageQueuedCounter.add(
+              1,
+              buildDiagnosticsMessageMetricAttrs(evt.channel, {
+                "openclaw.source": evt.source,
+              }),
+            );
+            if (typeof evt.queueDepth === "number") {
+              instruments.diagnosticsQueueDepth.record(
+                evt.queueDepth,
+                buildDiagnosticsMessageMetricAttrs(evt.channel),
+              );
+            }
             const root = getRoot(evt, true);
             if (root) {
               addEvent(root.span, "message.queued", stringAttrs({
@@ -1880,6 +2166,51 @@ export function createOtelPluginService(
           }
           case "model.usage": {
             updateAggregateTokens(evt);
+            const modelMetricAttrs = buildDiagnosticsModelMetricAttrs(
+              evt.channel,
+              evt.provider,
+              evt.model,
+            );
+            const tokenMetrics = [
+              ["input", evt.usage.input],
+              ["output", evt.usage.output],
+              ["cache_read", evt.usage.cacheRead],
+              ["cache_write", evt.usage.cacheWrite],
+              ["prompt", evt.usage.promptTokens],
+              ["total", evt.usage.total],
+            ] as const;
+            for (const [tokenType, tokenValue] of tokenMetrics) {
+              if (typeof tokenValue === "number" && tokenValue > 0) {
+                instruments.diagnosticsTokensCounter.add(
+                  tokenValue,
+                  buildDiagnosticsModelMetricAttrs(evt.channel, evt.provider, evt.model, {
+                    "openclaw.token": tokenType,
+                  }),
+                );
+              }
+            }
+            if (typeof evt.costUsd === "number" && evt.costUsd > 0) {
+              instruments.diagnosticsCostUsdCounter.add(evt.costUsd, modelMetricAttrs);
+            }
+            if (typeof evt.durationMs === "number") {
+              instruments.diagnosticsRunDurationMs.record(evt.durationMs, modelMetricAttrs);
+            }
+            if (typeof evt.context?.limit === "number") {
+              instruments.diagnosticsContextTokens.record(
+                evt.context.limit,
+                buildDiagnosticsModelMetricAttrs(evt.channel, evt.provider, evt.model, {
+                  "openclaw.context": "limit",
+                }),
+              );
+            }
+            if (typeof evt.context?.used === "number") {
+              instruments.diagnosticsContextTokens.record(
+                evt.context.used,
+                buildDiagnosticsModelMetricAttrs(evt.channel, evt.provider, evt.model, {
+                  "openclaw.context": "used",
+                }),
+              );
+            }
             const run = getRun(evt, true);
             if (run?.modelSpan) {
               run.modelSpan.setAttributes(stringAttrs(enrichWithTranscript(evt.sessionKey, {
@@ -1936,6 +2267,20 @@ export function createOtelPluginService(
             break;
           }
           case "message.processed": {
+            instruments.diagnosticsMessageProcessedCounter.add(
+              1,
+              buildDiagnosticsMessageMetricAttrs(evt.channel, {
+                "openclaw.outcome": evt.outcome,
+              }),
+            );
+            if (typeof evt.durationMs === "number") {
+              instruments.diagnosticsMessageDurationMs.record(
+                evt.durationMs,
+                buildDiagnosticsMessageMetricAttrs(evt.channel, {
+                  "openclaw.outcome": evt.outcome,
+                }),
+              );
+            }
             const snapshot = loadSessionSnapshot(evt.sessionKey);
             ensureTranscriptSkillSpans(evt);
             emitSyntheticModelSpan(evt);
@@ -1971,6 +2316,10 @@ export function createOtelPluginService(
             break;
           }
           case "webhook.received": {
+            instruments.diagnosticsWebhookReceivedCounter.add(
+              1,
+              buildDiagnosticsWebhookMetricAttrs(evt.channel, evt.updateType),
+            );
             const { span } = createChildSpan("openclaw.webhook.received", evt, {
               "openclaw.channel": evt.channel,
               "openclaw.webhook": evt.updateType,
@@ -1981,6 +2330,12 @@ export function createOtelPluginService(
             break;
           }
           case "webhook.processed": {
+            if (typeof evt.durationMs === "number") {
+              instruments.diagnosticsWebhookDurationMs.record(
+                evt.durationMs,
+                buildDiagnosticsWebhookMetricAttrs(evt.channel, evt.updateType),
+              );
+            }
             const { span } = createChildSpan(
               "openclaw.webhook.processed",
               evt,
@@ -1996,6 +2351,10 @@ export function createOtelPluginService(
             break;
           }
           case "webhook.error": {
+            instruments.diagnosticsWebhookErrorCounter.add(
+              1,
+              buildDiagnosticsWebhookMetricAttrs(evt.channel, evt.updateType),
+            );
             const { span } = createChildSpan("openclaw.webhook.error", evt, {
               "openclaw.channel": evt.channel,
               "openclaw.webhook": evt.updateType,
@@ -2007,6 +2366,20 @@ export function createOtelPluginService(
             break;
           }
           case "session.stuck": {
+            instruments.diagnosticsSessionStuckCounter.add(
+              1,
+              buildDiagnosticsSessionMetricAttrs(evt.state),
+            );
+            instruments.diagnosticsSessionStuckAgeMs.record(
+              evt.ageMs,
+              buildDiagnosticsSessionMetricAttrs(evt.state),
+            );
+            if (typeof evt.queueDepth === "number") {
+              instruments.diagnosticsQueueDepth.record(
+                evt.queueDepth,
+                buildDiagnosticsSessionMetricAttrs(evt.state),
+              );
+            }
             const { span } = createChildSpan("openclaw.session.stuck", evt, {
               "openclaw.state": evt.state,
               "openclaw.ageMs": evt.ageMs,
@@ -2029,6 +2402,36 @@ export function createOtelPluginService(
           case "queue.lane.dequeue":
           case "diagnostic.heartbeat":
           case "tool.loop": {
+            if (evt.type === "queue.lane.enqueue") {
+              instruments.diagnosticsQueueLaneEnqueueCounter.add(
+                1,
+                buildDiagnosticsQueueMetricAttrs(evt.lane),
+              );
+              instruments.diagnosticsQueueDepth.record(
+                evt.queueSize,
+                buildDiagnosticsQueueMetricAttrs(evt.lane),
+              );
+            }
+            if (evt.type === "queue.lane.dequeue") {
+              instruments.diagnosticsQueueLaneDequeueCounter.add(
+                1,
+                buildDiagnosticsQueueMetricAttrs(evt.lane),
+              );
+              instruments.diagnosticsQueueDepth.record(
+                evt.queueSize,
+                buildDiagnosticsQueueMetricAttrs(evt.lane),
+              );
+              instruments.diagnosticsQueueWaitMs.record(
+                evt.waitMs,
+                buildDiagnosticsQueueMetricAttrs(evt.lane),
+              );
+            }
+            if (evt.type === "diagnostic.heartbeat") {
+              instruments.diagnosticsQueueDepth.record(
+                evt.queued,
+                stringAttrs({ "openclaw.channel": "heartbeat" }),
+              );
+            }
             if (evt.type === "tool.loop" && annotateToolLoop(evt)) {
               break;
             }
