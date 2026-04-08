@@ -160,7 +160,7 @@ If your receiver supports metrics, you can also query:
 
 ## Trace Notes
 
-- Main trace hierarchy is `openclaw_request -> user_message -> main -> skill:* -> tool:* / provider:model -> assistant_message`
+- Main trace hierarchy is `openclaw_request -> user_message -> main -> skill:* -> skill_call:* -> tool:* / provider:model -> assistant_message`
 - Tool execution exports independent `tool:<name>` spans with attributes such as `openclaw.tool.call_id` and `openclaw.tool.outcome`
 - `openclaw.session.stuck` is reported as a diagnostic alert and is not marked as an error
 - Skill identification combines session metadata, transcript content, and local skill data under `~/.openclaw/workspace/skills`

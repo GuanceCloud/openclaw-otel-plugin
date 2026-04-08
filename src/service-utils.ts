@@ -46,6 +46,7 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
     usedToolCommands: new Set<string>(),
     usedToolResultStatuses: new Set<string>(),
     skillSpans: new Map(),
+    skillInvocationSpans: new Map(),
     toolSpans: new Map(),
   };
 }
@@ -534,6 +535,10 @@ export function buildSkillCatalogEntry(
 
 export function skillSpanName(skillName: string): string {
   return `skill:${skillName}`;
+}
+
+export function skillCallSpanName(skillName: string): string {
+  return `skill_call:${skillName}`;
 }
 
 export function extractMentionedSkillNames(

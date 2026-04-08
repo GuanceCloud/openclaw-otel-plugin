@@ -582,10 +582,8 @@ export function createOtelPluginService(
       unsubscribeTranscript?.();
       unsubscribeTranscript = null;
       for (const current of activeRuns.values()) {
+        toolSpanManager.finalizeToolAndSkillSpans(current);
         endSpanSafely(current.modelSpan);
-        for (const skill of current.skillSpans.values()) {
-          endSpanSafely(skill.span);
-        }
         endSpanSafely(current.span);
         endSpanSafely(current.userSpan);
       }

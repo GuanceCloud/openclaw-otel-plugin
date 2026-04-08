@@ -13,6 +13,16 @@ export type ActiveSkillSpan = {
   source: "runtime" | "transcript";
 };
 
+export type ActiveSkillInvocationSpan = {
+  callId: string;
+  name: string;
+  span: any;
+  ctx: any;
+  startedAt: number;
+  source: "runtime";
+  toolName?: string;
+};
+
 export type ActiveToolSpan = {
   toolCallId: string;
   name: string;
@@ -52,6 +62,7 @@ export type ActiveRunSpan = {
   usedToolCommands: Set<string>;
   usedToolResultStatuses: Set<string>;
   skillSpans: Map<string, ActiveSkillSpan>;
+  skillInvocationSpans: Map<string, ActiveSkillInvocationSpan>;
   toolSpans: Map<string, ActiveToolSpan>;
   activeSkillName?: string;
   userSpan?: any;

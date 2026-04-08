@@ -161,7 +161,7 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 
 ## 链路与指标说明
 
-- 主要 trace 层级为 `openclaw_request -> user_message -> main -> skill:* -> tool:* / provider:model -> assistant_message`
+- 主要 trace 层级为 `openclaw_request -> user_message -> main -> skill:* -> skill_call:* -> tool:* / provider:model -> assistant_message`
 - tool 执行会导出独立的 `tool:<name>` span，并附带 `openclaw.tool.call_id`、`openclaw.tool.outcome` 等属性
 - `openclaw.session.stuck` 当前作为诊断告警上报，不再标记为错误
 - skill 识别会综合 session 元数据、transcript 内容和本地 `~/.openclaw/workspace/skills` 下的 skill 信息
