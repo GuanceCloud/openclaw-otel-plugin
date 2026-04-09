@@ -92,6 +92,30 @@ Notes:
 - Traces are exported to `endpoint + / + tracePath`
 - Metrics are exported to `/otel/v1/metrics`
 
+Custom trace route example:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "openclaw-otel-plugin": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://localhost:4317/otel",
+          "tracePath": "v1/llms"
+        }
+      }
+    }
+  }
+}
+```
+
+The configuration above exports traces to:
+
+```text
+http://localhost:4317/otel/v1/llms
+```
+
 ## Restart Gateway
 
 After changing configuration, use the official OpenClaw CLI to restart the gateway service:

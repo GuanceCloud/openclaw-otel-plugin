@@ -93,6 +93,30 @@ npm run build
 - traces 走 `endpoint + / + tracePath`
 - metrics 走 `/otel/v1/metrics`
 
+自定义 trace 路由示例：
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "openclaw-otel-plugin": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://localhost:4317/otel",
+          "tracePath": "v1/llms"
+        }
+      }
+    }
+  }
+}
+```
+
+上面的配置会把 trace 上报到：
+
+```text
+http://localhost:4317/otel/v1/llms
+```
+
 ## 重启网关
 
 修改配置后，优先使用 OpenClaw 官方 CLI 重启网关服务：
