@@ -70,6 +70,7 @@ npm run build
         "enabled": true,
         "config": {
           "endpoint": "http://localhost:4317",
+          "tracePath": "v1/traces",
           "protocol": "http/protobuf",
           "serviceName": "openclaw-otel-plugin",
           "flushIntervalMs": 15000,
@@ -88,7 +89,8 @@ npm run build
 说明：
 
 - `flushIntervalMs` 同时作为 OTLP metrics 的周期导出间隔
-- traces 走 `/otel/v1/traces`
+- `tracePath` 默认为 `v1/traces`，可按需改成 `v1/llms` 等其他路由
+- traces 走 `endpoint + / + tracePath`
 - metrics 走 `/otel/v1/metrics`
 
 ## 重启网关
@@ -197,6 +199,7 @@ plugins.entries.openclaw-otel-plugin.config
 不要把以下字段直接放在插件 entry 顶层：
 
 - `endpoint`
+- `tracePath`
 - `serviceName`
 - `resourceAttributes`
 - `flushIntervalMs`

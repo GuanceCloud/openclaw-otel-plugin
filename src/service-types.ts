@@ -123,6 +123,8 @@ export type SessionSnapshot = {
   sessionCwd?: string;
   sessionSkills?: string[];
   mentionedSkillNames?: string[];
+  invokedSkillNames?: string[];
+  toolCallSkillNamesById?: Record<string, string>;
   lastUserText?: string;
   lastAssistantText?: string;
   lastAssistantThinking?: string;

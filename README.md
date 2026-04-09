@@ -69,6 +69,7 @@ Example configuration:
         "enabled": true,
         "config": {
           "endpoint": "http://localhost:4317",
+          "tracePath": "v1/traces",
           "protocol": "http/protobuf",
           "serviceName": "openclaw-otel-plugin",
           "flushIntervalMs": 15000,
@@ -87,7 +88,8 @@ Example configuration:
 Notes:
 
 - `flushIntervalMs` is also used as the OTLP metrics export interval
-- Traces are exported to `/otel/v1/traces`
+- `tracePath` defaults to `v1/traces` and can be changed to routes such as `v1/llms`
+- Traces are exported to `endpoint + / + tracePath`
 - Metrics are exported to `/otel/v1/metrics`
 
 ## Restart Gateway
@@ -196,6 +198,7 @@ plugins.entries.openclaw-otel-plugin.config
 Do not place these fields directly at the plugin entry top level:
 
 - `endpoint`
+- `tracePath`
 - `serviceName`
 - `resourceAttributes`
 - `flushIntervalMs`

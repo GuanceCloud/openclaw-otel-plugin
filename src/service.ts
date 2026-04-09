@@ -27,6 +27,7 @@ import {
   normalizeReasoningPreview,
   normalizeUserInputPreview,
   redactSensitiveText,
+  resolveSpanWindow,
   sessionIdentity,
   stringAttrs,
 } from "./service-utils.js";
@@ -328,24 +329,17 @@ export function createOtelPluginService(
         }
         const snapshot = loadSessionSnapshot(key);
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
-        if (current.usedSkillNames.size === 0) {
-          for (const skillName of snapshot?.mentionedSkillNames ?? []) {
-            current.usedSkillNames.add(skillName);
-          }
-        }
-        if (current.usedSkillNames.size > 0) {
-          for (const skillName of current.usedSkillNames) {
-            if (!current.skillSpans.has(skillName)) {
-              ensureSkillSpan(
-                {
-                  sessionKey: evt.sessionKey,
-                  sessionId: evt.sessionId,
-                  ts: current.mainStartTs,
-                },
-                skillName,
-                "transcript",
-              );
-            }
+        for (const skillName of snapshot?.invokedSkillNames ?? []) {
+          if (!current.skillSpans.has(skillName)) {
+            ensureSkillSpan(
+              {
+                sessionKey: evt.sessionKey,
+                sessionId: evt.sessionId,
+                ts: current.mainStartTs,
+              },
+              skillName,
+              "transcript",
+            );
           }
         }
         const finalAttrs = stringAttrs({
@@ -434,10 +428,10 @@ export function createOtelPluginService(
           typeof durationMs === "number"
             ? Math.max(durationMs, name.includes("/") ? MIN_VISIBLE_MODEL_MS : MIN_VISIBLE_CHILD_MS)
             : MIN_VISIBLE_CHILD_MS;
-        const startTime =
-          typeof durationMs === "number"
-            ? new Date(Math.max(Date.now() - Math.max(0, effectiveDurationMs), evt.ts))
-            : eventTime(evt.ts);
+        const { startTime, endTime } = resolveSpanWindow(
+          evt.ts,
+          typeof durationMs === "number" ? effectiveDurationMs : undefined,
+        );
         const span = tracer.startSpan(
           name,
           {
@@ -453,7 +447,7 @@ export function createOtelPluginService(
           },
           parentCtx ?? root?.ctx,
         );
-        return { span, root, effectiveDurationMs, startTime };
+        return { span, root, effectiveDurationMs, startTime, endTime };
       };
 
       const updateAggregateTokens = (
@@ -571,7 +565,7 @@ export function createOtelPluginService(
       unsubscribeDiagnostic = onDiagnosticEvent(handleDiagnosticEvent);
 
       ctx.logger.info(
-        `[otel-plugin] trace exporter enabled (${config.protocol}) -> ${resolveOtelUrl(config.endpoint, "v1/traces")}`,
+        `[otel-plugin] trace exporter enabled (${config.protocol}) -> ${resolveOtelUrl(config.endpoint, config.tracePath)}`,
       );
     },
     async stop() {

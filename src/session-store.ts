@@ -6,6 +6,8 @@ import {
   extractContentText,
   extractFrontmatter,
   extractMentionedSkillNames,
+  extractToolTarget,
+  inferSkillNameFromToolIdentity,
   readJsonLines,
   uniqStrings,
 } from "./service-utils.js";
@@ -24,8 +26,20 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
     originProvider?: string;
     originSurface?: string;
   }>();
-  const sessionsIndexPath = path.join(stateDir, "agents", "main-agent", "sessions", "sessions.json");
+  const sessionsIndexPathCandidates = [
+    path.join(stateDir, "agents", "main", "sessions", "sessions.json"),
+    path.join(stateDir, "agents", "main-agent", "sessions", "sessions.json"),
+  ];
   const workspaceSkillsDir = path.join(stateDir, "workspace", "skills");
+
+  const resolveSessionsIndexPath = () => {
+    for (const candidate of sessionsIndexPathCandidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return sessionsIndexPathCandidates[0];
+  };
 
   const mergeSessionSkills = (sessionKey: string, entries: SkillCatalogEntry[]) => {
     if (entries.length === 0) {
@@ -81,7 +95,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
 
   const refreshSessionsIndex = () => {
     try {
-      const raw = fs.readFileSync(sessionsIndexPath, "utf8");
+      const raw = fs.readFileSync(resolveSessionsIndexPath(), "utf8");
       const parsed = JSON.parse(raw) as Record<string, {
         sessionFile?: string;
         sessionId?: string;
@@ -165,6 +179,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       let lastModel: string | undefined;
       let sessionCwd: string | undefined;
       let lastAssistantUsage: SessionSnapshot["lastAssistantUsage"];
+      const invokedSkillNames = new Set<string>();
+      const toolCallSkillNamesById: Record<string, string> = {};
       for (const line of lines) {
         if (line.type === "session" && typeof line.cwd === "string" && !sessionCwd) {
           sessionCwd = line.cwd;
@@ -185,6 +201,34 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           lastAssistantThinking = extractContentText(message.content, "thinking") ?? lastAssistantThinking;
           lastProvider = typeof message.provider === "string" ? message.provider : lastProvider;
           lastModel = typeof message.model === "string" ? message.model : lastModel;
+          if (Array.isArray(message.content)) {
+            for (const item of message.content) {
+              if (!item || typeof item !== "object") {
+                continue;
+              }
+              const record = item as Record<string, unknown>;
+              if (record.type !== "toolCall") {
+                continue;
+              }
+              const toolCallId = typeof record.id === "string" ? record.id.trim() : "";
+              const toolName = typeof record.name === "string" ? record.name.trim() : "";
+              const args = record.arguments ?? record.args;
+              if (!toolCallId || !toolName) {
+                continue;
+              }
+              const skillName = inferSkillNameFromToolIdentity(
+                toolName,
+                extractToolTarget(toolName, args, undefined),
+                typeof args === "object" && args !== null && typeof (args as Record<string, unknown>).command === "string"
+                  ? (args as Record<string, unknown>).command as string
+                  : undefined,
+              );
+              if (skillName) {
+                invokedSkillNames.add(skillName);
+                toolCallSkillNamesById[toolCallId] = skillName;
+              }
+            }
+          }
           if (message.usage && typeof message.usage === "object") {
             const usage = message.usage as Record<string, unknown>;
             lastAssistantUsage = {
@@ -225,6 +269,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         sessionCwd,
         sessionSkills: (sessionSkillsBySessionKey.get(sessionKey) ?? []).map((skill) => skill.name),
         mentionedSkillNames: Array.from(mentionedSkillNames),
+        invokedSkillNames: Array.from(invokedSkillNames),
+        toolCallSkillNamesById,
         lastUserText,
         lastAssistantText: liveAssistantText ?? lastAssistantText,
         lastAssistantThinking,

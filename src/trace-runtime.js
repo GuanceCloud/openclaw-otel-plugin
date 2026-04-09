@@ -1,9 +1,14 @@
 export function resolveOtelUrl(endpoint, path) {
-  const endpointWithoutQueryOrFragment = endpoint.split(/[?#]/, 1)[0] ?? endpoint;
-  if (/\/v1\/traces$/i.test(endpointWithoutQueryOrFragment)) {
+  const normalizedPath = String(path ?? "").trim().replace(/^\/+/, "").replace(/\/+$/, "");
+  if (!normalizedPath) {
     return endpoint;
   }
-  return `${endpoint}/${path}`;
+  const endpointWithoutQueryOrFragment = endpoint.split(/[?#]/, 1)[0] ?? endpoint;
+  const escapedPath = normalizedPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`/${escapedPath}$`, "i").test(endpointWithoutQueryOrFragment)) {
+    return endpoint;
+  }
+  return `${endpoint}/${normalizedPath}`;
 }
 
 export function stripAnsiEscapeCodes(text) {

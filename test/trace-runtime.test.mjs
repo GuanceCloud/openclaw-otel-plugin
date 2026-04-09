@@ -31,6 +31,20 @@ test("resolveOtelUrl keeps trace endpoint with fragment unchanged", () => {
   );
 });
 
+test("resolveOtelUrl appends a custom trace path", () => {
+  assert.equal(
+    resolveOtelUrl("https://collector.example.com/base", "v1/llms"),
+    "https://collector.example.com/base/v1/llms",
+  );
+});
+
+test("resolveOtelUrl keeps a custom signal endpoint unchanged", () => {
+  assert.equal(
+    resolveOtelUrl("https://collector.example.com/v1/llms?timeout=30s", "/v1/llms"),
+    "https://collector.example.com/v1/llms?timeout=30s",
+  );
+});
+
 test("stripAnsiEscapeCodes removes terminal escape sequences from previews", () => {
   assert.equal(stripAnsiEscapeCodes("hello \u001b[118;1:3mbug\u001b[0m world"), "hello bug world");
 });

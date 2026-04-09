@@ -59,6 +59,30 @@ export function endTimeFromStart(startTs: number, durationMs: number): Date {
   return new Date(startTs + Math.max(durationMs, 1));
 }
 
+export function resolveSpanWindow(
+  ts: number | undefined,
+  durationMs?: number,
+): {
+  startTime: Date;
+  endTime: Date;
+  effectiveDurationMs?: number;
+} {
+  const endTs = typeof ts === "number" ? ts : Date.now();
+  if (typeof durationMs !== "number") {
+    const endTime = new Date(endTs);
+    return {
+      startTime: endTime,
+      endTime,
+    };
+  }
+  const effectiveDurationMs = Math.max(durationMs, 1);
+  return {
+    startTime: new Date(endTs - effectiveDurationMs),
+    endTime: new Date(endTs),
+    effectiveDurationMs,
+  };
+}
+
 export function sessionIdentity(evt: {
   sessionKey?: string;
   sessionId?: string;
@@ -476,6 +500,30 @@ export function inferSkillNameFromTool(toolName: string | undefined): string | u
     return "coding-agent";
   }
   return undefined;
+}
+
+function inferSkillNameFromSkillPath(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const normalized = text.trim().replace(/\\/g, "/").toLowerCase();
+  const match = normalized.match(/\/workspace\/skills\/([^/\s"'`]+)/);
+  if (!match) {
+    return undefined;
+  }
+  return match[1]?.trim();
+}
+
+export function inferSkillNameFromToolIdentity(
+  toolName: string | undefined,
+  target?: string,
+  command?: string,
+): string | undefined {
+  return (
+    inferSkillNameFromTool(toolName)
+    ?? inferSkillNameFromSkillPath(target)
+    ?? inferSkillNameFromSkillPath(command)
+  );
 }
 
 export function uniqStrings(values: Array<string | undefined>): string[] {

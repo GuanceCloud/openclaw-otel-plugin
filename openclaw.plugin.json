@@ -10,6 +10,9 @@
       "endpoint": {
         "type": "string"
       },
+      "tracePath": {
+        "type": "string"
+      },
       "protocol": {
         "type": "string",
         "enum": ["http/protobuf"]

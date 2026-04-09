@@ -20,6 +20,7 @@ import {
   eventTime,
   extractToolResultStatus,
   inferSkillNameFromTool,
+  inferSkillNameFromToolIdentity,
   mergeToolIdentity,
   MIN_VISIBLE_CHILD_MS,
   MIN_VISIBLE_MODEL_MS,
@@ -291,9 +292,22 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
 
   const ensureTranscriptSkillSpans = (evt: SessionEvent) => {
     const snapshot = loadSessionSnapshot(evt.sessionKey);
-    for (const skillName of snapshot?.mentionedSkillNames ?? []) {
+    for (const skillName of snapshot?.invokedSkillNames ?? []) {
       ensureSkillSpan(evt, skillName, "transcript");
     }
+  };
+
+  const resolveSkillName = (
+    evt: SessionEvent,
+    toolName: string | undefined,
+    toolCallId: string | undefined,
+    target?: string,
+    command?: string,
+  ) => {
+    const transcriptSkillName = toolCallId
+      ? loadSessionSnapshot(evt.sessionKey)?.toolCallSkillNamesById?.[toolCallId]
+      : undefined;
+    return transcriptSkillName ?? inferSkillNameFromToolIdentity(toolName, target, command);
   };
 
   const ensureToolSpan = (
@@ -320,7 +334,13 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (summary.target) run.usedToolTargets.add(summary.target);
     if (summary.command) run.usedToolCommands.add(summary.command);
     if (summary.resultStatus) run.usedToolResultStatuses.add(summary.resultStatus);
-    const skillName = inferSkillNameFromTool(normalizedToolName);
+    const skillName = resolveSkillName(
+      evt,
+      normalizedToolName,
+      normalizedToolCallId,
+      attrs?.["openclaw.tool.target"] as string | undefined,
+      attrs?.["openclaw.tool.command"] as string | undefined,
+    );
     if (skillName) {
       ensureSkillSpan(evt, skillName, "runtime");
       ensureSkillInvocationSpan(evt, skillName, normalizedToolCallId, normalizedToolName);
@@ -611,7 +631,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       return;
     }
     const toolName = typeof evt.data.name === "string" ? evt.data.name : undefined;
-    const skillName = inferSkillNameFromTool(toolName);
     const run = getRun({ sessionKey }, false) ?? ensureUserSpan({ sessionKey, ts: evt.ts ?? Date.now() });
     if (!run || !toolName) {
       return;
@@ -623,10 +642,17 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       result: evt.data.result,
       partialResult: evt.data.partialResult,
     });
+    const toolCallId = typeof evt.data.toolCallId === "string" ? evt.data.toolCallId : undefined;
+    const skillName = resolveSkillName(
+      { sessionKey, ts: evt.ts ?? Date.now() },
+      toolName,
+      toolCallId,
+      summary.target,
+      summary.command,
+    );
     if (summary.target) run.usedToolTargets.add(summary.target);
     if (summary.command) run.usedToolCommands.add(summary.command);
     if (summary.resultStatus) run.usedToolResultStatuses.add(summary.resultStatus);
-    const toolCallId = typeof evt.data.toolCallId === "string" ? evt.data.toolCallId : undefined;
     if (skillName) {
       ensureSkillSpan({ sessionKey, ts: evt.ts ?? Date.now() }, skillName, "runtime");
       if (toolCallId) {

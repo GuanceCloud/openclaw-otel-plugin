@@ -46,6 +46,7 @@ type ChildSpanFactory = (
   root: unknown;
   effectiveDurationMs: number;
   startTime: Date;
+  endTime?: Date;
 };
 
 type DiagnosticEventHandlerDeps = {
@@ -253,7 +254,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           run.modelSpan = undefined;
           run.modelCtx = undefined;
         } else {
-          const { span, effectiveDurationMs, startTime } = createChildSpan(
+          const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
             `${evt.provider ?? "model"}/${evt.model ?? "unknown"}`,
             evt,
             enrichWithTranscript(evt.sessionKey, {
@@ -281,7 +282,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             getActiveSkillCtx(run) ?? run?.ctx,
           );
           span.setStatus({ code: SpanStatusCode.OK });
-          span.end(endTimeFromStart(startTime.getTime(), effectiveDurationMs));
+          span.end(endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs));
         }
         break;
       }
@@ -304,7 +305,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         ensureTranscriptSkillSpans(evt);
         emitSyntheticModelSpan(evt);
         const run = getRun(evt, true);
-        const { span, effectiveDurationMs, startTime } = createChildSpan(
+        const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
           "assistant_message",
           evt,
           {
@@ -319,7 +320,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             "openclaw.provider": snapshot?.lastProvider,
             "openclaw.model": snapshot?.lastModel,
           },
-          MIN_VISIBLE_CHILD_MS,
+          evt.durationMs ?? MIN_VISIBLE_CHILD_MS,
           run?.modelCtx ?? getActiveSkillCtx(run) ?? run?.ctx,
         );
         if (evt.outcome === "error") {
@@ -327,7 +328,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         } else {
           span.setStatus({ code: SpanStatusCode.OK });
         }
-        span.end(endTimeFromStart(startTime.getTime(), effectiveDurationMs));
+        span.end(endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs));
         syncRootFromRun(evt);
         endRun(evt, { "openclaw.outcome": evt.outcome });
         endRoot(evt, { "openclaw.outcome": evt.outcome });

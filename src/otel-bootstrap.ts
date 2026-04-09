@@ -18,7 +18,7 @@ export async function startOtelBootstrap(config: OtelPluginConfig): Promise<Otel
   const { ATTR_SERVICE_NAME } = require("@opentelemetry/semantic-conventions");
 
   const traceExporter = new OTLPTraceExporter({
-    url: resolveOtelUrl(config.endpoint, "v1/traces"),
+    url: resolveOtelUrl(config.endpoint, config.tracePath),
     ...(config.headers ? { headers: config.headers } : {}),
   });
   const metricExporter = new OTLPMetricExporter({
