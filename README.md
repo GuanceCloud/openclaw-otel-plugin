@@ -17,7 +17,7 @@
 - OpenClaw `2026.3.23+`
 - Node.js `22.x`
 - A working OTLP HTTP/protobuf receiver
-- Default example endpoint: `http://localhost:4317`
+- Default example endpoint: `http://localhost:4318`
 
 Compatibility notes:
 
@@ -68,7 +68,7 @@ Example configuration:
       "openclaw-otel-plugin": {
         "enabled": true,
         "config": {
-          "endpoint": "http://localhost:4317",
+          "endpoint": "http://localhost:4318",
           "tracePath": "v1/traces",
           "protocol": "http/protobuf",
           "serviceName": "openclaw-otel-plugin",
@@ -101,7 +101,7 @@ Custom trace route example:
       "openclaw-otel-plugin": {
         "enabled": true,
         "config": {
-          "endpoint": "http://localhost:4317/otel",
+          "endpoint": "http://localhost:4318/otel",
           "tracePath": "v1/llms"
         }
       }
@@ -113,7 +113,7 @@ Custom trace route example:
 The configuration above exports traces to:
 
 ```text
-http://localhost:4317/otel/v1/llms
+http://localhost:4318/otel/v1/llms
 ```
 
 ## Restart Gateway
@@ -153,7 +153,7 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 You should see something like:
 
 ```text
-[otel-plugin] trace exporter enabled (http/protobuf) -> http://localhost:4317/v1/traces
+[otel-plugin] trace exporter enabled (http/protobuf) -> http://localhost:4318/v1/traces
 ```
 
 Then send a test message in OpenClaw and query in your tracing platform with:
