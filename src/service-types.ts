@@ -83,6 +83,12 @@ export type RuntimeLike = {
   events?: RuntimeEvents;
 };
 
+export type RuntimeMetadata = {
+  openclawVersion?: string;
+  runtimeEnvironment?: string;
+  agentName?: string;
+};
+
 export type MetricInstruments = {
   requestCounter: any;
   requestDuration: any;

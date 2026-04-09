@@ -6,7 +6,7 @@ import { onDiagnosticEvent } from "openclaw/plugin-sdk";
 import type { OtelPluginConfig } from "./config.js";
 import { createDiagnosticEventHandler } from "./diagnostic-event-handler.js";
 import { startOtelBootstrap } from "./otel-bootstrap.js";
-import { createSessionSnapshotStore } from "./session-store.js";
+import { createSessionSnapshotStore, resolveRuntimeMetadata } from "./session-store.js";
 import type {
   ActiveRootSpan,
   ActiveRunSpan,
@@ -57,6 +57,7 @@ export function createOtelPluginService(
       }
 
       sessionStore = createSessionSnapshotStore(ctx.stateDir);
+      const runtimeMetadata = resolveRuntimeMetadata(ctx.stateDir);
       const {
         sdk: otelSdk,
         context,
@@ -65,7 +66,7 @@ export function createOtelPluginService(
         SpanKind,
         SpanStatusCode,
         instruments,
-      } = await startOtelBootstrap(config);
+      } = await startOtelBootstrap(config, runtimeMetadata);
       sdk = otelSdk;
       sessionStore.refreshSessionsIndex();
 

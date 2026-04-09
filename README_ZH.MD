@@ -71,6 +71,11 @@ npm run build
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/traces",
+          "agentProvider": "openclaw",
+          "globalTags": {
+            "team": "apm",
+            "cluster": "prod-cn"
+          },
           "protocol": "http/protobuf",
           "serviceName": "openclaw-otel-plugin",
           "flushIntervalMs": 15000,
@@ -90,8 +95,23 @@ npm run build
 
 - `flushIntervalMs` 同时作为 OTLP metrics 的周期导出间隔
 - `tracePath` 默认为 `v1/traces`，可按需改成 `v1/llms` 等其他路由
+- `agentProvider` 默认为 `openclaw`，会作为全局资源标签 `agent_provider` 附加到 trace 和 metrics
+- `globalTags` 用于追加固定全局标签，适合配置团队、集群、环境标识等
 - traces 走 `endpoint + / + tracePath`
 - metrics 走 `/otel/v1/metrics`
+
+默认会自动附加这些全局标签：
+
+- `agent_provider`
+- `agent_version`
+- `runtime_environment`
+- `agent_name`
+
+标签合并优先级：
+
+- 自动标签
+- `globalTags`
+- `resourceAttributes`
 
 自定义 trace 路由示例：
 
@@ -102,8 +122,12 @@ npm run build
       "openclaw-otel-plugin": {
         "enabled": true,
         "config": {
-          "endpoint": "http://localhost:4318/otel",
-          "tracePath": "v1/llms"
+          "endpoint": "http://localhost:4318",
+          "tracePath": "v1/llms",
+          "agentProvider": "openclaw",
+          "globalTags": {
+            "team": "apm"
+          }
         }
       }
     }
@@ -114,7 +138,7 @@ npm run build
 上面的配置会把 trace 上报到：
 
 ```text
-http://localhost:4318/otel/v1/llms
+http://localhost:4318/v1/llms
 ```
 
 ## 重启网关
@@ -224,6 +248,8 @@ plugins.entries.openclaw-otel-plugin.config
 
 - `endpoint`
 - `tracePath`
+- `agentProvider`
+- `globalTags`
 - `serviceName`
 - `resourceAttributes`
 - `flushIntervalMs`

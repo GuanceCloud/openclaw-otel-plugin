@@ -13,6 +13,15 @@
       "tracePath": {
         "type": "string"
       },
+      "agentProvider": {
+        "type": "string"
+      },
+      "globalTags": {
+        "type": "object",
+        "additionalProperties": {
+          "type": ["string", "number", "boolean"]
+        }
+      },
       "protocol": {
         "type": "string",
         "enum": ["http/protobuf"]

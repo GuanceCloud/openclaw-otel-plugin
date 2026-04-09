@@ -90,11 +90,100 @@ export function sessionIdentity(evt: {
   return evt.sessionKey ?? evt.sessionId;
 }
 
+function promoteAlias(
+  target: Record<string, string | number | boolean | undefined>,
+  aliasKey: string,
+  ...sourceKeys: string[]
+) {
+  let aliasValue = target[aliasKey];
+  if (aliasValue === undefined || aliasValue === "") {
+    for (const sourceKey of sourceKeys) {
+      const value = target[sourceKey];
+      if (value !== undefined && value !== "") {
+        aliasValue = value;
+        target[aliasKey] = value;
+        break;
+      }
+    }
+  }
+  if (aliasValue === undefined || aliasValue === "") {
+    return;
+  }
+  for (const sourceKey of sourceKeys) {
+    if (sourceKey !== aliasKey) {
+      delete target[sourceKey];
+    }
+  }
+}
+
+function copyAlias(
+  target: Record<string, string | number | boolean | undefined>,
+  aliasKey: string,
+  ...sourceKeys: string[]
+) {
+  if (target[aliasKey] !== undefined && target[aliasKey] !== "") {
+    return;
+  }
+  for (const sourceKey of sourceKeys) {
+    const value = target[sourceKey];
+    if (value !== undefined && value !== "") {
+      target[aliasKey] = value;
+      return;
+    }
+  }
+}
+
+function promotePrefixedKeys(
+  target: Record<string, string | number | boolean | undefined>,
+  prefix: string,
+  aliasPrefix: string,
+) {
+  for (const [key, value] of Object.entries({ ...target })) {
+    if (!key.startsWith(prefix) || value === undefined || value === "") {
+      continue;
+    }
+    const suffix = key.slice(prefix.length).replace(/\./g, "_");
+    if (!suffix) {
+      continue;
+    }
+    const aliasKey = `${aliasPrefix}${suffix}`;
+    if (target[aliasKey] === undefined || target[aliasKey] === "") {
+      target[aliasKey] = value;
+    }
+    delete target[key];
+  }
+}
+
+function withCanonicalAliases(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean | undefined> {
+  const next = { ...attrs };
+  promotePrefixedKeys(next, "openclaw.tool.", "tool_");
+  promoteAlias(next, "session_id", "openclaw.sessionId");
+  promoteAlias(next, "session_key", "openclaw.sessionKey");
+  promoteAlias(next, "channel", "openclaw.channel", "openclaw.session.lastChannel");
+  promoteAlias(next, "source_app", "openclaw.session.origin.provider");
+  promoteAlias(next, "entry_point", "openclaw.session.origin.surface");
+  promoteAlias(next, "model_provider", "openclaw.provider");
+  promoteAlias(next, "model_name", "openclaw.model");
+  promoteAlias(next, "input_tokens", "openclaw.tokens.input");
+  promoteAlias(next, "output_tokens", "openclaw.tokens.output");
+  promoteAlias(next, "total_tokens", "openclaw.tokens.total");
+  copyAlias(next, "target_resource", "tool_target");
+  copyAlias(next, "call_result", "tool_outcome");
+  promoteAlias(next, "skill_call_id", "openclaw.skill.call_id");
+  promoteAlias(next, "skill_name", "openclaw.skill.name");
+  promoteAlias(next, "skill_type", "openclaw.skill.kind");
+  promoteAlias(next, "skill_source", "openclaw.skill.source");
+  promoteAlias(next, "final_status", "openclaw.outcome", "openclaw.final_state");
+  return next;
+}
+
 export function stringAttrs(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean> {
   return Object.fromEntries(
-    Object.entries(attrs)
+    Object.entries(withCanonicalAliases(attrs))
       .filter(([key, value]) => key !== "trace_id" && value !== undefined && value !== "")
       .map(([key, value]) => [
         key,

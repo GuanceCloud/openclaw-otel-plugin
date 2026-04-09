@@ -70,6 +70,11 @@ Example configuration:
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/traces",
+          "agentProvider": "openclaw",
+          "globalTags": {
+            "team": "apm",
+            "cluster": "prod-cn"
+          },
           "protocol": "http/protobuf",
           "serviceName": "openclaw-otel-plugin",
           "flushIntervalMs": 15000,
@@ -89,8 +94,23 @@ Notes:
 
 - `flushIntervalMs` is also used as the OTLP metrics export interval
 - `tracePath` defaults to `v1/traces` and can be changed to routes such as `v1/llms`
+- `agentProvider` defaults to `openclaw` and is attached to traces and metrics as the global resource tag `agent_provider`
+- `globalTags` is for fixed global tags such as team, cluster, or environment markers
 - Traces are exported to `endpoint + / + tracePath`
 - Metrics are exported to `/otel/v1/metrics`
+
+These global tags are added automatically by default:
+
+- `agent_provider`
+- `agent_version`
+- `runtime_environment`
+- `agent_name`
+
+Tag merge priority:
+
+- automatic tags
+- `globalTags`
+- `resourceAttributes`
 
 Custom trace route example:
 
@@ -101,8 +121,12 @@ Custom trace route example:
       "openclaw-otel-plugin": {
         "enabled": true,
         "config": {
-          "endpoint": "http://localhost:4318/otel",
-          "tracePath": "v1/llms"
+          "endpoint": "http://localhost:4318",
+          "tracePath": "v1/llms",
+          "agentProvider": "openclaw",
+          "globalTags": {
+            "team": "apm"
+          }
         }
       }
     }
@@ -113,7 +137,7 @@ Custom trace route example:
 The configuration above exports traces to:
 
 ```text
-http://localhost:4318/otel/v1/llms
+http://localhost:4318/v1/llms
 ```
 
 ## Restart Gateway
@@ -223,6 +247,8 @@ Do not place these fields directly at the plugin entry top level:
 
 - `endpoint`
 - `tracePath`
+- `agentProvider`
+- `globalTags`
 - `serviceName`
 - `resourceAttributes`
 - `flushIntervalMs`

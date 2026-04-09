@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { SessionSnapshot, SessionSnapshotStore, SkillCatalogEntry } from "./service-types.js";
+import type { RuntimeMetadata, SessionSnapshot, SessionSnapshotStore, SkillCatalogEntry } from "./service-types.js";
 import {
   buildSkillCatalogEntry,
   extractContentText,
@@ -311,5 +311,74 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       sessionModelBySessionKey.clear();
       sessionMetaBySessionKey.clear();
     },
+  };
+}
+
+function parseAgentKey(value: string | undefined): { runtimeEnvironment?: string; agentName?: string } {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return {};
+  }
+  const match = normalized.match(/^agent:([^:]+):([^:]+)$/);
+  if (!match) {
+    return {};
+  }
+  return {
+    runtimeEnvironment: match[1]?.trim() || undefined,
+    agentName: match[2]?.trim() || undefined,
+  };
+}
+
+function detectOpenClawVersion(): string | undefined {
+  const envVersion = process.env.OPENCLAW_VERSION?.trim();
+  if (envVersion) {
+    return envVersion;
+  }
+  const candidates = [
+    path.join(path.dirname(path.dirname(process.execPath)), "lib", "node_modules", "openclaw", "package.json"),
+    "/usr/local/lib/node_modules/openclaw/package.json",
+    "/usr/lib/node_modules/openclaw/package.json",
+  ];
+  for (const candidate of candidates) {
+    try {
+      const raw = fs.readFileSync(candidate, "utf8");
+      const parsed = JSON.parse(raw) as { version?: unknown };
+      if (typeof parsed.version === "string" && parsed.version.trim()) {
+        return parsed.version.trim();
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return undefined;
+}
+
+export function resolveRuntimeMetadata(stateDir: string): RuntimeMetadata {
+  const sessionsIndexCandidates = [
+    path.join(stateDir, "agents", "main", "sessions", "sessions.json"),
+    path.join(stateDir, "agents", "main-agent", "sessions", "sessions.json"),
+  ];
+  for (const candidate of sessionsIndexCandidates) {
+    try {
+      if (!fs.existsSync(candidate)) {
+        continue;
+      }
+      const raw = fs.readFileSync(candidate, "utf8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const firstSessionKey = Object.keys(parsed)[0];
+      const { runtimeEnvironment, agentName } = parseAgentKey(firstSessionKey);
+      return {
+        openclawVersion: detectOpenClawVersion(),
+        runtimeEnvironment: runtimeEnvironment ?? (process.env.NODE_ENV?.trim() || undefined),
+        agentName,
+      };
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return {
+    openclawVersion: detectOpenClawVersion(),
+    runtimeEnvironment: process.env.NODE_ENV?.trim() || undefined,
+    agentName: undefined,
   };
 }

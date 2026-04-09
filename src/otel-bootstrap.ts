@@ -1,9 +1,20 @@
 import { createRequire } from "node:module";
 import type { OtelPluginConfig } from "./config.js";
-import type { MetricInstruments, OtelBootstrapResult } from "./service-types.js";
+import type { MetricInstruments, OtelBootstrapResult, RuntimeMetadata } from "./service-types.js";
 import { resolveOtelUrl } from "./trace-runtime.js";
 
-export async function startOtelBootstrap(config: OtelPluginConfig): Promise<OtelBootstrapResult> {
+function compactResourceAttrs(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean> {
+  return Object.fromEntries(
+    Object.entries(attrs).filter(([, value]) => value !== undefined && value !== ""),
+  ) as Record<string, string | number | boolean>;
+}
+
+export async function startOtelBootstrap(
+  config: OtelPluginConfig,
+  runtimeMetadata?: RuntimeMetadata,
+): Promise<OtelBootstrapResult> {
   const require = createRequire(import.meta.url);
   const { context, metrics, trace, SpanKind, SpanStatusCode } = require("@opentelemetry/api");
   const { OTLPMetricExporter } = require("@opentelemetry/exporter-metrics-otlp-proto");
@@ -26,10 +37,15 @@ export async function startOtelBootstrap(config: OtelPluginConfig): Promise<Otel
     ...(config.headers ? { headers: config.headers } : {}),
   });
 
-  const resource = resourceFromAttributes({
+  const resource = resourceFromAttributes(compactResourceAttrs({
     [ATTR_SERVICE_NAME]: config.serviceName,
+    agent_provider: config.agentProvider,
+    agent_version: runtimeMetadata?.openclawVersion,
+    runtime_environment: runtimeMetadata?.runtimeEnvironment,
+    agent_name: runtimeMetadata?.agentName,
+    ...(config.globalTags ?? {}),
     ...(config.resourceAttributes ?? {}),
-  });
+  }));
 
   const sdk = new NodeSDK({
     resource,
