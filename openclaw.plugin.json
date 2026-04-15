@@ -13,6 +13,15 @@
       "tracePath": {
         "type": "string"
       },
+      "metricsPath": {
+        "type": "string"
+      },
+      "logsEnabled": {
+        "type": "boolean"
+      },
+      "logsPath": {
+        "type": "string"
+      },
       "agentProvider": {
         "type": "string"
       },

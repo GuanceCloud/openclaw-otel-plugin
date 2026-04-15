@@ -1,6 +1,6 @@
 # openclaw-otel-plugin
 
-`openclaw-otel-plugin` is an OpenClaw observability export plugin. It converts OpenClaw diagnostic events into session-oriented traces, exports supplemental metrics, and reports them to any OpenTelemetry-compatible receiver via `OTLP HTTP/protobuf`.
+`openclaw-otel-plugin` is an OpenClaw observability export plugin. It converts OpenClaw diagnostic events into session-oriented traces, exports supplemental metrics and diagnostics logs, and reports them to any OpenTelemetry-compatible receiver via `OTLP HTTP/protobuf`.
 
 ## Features
 
@@ -11,6 +11,7 @@
 - Adds OpenClaw-specific attributes to make troubleshooting easier in tracing platforms
 - Exports supplemental metrics such as request count, request duration, tool calls, tool errors, tool duration, skill activations, and model calls
 - Mirrors the latest built-in OpenClaw diagnostics metrics such as `openclaw.tokens`, `openclaw.cost.usd`, `openclaw.message.queued`, and `openclaw.queue.depth`
+- Mirrors OpenClaw diagnostics events to OTEL logs such as `session.state`, `message.processed`, and `webhook.error`
 
 ## Requirements
 
@@ -70,6 +71,9 @@ Example configuration:
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/traces",
+          "metricsPath": "v1/write/otel-metrics",
+          "logsEnabled": true,
+          "logsPath": "v1/write/otel-logs",
           "headers": {
             "Authorization": "Bearer <token>",
             "X-Env": "prod"
@@ -98,11 +102,15 @@ Notes:
 
 - `flushIntervalMs` is also used as the OTLP metrics export interval
 - `tracePath` defaults to `v1/traces` and can be changed to routes such as `v1/llms`
-- `headers` can be used to attach fixed HTTP headers to both trace and metrics exports
+- `metricsPath` defaults to `v1/metrics` and can be changed to custom routes such as `/v1/write/otel-metrics`
+- `logsEnabled` is disabled by default; OTEL logs are exported only when explicitly set to `true`
+- `logsPath` defaults to `v1/logs` and is used for OpenClaw diagnostics log export; it can be changed to routes such as `/v1/write/otel-logs`
+- `headers` can be used to attach fixed HTTP headers to trace, metrics, and logs exports
 - `agentProvider` defaults to `openclaw` and is attached to traces and metrics as the global resource tag `agent_provider`
 - `globalTags` is for fixed global tags such as team, cluster, or environment markers
 - Traces are exported to `endpoint + / + tracePath`
-- Metrics are exported to `/otel/v1/metrics`
+- Metrics are exported to `endpoint + / + metricsPath`
+- Logs are exported to `endpoint + / + logsPath`
 
 These global tags are added automatically by default:
 
@@ -183,14 +191,24 @@ You should see something like:
 
 ```text
 [otel-plugin] trace exporter enabled (http/protobuf) -> http://localhost:4318/v1/traces
+[otel-plugin] metric exporter enabled (http/protobuf) -> http://localhost:4318/v1/write/otel-metrics
+[otel-plugin] log exporter disabled
+```
+
+If log export is enabled:
+
+```text
+[otel-plugin] log exporter enabled (http/protobuf) -> http://localhost:4318/v1/write/otel-logs
 [otel-plugin] trace export succeeded -> http://localhost:4318/v1/traces (8ms, items=3)
-[otel-plugin] metric export succeeded -> http://localhost:4318/v1/metrics (5ms, items=12)
+[otel-plugin] metric export succeeded -> http://localhost:4318/v1/write/otel-metrics (5ms, items=12)
+[otel-plugin] log export succeeded -> http://localhost:4318/v1/write/otel-logs (4ms, items=6)
 ```
 
 If export fails, an error log is also emitted, for example:
 
 ```text
 [otel-plugin] trace export failed -> http://localhost:4318/v1/traces (13ms, items=2): 401 Unauthorized
+[otel-plugin] log export failed -> http://localhost:4318/v1/write/otel-logs (7ms, items=3): 401 Unauthorized
 ```
 
 Then send a test message in OpenClaw and query in your tracing platform with:
@@ -221,6 +239,17 @@ If your receiver supports metrics, you can also query:
 - `openclaw.session.stuck`
 - `openclaw.run.attempt`
 
+If your receiver supports logs, the `otel-logs` route will also contain mirrored OpenClaw diagnostics events such as:
+
+- `session.state`
+- `message.queued`
+- `model.usage`
+- `message.processed`
+- `webhook.received`
+- `webhook.error`
+- `session.stuck`
+- `queue.lane.enqueue`
+
 ## Trace Notes
 
 - Main trace hierarchy is `openclaw_request -> user_message -> main -> skill:* -> skill_call:* -> tool:* / provider:model -> assistant_message`
@@ -240,6 +269,7 @@ Check the following in order:
 - Whether `headers` match the receiver authentication requirements
 - Whether the plugin is enabled in `openclaw.json`
 - Whether `gateway.log` contains the exporter enabled / export succeeded / export failed log lines
+- If validating `otel-logs`, confirm `logsEnabled=true`
 
 ### 2. Incomplete skill names
 
@@ -261,6 +291,9 @@ Do not place these fields directly at the plugin entry top level:
 
 - `endpoint`
 - `tracePath`
+- `metricsPath`
+- `logsEnabled`
+- `logsPath`
 - `headers`
 - `agentProvider`
 - `globalTags`
@@ -273,7 +306,7 @@ Do not place these fields directly at the plugin entry top level:
 
 - `index.ts`: plugin entry
 - `src/config.ts`: config parsing
-- `src/service.ts`: trace and metrics generation/export logic
+- `src/service.ts`: trace, metrics, and logs generation/export logic
 - `src/trace-runtime.js`: runtime helper functions
 - `openclaw.plugin.json`: plugin manifest
 - `test/trace-runtime.test.mjs`: runtime tests

@@ -57,7 +57,7 @@ function countExportItems(signal: "trace" | "metric", items: unknown): number | 
 function withExportLogging<T extends { export: (items: any, callback: (result: any) => void) => void }>(
   exporter: T,
   options: {
-    signal: "trace" | "metric";
+    signal: "trace" | "metric" | "log";
     url: string;
     logger?: OtelLogger;
   },
@@ -103,9 +103,12 @@ export async function startOtelBootstrap(
 ): Promise<OtelBootstrapResult> {
   const require = createRequire(import.meta.url);
   const { context, metrics, trace, SpanKind, SpanStatusCode } = require("@opentelemetry/api");
+  const { SeverityNumber } = require("@opentelemetry/api-logs");
+  const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-proto");
   const { OTLPMetricExporter } = require("@opentelemetry/exporter-metrics-otlp-proto");
   const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-proto");
   const { resourceFromAttributes } = require("@opentelemetry/resources");
+  const { BatchLogRecordProcessor, LoggerProvider } = require("@opentelemetry/sdk-logs");
   const { NodeSDK } = require("@opentelemetry/sdk-node");
   const { PeriodicExportingMetricReader } = require("@opentelemetry/sdk-metrics");
   const {
@@ -115,7 +118,8 @@ export async function startOtelBootstrap(
   const { ATTR_SERVICE_NAME } = require("@opentelemetry/semantic-conventions");
 
   const traceUrl = resolveOtelUrl(config.endpoint, config.tracePath);
-  const metricUrl = resolveOtelUrl(config.endpoint, "v1/metrics");
+  const metricUrl = resolveOtelUrl(config.endpoint, config.metricsPath);
+  const logsUrl = resolveOtelUrl(config.endpoint, config.logsPath);
 
   const traceExporter = withExportLogging(new OTLPTraceExporter({
     url: traceUrl,
@@ -133,6 +137,16 @@ export async function startOtelBootstrap(
     url: metricUrl,
     logger,
   });
+  const logExporter = config.logsEnabled
+    ? withExportLogging(new OTLPLogExporter({
+        url: logsUrl,
+        ...(config.headers ? { headers: config.headers } : {}),
+      }), {
+        signal: "log",
+        url: logsUrl,
+        logger,
+      })
+    : undefined;
 
   const resource = resourceFromAttributes(compactResourceAttrs({
     [ATTR_SERVICE_NAME]: config.serviceName,
@@ -159,6 +173,13 @@ export async function startOtelBootstrap(
         }
       : {}),
   });
+  const loggerProvider = config.logsEnabled
+    ? new LoggerProvider({
+        resource,
+        processors: logExporter ? [new BatchLogRecordProcessor(logExporter)] : [],
+      })
+    : undefined;
+  const diagnosticsLogger = loggerProvider?.getLogger("openclaw-otel-plugin");
 
   await sdk.start();
 
@@ -250,12 +271,25 @@ export async function startOtelBootstrap(
   };
 
   return {
-    sdk,
+    sdk: {
+      shutdown: async () => {
+        const results = await Promise.allSettled([
+          sdk.shutdown(),
+          loggerProvider?.shutdown(),
+        ]);
+        const rejected = results.find((item) => item.status === "rejected");
+        if (rejected && rejected.status === "rejected") {
+          throw rejected.reason;
+        }
+      },
+    },
     context,
     trace,
     tracer,
     SpanKind,
     SpanStatusCode,
+    SeverityNumber,
+    diagnosticsLogger,
     instruments,
   };
 }

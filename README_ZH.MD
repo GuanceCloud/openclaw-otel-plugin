@@ -1,6 +1,6 @@
 # openclaw-otel-plugin
 
-`openclaw-otel-plugin` 是一个 OpenClaw 可观测性导出插件，用于将 OpenClaw 的诊断事件转换为面向会话的 trace，并导出补充 metrics，通过 `OTLP HTTP/protobuf` 上报到任意兼容的 OpenTelemetry 接收端。
+`openclaw-otel-plugin` 是一个 OpenClaw 可观测性导出插件，用于将 OpenClaw 的诊断事件转换为面向会话的 trace，并导出补充 metrics 与 diagnostics logs，通过 `OTLP HTTP/protobuf` 上报到任意兼容的 OpenTelemetry 接收端。
 
 ## 功能说明
 
@@ -12,6 +12,7 @@
 - 补充 OpenClaw 相关属性，便于在链路平台中排查问题
 - 导出补充指标，例如请求数、请求时长、tool 调用数、tool 错误数、tool 时长、skill 命中数、model 调用数
 - 镜像最新 OpenClaw 官方 `openclaw.*` diagnostics metrics，例如 `openclaw.tokens`、`openclaw.cost.usd`、`openclaw.message.queued`、`openclaw.queue.depth`
+- 镜像 OpenClaw diagnostics 事件到 OTEL logs，例如 `session.state`、`message.processed`、`webhook.error`
 
 ## 环境要求
 
@@ -71,6 +72,9 @@ npm run build
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/traces",
+          "metricsPath": "v1/write/otel-metrics",
+          "logsEnabled": true,
+          "logsPath": "v1/write/otel-logs",
           "headers": {
             "Authorization": "Bearer <token>",
             "X-Env": "prod"
@@ -99,11 +103,15 @@ npm run build
 
 - `flushIntervalMs` 同时作为 OTLP metrics 的周期导出间隔
 - `tracePath` 默认为 `v1/traces`，可按需改成 `v1/llms` 等其他路由
-- `headers` 可用于给 trace 和 metrics 上报统一附加 HTTP Header
+- `metricsPath` 默认为 `v1/metrics`，可改成 `/v1/write/otel-metrics` 这类自定义路由
+- `logsEnabled` 默认关闭，只有显式设置为 `true` 才会上报 `otel-logs`
+- `logsPath` 默认为 `v1/logs`，用于上报 OpenClaw diagnostics 日志，可改成 `/v1/write/otel-logs`
+- `headers` 可用于给 trace、metrics 和 logs 上报统一附加 HTTP Header
 - `agentProvider` 默认为 `openclaw`，会作为全局资源标签 `agent_provider` 附加到 trace 和 metrics
 - `globalTags` 用于追加固定全局标签，适合配置团队、集群、环境标识等
 - traces 走 `endpoint + / + tracePath`
-- metrics 走 `/otel/v1/metrics`
+- metrics 走 `endpoint + / + metricsPath`
+- logs 走 `endpoint + / + logsPath`
 
 默认会自动附加这些全局标签：
 
@@ -184,14 +192,24 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 
 ```text
 [otel-plugin] trace exporter enabled (http/protobuf) -> http://localhost:4318/v1/traces
+[otel-plugin] metric exporter enabled (http/protobuf) -> http://localhost:4318/v1/write/otel-metrics
+[otel-plugin] log exporter disabled
+```
+
+如果开启日志上报：
+
+```text
+[otel-plugin] log exporter enabled (http/protobuf) -> http://localhost:4318/v1/write/otel-logs
 [otel-plugin] trace export succeeded -> http://localhost:4318/v1/traces (8ms, items=3)
-[otel-plugin] metric export succeeded -> http://localhost:4318/v1/metrics (5ms, items=12)
+[otel-plugin] metric export succeeded -> http://localhost:4318/v1/write/otel-metrics (5ms, items=12)
+[otel-plugin] log export succeeded -> http://localhost:4318/v1/write/otel-logs (4ms, items=6)
 ```
 
 如果上报失败，也会记录错误日志，例如：
 
 ```text
 [otel-plugin] trace export failed -> http://localhost:4318/v1/traces (13ms, items=2): 401 Unauthorized
+[otel-plugin] log export failed -> http://localhost:4318/v1/write/otel-logs (7ms, items=3): 401 Unauthorized
 ```
 
 然后在 OpenClaw 中发送一条测试消息，再到链路平台中按以下条件查询：
@@ -222,6 +240,17 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 - `openclaw.session.stuck`
 - `openclaw.run.attempt`
 
+如果接收端支持 logs，还可以在 `otel-logs` 路由里看到镜像出来的 OpenClaw diagnostics 事件日志，例如：
+
+- `session.state`
+- `message.queued`
+- `model.usage`
+- `message.processed`
+- `webhook.received`
+- `webhook.error`
+- `session.stuck`
+- `queue.lane.enqueue`
+
 ## 链路与指标说明
 
 - 主要 trace 层级为 `openclaw_request -> user_message -> main -> skill:* -> skill_call:* -> tool:* / provider:model -> assistant_message`
@@ -241,6 +270,7 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 - `headers` 是否符合接收端鉴权要求
 - 插件是否已在 `openclaw.json` 中启用
 - `gateway.log` 中是否出现 exporter enabled / export succeeded / export failed 日志
+- 如果要验证 `otel-logs`，先确认 `logsEnabled=true`
 
 ### 2. skill 名称显示不全
 
@@ -262,6 +292,9 @@ plugins.entries.openclaw-otel-plugin.config
 
 - `endpoint`
 - `tracePath`
+- `metricsPath`
+- `logsEnabled`
+- `logsPath`
 - `headers`
 - `agentProvider`
 - `globalTags`
@@ -274,7 +307,7 @@ plugins.entries.openclaw-otel-plugin.config
 
 - `index.ts`：插件入口
 - `src/config.ts`：配置解析
-- `src/service.ts`：trace 与 metrics 生成、导出逻辑
+- `src/service.ts`：trace、metrics、logs 生成与导出逻辑
 - `src/trace-runtime.js`：运行时辅助函数
 - `openclaw.plugin.json`：插件清单
 - `test/trace-runtime.test.mjs`：运行时测试

@@ -65,6 +65,8 @@ export function createOtelPluginService(
         tracer,
         SpanKind,
         SpanStatusCode,
+        SeverityNumber,
+        diagnosticsLogger,
         instruments,
       } = await startOtelBootstrap(config, runtimeMetadata, ctx.logger);
       sdk = otelSdk;
@@ -102,6 +104,40 @@ export function createOtelPluginService(
 
       const eventTimestamp = (evt: { ts?: number }): Date =>
         typeof evt.ts === "number" ? eventTime(evt.ts) : new Date();
+
+      const emitDiagnosticLog = (
+        evt: DiagnosticEventPayload,
+        attrs: Record<string, string | number | boolean | undefined>,
+        options?: {
+          body?: string;
+          severityNumber?: number;
+          severityText?: string;
+          context?: any;
+          eventName?: string;
+          exception?: unknown;
+        },
+      ) => {
+        if (!diagnosticsLogger) {
+          return;
+        }
+        const key = "sessionKey" in evt || "sessionId" in evt ? sessionIdentity(evt) : undefined;
+        const currentRun = key ? activeRuns.get(key) : undefined;
+        const currentRoot = key ? activeRoots.get(key) : undefined;
+        diagnosticsLogger.emit({
+          body: options?.body ? redactSensitiveText(options.body) : evt.type,
+          eventName: options?.eventName ?? evt.type,
+          severityNumber: options?.severityNumber,
+          severityText: options?.severityText,
+          attributes: stringAttrs(enrichWithTranscript(key, {
+            "openclaw.event.type": evt.type,
+            ...attrs,
+          })),
+          ...(options?.exception ? { exception: options.exception } : {}),
+          timestamp: eventTimestamp(evt),
+          observedTimestamp: new Date(),
+          context: options?.context ?? currentRun?.modelCtx ?? currentRun?.ctx ?? currentRoot?.ctx ?? context.active(),
+        });
+      };
 
       const finalizeRunSpans = (current: ActiveRunSpan, endTime?: Date) => {
         if (current.modelSpan) {
@@ -557,6 +593,8 @@ export function createOtelPluginService(
         loadSessionSnapshot,
         enrichWithTranscript,
         createChildSpan,
+        emitDiagnosticLog,
+        SeverityNumber,
         getActiveSkillCtx,
         ensureTranscriptSkillSpans,
         emitSyntheticModelSpan,
@@ -568,6 +606,16 @@ export function createOtelPluginService(
       ctx.logger.info(
         `[otel-plugin] trace exporter enabled (${config.protocol}) -> ${resolveOtelUrl(config.endpoint, config.tracePath)}`,
       );
+      ctx.logger.info(
+        `[otel-plugin] metric exporter enabled (${config.protocol}) -> ${resolveOtelUrl(config.endpoint, config.metricsPath)}`,
+      );
+      if (config.logsEnabled) {
+        ctx.logger.info(
+          `[otel-plugin] log exporter enabled (${config.protocol}) -> ${resolveOtelUrl(config.endpoint, config.logsPath)}`,
+        );
+      } else {
+        ctx.logger.info("[otel-plugin] log exporter disabled");
+      }
     },
     async stop() {
       unsubscribeDiagnostic?.();

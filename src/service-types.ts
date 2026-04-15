@@ -166,5 +166,7 @@ export type OtelBootstrapResult = {
   tracer: any;
   SpanKind: any;
   SpanStatusCode: any;
+  SeverityNumber: any;
+  diagnosticsLogger: any;
   instruments: MetricInstruments;
 };

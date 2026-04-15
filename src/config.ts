@@ -2,6 +2,9 @@ export type OtelPluginConfig = {
   enabled: boolean;
   endpoint: string;
   tracePath: string;
+  metricsPath: string;
+  logsEnabled: boolean;
+  logsPath: string;
   agentProvider: string;
   globalTags?: Record<string, string | number | boolean>;
   protocol: "http/protobuf";
@@ -15,6 +18,8 @@ export type OtelPluginConfig = {
 
 const DEFAULT_ENDPOINT = "http://127.0.0.1:9529/otel";
 const DEFAULT_TRACE_PATH = "v1/traces";
+const DEFAULT_METRICS_PATH = "v1/metrics";
+const DEFAULT_LOGS_PATH = "v1/logs";
 const DEFAULT_AGENT_PROVIDER = "openclaw";
 const DEFAULT_SERVICE_NAME = "openclaw-otel-plugin";
 const DEFAULT_FLUSH_INTERVAL_MS = 15000;
@@ -98,6 +103,15 @@ export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {
     enabled: raw.enabled !== false,
     endpoint: normalizeEndpoint(typeof raw.endpoint === "string" ? raw.endpoint : undefined),
     tracePath: normalizeSignalPath(typeof raw.tracePath === "string" ? raw.tracePath : undefined, DEFAULT_TRACE_PATH),
+    metricsPath: normalizeSignalPath(
+      typeof raw.metricsPath === "string" ? raw.metricsPath : undefined,
+      DEFAULT_METRICS_PATH,
+    ),
+    logsEnabled: raw.logsEnabled === true,
+    logsPath: normalizeSignalPath(
+      typeof raw.logsPath === "string" ? raw.logsPath : undefined,
+      DEFAULT_LOGS_PATH,
+    ),
     agentProvider: normalizeNonEmptyString(
       typeof raw.agentProvider === "string" ? raw.agentProvider : undefined,
       DEFAULT_AGENT_PROVIDER,

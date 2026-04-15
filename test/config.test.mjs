@@ -48,3 +48,24 @@ test("resolveOtelPluginConfig accepts otlp headers", () => {
     "X-DataKit-UUID": "datakit-1",
   });
 });
+
+test("resolveOtelPluginConfig accepts custom metrics and logs paths", () => {
+  const config = resolveOtelPluginConfig({
+    metricsPath: "/v1/write/otel-metrics/",
+    logsPath: "/v1/write/otel-logs/",
+  });
+
+  assert.equal(config.metricsPath, "v1/write/otel-metrics");
+  assert.equal(config.logsPath, "v1/write/otel-logs");
+  assert.equal(config.logsEnabled, false);
+});
+
+test("resolveOtelPluginConfig keeps logs disabled by default and allows enabling it", () => {
+  const disabledConfig = resolveOtelPluginConfig({});
+  const enabledConfig = resolveOtelPluginConfig({
+    logsEnabled: true,
+  });
+
+  assert.equal(disabledConfig.logsEnabled, false);
+  assert.equal(enabledConfig.logsEnabled, true);
+});
