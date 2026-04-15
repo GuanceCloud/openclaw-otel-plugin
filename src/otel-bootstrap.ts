@@ -3,6 +3,12 @@ import type { OtelPluginConfig } from "./config.js";
 import type { MetricInstruments, OtelBootstrapResult, RuntimeMetadata } from "./service-types.js";
 import { resolveOtelUrl } from "./trace-runtime.js";
 
+type OtelLogger = {
+  info?: (message: string) => void;
+  warn?: (message: string) => void;
+  error?: (message: string) => void;
+};
+
 function compactResourceAttrs(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean> {
@@ -11,9 +17,89 @@ function compactResourceAttrs(
   ) as Record<string, string | number | boolean>;
 }
 
+function formatExportError(error: unknown): string {
+  if (!error) {
+    return "unknown";
+  }
+  if (error instanceof Error) {
+    return error.message || error.name;
+  }
+  return String(error);
+}
+
+function countExportItems(signal: "trace" | "metric", items: unknown): number | undefined {
+  if (Array.isArray(items)) {
+    return items.length;
+  }
+  if (signal !== "metric" || !items || typeof items !== "object") {
+    return undefined;
+  }
+  const resourceMetrics = (items as { resourceMetrics?: unknown }).resourceMetrics;
+  if (!Array.isArray(resourceMetrics)) {
+    return undefined;
+  }
+  let count = 0;
+  for (const resourceMetric of resourceMetrics) {
+    const scopeMetrics = (resourceMetric as { scopeMetrics?: unknown }).scopeMetrics;
+    if (!Array.isArray(scopeMetrics)) {
+      continue;
+    }
+    for (const scopeMetric of scopeMetrics) {
+      const metrics = (scopeMetric as { metrics?: unknown }).metrics;
+      if (Array.isArray(metrics)) {
+        count += metrics.length;
+      }
+    }
+  }
+  return count;
+}
+
+function withExportLogging<T extends { export: (items: any, callback: (result: any) => void) => void }>(
+  exporter: T,
+  options: {
+    signal: "trace" | "metric";
+    url: string;
+    logger?: OtelLogger;
+  },
+): T {
+  const originalExport = exporter.export.bind(exporter);
+  exporter.export = (items: any, callback: (result: any) => void) => {
+    const startedAt = Date.now();
+    const itemCount = countExportItems(options.signal, items);
+    try {
+      originalExport(items, (result: any) => {
+        const durationMs = Date.now() - startedAt;
+        const suffix = ` -> ${options.url} (${durationMs}ms${
+          itemCount === undefined ? "" : `, items=${itemCount}`
+        })`;
+        if (result?.code === 0) {
+          options.logger?.info?.(`[otel-plugin] ${options.signal} export succeeded${suffix}`);
+        } else {
+          options.logger?.error?.(
+            `[otel-plugin] ${options.signal} export failed${suffix}: ${
+              formatExportError(result?.error)
+            }`,
+          );
+        }
+        callback(result);
+      });
+    } catch (error) {
+      const durationMs = Date.now() - startedAt;
+      options.logger?.error?.(
+        `[otel-plugin] ${options.signal} export failed before callback -> ${options.url} (${durationMs}ms): ${
+          formatExportError(error)
+        }`,
+      );
+      throw error;
+    }
+  };
+  return exporter;
+}
+
 export async function startOtelBootstrap(
   config: OtelPluginConfig,
   runtimeMetadata?: RuntimeMetadata,
+  logger?: OtelLogger,
 ): Promise<OtelBootstrapResult> {
   const require = createRequire(import.meta.url);
   const { context, metrics, trace, SpanKind, SpanStatusCode } = require("@opentelemetry/api");
@@ -28,13 +114,24 @@ export async function startOtelBootstrap(
   } = require("@opentelemetry/sdk-trace-base");
   const { ATTR_SERVICE_NAME } = require("@opentelemetry/semantic-conventions");
 
-  const traceExporter = new OTLPTraceExporter({
-    url: resolveOtelUrl(config.endpoint, config.tracePath),
+  const traceUrl = resolveOtelUrl(config.endpoint, config.tracePath);
+  const metricUrl = resolveOtelUrl(config.endpoint, "v1/metrics");
+
+  const traceExporter = withExportLogging(new OTLPTraceExporter({
+    url: traceUrl,
     ...(config.headers ? { headers: config.headers } : {}),
+  }), {
+    signal: "trace",
+    url: traceUrl,
+    logger,
   });
-  const metricExporter = new OTLPMetricExporter({
-    url: resolveOtelUrl(config.endpoint, "v1/metrics"),
+  const metricExporter = withExportLogging(new OTLPMetricExporter({
+    url: metricUrl,
     ...(config.headers ? { headers: config.headers } : {}),
+  }), {
+    signal: "metric",
+    url: metricUrl,
+    logger,
   });
 
   const resource = resourceFromAttributes(compactResourceAttrs({

@@ -116,23 +116,6 @@ function promoteAlias(
   }
 }
 
-function copyAlias(
-  target: Record<string, string | number | boolean | undefined>,
-  aliasKey: string,
-  ...sourceKeys: string[]
-) {
-  if (target[aliasKey] !== undefined && target[aliasKey] !== "") {
-    return;
-  }
-  for (const sourceKey of sourceKeys) {
-    const value = target[sourceKey];
-    if (value !== undefined && value !== "") {
-      target[aliasKey] = value;
-      return;
-    }
-  }
-}
-
 function promotePrefixedKeys(
   target: Record<string, string | number | boolean | undefined>,
   prefix: string,
@@ -169,8 +152,6 @@ function withCanonicalAliases(
   promoteAlias(next, "input_tokens", "openclaw.tokens.input");
   promoteAlias(next, "output_tokens", "openclaw.tokens.output");
   promoteAlias(next, "total_tokens", "openclaw.tokens.total");
-  copyAlias(next, "target_resource", "tool_target");
-  copyAlias(next, "call_result", "tool_outcome");
   promoteAlias(next, "skill_call_id", "openclaw.skill.call_id");
   promoteAlias(next, "skill_name", "openclaw.skill.name");
   promoteAlias(next, "skill_type", "openclaw.skill.kind");
@@ -397,9 +378,6 @@ export function extractToolResultStatus(result: unknown): string | undefined {
   }
   if (typeof result.status === "string") {
     return result.status;
-  }
-  if (typeof result.outcome === "string") {
-    return result.outcome;
   }
   return undefined;
 }

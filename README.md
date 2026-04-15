@@ -70,6 +70,10 @@ Example configuration:
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/traces",
+          "headers": {
+            "Authorization": "Bearer <token>",
+            "X-Env": "prod"
+          },
           "agentProvider": "openclaw",
           "globalTags": {
             "team": "apm",
@@ -94,6 +98,7 @@ Notes:
 
 - `flushIntervalMs` is also used as the OTLP metrics export interval
 - `tracePath` defaults to `v1/traces` and can be changed to routes such as `v1/llms`
+- `headers` can be used to attach fixed HTTP headers to both trace and metrics exports
 - `agentProvider` defaults to `openclaw` and is attached to traces and metrics as the global resource tag `agent_provider`
 - `globalTags` is for fixed global tags such as team, cluster, or environment markers
 - Traces are exported to `endpoint + / + tracePath`
@@ -178,6 +183,14 @@ You should see something like:
 
 ```text
 [otel-plugin] trace exporter enabled (http/protobuf) -> http://localhost:4318/v1/traces
+[otel-plugin] trace export succeeded -> http://localhost:4318/v1/traces (8ms, items=3)
+[otel-plugin] metric export succeeded -> http://localhost:4318/v1/metrics (5ms, items=12)
+```
+
+If export fails, an error log is also emitted, for example:
+
+```text
+[otel-plugin] trace export failed -> http://localhost:4318/v1/traces (13ms, items=2): 401 Unauthorized
 ```
 
 Then send a test message in OpenClaw and query in your tracing platform with:
@@ -224,8 +237,9 @@ Check the following in order:
 
 - Whether the OTLP receiver is available
 - Whether `endpoint` is configured correctly
+- Whether `headers` match the receiver authentication requirements
 - Whether the plugin is enabled in `openclaw.json`
-- Whether `gateway.log` contains the exporter enabled log line
+- Whether `gateway.log` contains the exporter enabled / export succeeded / export failed log lines
 
 ### 2. Incomplete skill names
 
@@ -247,6 +261,7 @@ Do not place these fields directly at the plugin entry top level:
 
 - `endpoint`
 - `tracePath`
+- `headers`
 - `agentProvider`
 - `globalTags`
 - `serviceName`

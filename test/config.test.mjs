@@ -32,3 +32,19 @@ test("resolveOtelPluginConfig accepts fixed global tags", () => {
     priority: 3,
   });
 });
+
+test("resolveOtelPluginConfig accepts otlp headers", () => {
+  const config = resolveOtelPluginConfig({
+    headers: {
+      Authorization: " Bearer token ",
+      "X-DataKit-UUID": "datakit-1",
+      ignored: "",
+      numeric: 1,
+    },
+  });
+
+  assert.deepEqual(config.headers, {
+    Authorization: "Bearer token",
+    "X-DataKit-UUID": "datakit-1",
+  });
+});

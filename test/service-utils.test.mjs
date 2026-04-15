@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveSpanWindow, stringAttrs } from "../dist/src/service-utils.js";
+import { extractToolResultStatus, resolveSpanWindow, stringAttrs } from "../dist/src/service-utils.js";
 
 test("resolveSpanWindow backfills start time from event end time", () => {
   const { startTime, endTime, effectiveDurationMs } = resolveSpanWindow(2000, 300);
@@ -56,8 +56,6 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.tool_loop_level, "critical");
   assert.equal(attrs.tool_target, "/tmp/demo.txt");
   assert.equal(attrs.tool_outcome, "completed");
-  assert.equal(attrs.target_resource, "/tmp/demo.txt");
-  assert.equal(attrs.call_result, "completed");
   assert.equal(attrs.skill_call_id, "skill-call-1");
   assert.equal(attrs.skill_name, "monitor");
   assert.equal(attrs.skill_type, "call");
@@ -66,4 +64,11 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal("openclaw.sessionId" in attrs, false);
   assert.equal("openclaw.tool.call_id" in attrs, false);
   assert.equal("openclaw.skill.call_id" in attrs, false);
+});
+
+test("extractToolResultStatus only uses explicit status fields", () => {
+  assert.equal(extractToolResultStatus({ details: { status: "blocked" } }), "blocked");
+  assert.equal(extractToolResultStatus({ status: "timeout" }), "timeout");
+  assert.equal(extractToolResultStatus({ outcome: "error" }), undefined);
+  assert.equal(extractToolResultStatus({}), undefined);
 });

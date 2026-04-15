@@ -66,7 +66,7 @@ export function createOtelPluginService(
         SpanKind,
         SpanStatusCode,
         instruments,
-      } = await startOtelBootstrap(config, runtimeMetadata);
+      } = await startOtelBootstrap(config, runtimeMetadata, ctx.logger);
       sdk = otelSdk;
       sessionStore.refreshSessionsIndex();
 

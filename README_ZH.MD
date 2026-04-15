@@ -71,6 +71,10 @@ npm run build
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/traces",
+          "headers": {
+            "Authorization": "Bearer <token>",
+            "X-Env": "prod"
+          },
           "agentProvider": "openclaw",
           "globalTags": {
             "team": "apm",
@@ -95,6 +99,7 @@ npm run build
 
 - `flushIntervalMs` 同时作为 OTLP metrics 的周期导出间隔
 - `tracePath` 默认为 `v1/traces`，可按需改成 `v1/llms` 等其他路由
+- `headers` 可用于给 trace 和 metrics 上报统一附加 HTTP Header
 - `agentProvider` 默认为 `openclaw`，会作为全局资源标签 `agent_provider` 附加到 trace 和 metrics
 - `globalTags` 用于追加固定全局标签，适合配置团队、集群、环境标识等
 - traces 走 `endpoint + / + tracePath`
@@ -179,6 +184,14 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 
 ```text
 [otel-plugin] trace exporter enabled (http/protobuf) -> http://localhost:4318/v1/traces
+[otel-plugin] trace export succeeded -> http://localhost:4318/v1/traces (8ms, items=3)
+[otel-plugin] metric export succeeded -> http://localhost:4318/v1/metrics (5ms, items=12)
+```
+
+如果上报失败，也会记录错误日志，例如：
+
+```text
+[otel-plugin] trace export failed -> http://localhost:4318/v1/traces (13ms, items=2): 401 Unauthorized
 ```
 
 然后在 OpenClaw 中发送一条测试消息，再到链路平台中按以下条件查询：
@@ -225,8 +238,9 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 
 - OTLP 接收端是否可用
 - `endpoint` 配置是否正确
+- `headers` 是否符合接收端鉴权要求
 - 插件是否已在 `openclaw.json` 中启用
-- `gateway.log` 中是否出现 exporter enabled 日志
+- `gateway.log` 中是否出现 exporter enabled / export succeeded / export failed 日志
 
 ### 2. skill 名称显示不全
 
@@ -248,6 +262,7 @@ plugins.entries.openclaw-otel-plugin.config
 
 - `endpoint`
 - `tracePath`
+- `headers`
 - `agentProvider`
 - `globalTags`
 - `serviceName`

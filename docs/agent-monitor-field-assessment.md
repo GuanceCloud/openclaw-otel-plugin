@@ -64,10 +64,10 @@
 | `openclaw.tool.loop.paired_tool` | `tool_loop_paired_tool` |
 | `openclaw.tool.loop.message` | `tool_loop_message` |
 
-同时保留两组兼容字段：
+说明：
 
-- `tool_target` 同时可派生为 `target_resource`
-- `tool_outcome` 同时可派生为 `call_result`
+- `tool_outcome` 表示插件对本次工具调用的统一结果判定，当前仅区分 `completed` / `error`
+- `tool_result_status` 仅提取工具返回体中的显式状态字段，如 `result.details.status` 或 `result.status`，不再回退 `result.outcome`
 
 ### Skill 映射
 
@@ -104,8 +104,8 @@
 | `tool_call_id` | tool span attr | `tool_call_id` | 直接可取 |
 | `tool_name` | tool span attr | `tool_name` | 直接可取 |
 | `call_latency_ms` | tool span duration | tool span duration | 不必重复存字段 |
-| `call_result` | tool span attr | `call_result` / `tool_outcome` | 直接可取 |
-| `target_resource` | tool span attr | `target_resource` / `tool_target` | 直接可取 |
+| `tool_outcome` | tool span attr | `tool_outcome` | 直接可取 |
+| `tool_target` | tool span attr | `tool_target` | 直接可取 |
 | `final_status` | root/run attr | `final_status` | 直接可取 |
 | `agent_name` | resource | `agent_name` | 已补全局 tag |
 | `agent_runtime` | resource | `runtime_environment` | 已补全局 tag，但语义更接近 runtime lane |
@@ -244,7 +244,7 @@
 最适合当前插件的一期字段方案：
 
 - 链路直接取：
-  `trace_id`、`span_id`、`parent_span_id`、`service.name`、`session_id`、`session_key`、`channel`、`model_provider`、`model_name`、`input_tokens`、`output_tokens`、`total_tokens`、`tool_call_id`、`tool_name`、`tool_phase`、`tool_result_status`、`call_result`、`target_resource`、`skill_call_id`、`skill_name`、`skill_type`、`skill_source`、`final_status`
+  `trace_id`、`span_id`、`parent_span_id`、`service.name`、`session_id`、`session_key`、`channel`、`model_provider`、`model_name`、`input_tokens`、`output_tokens`、`total_tokens`、`tool_call_id`、`tool_name`、`tool_phase`、`tool_result_status`、`tool_outcome`、`tool_target`、`skill_call_id`、`skill_name`、`skill_type`、`skill_source`、`final_status`
 - 全局 tag 补：
   `agent_provider`、`agent_version`、`runtime_environment`、`agent_name`、`deployment.environment`、`app_id`、`app_name`、`agent_id`、`agent_type`、`agent_source`
 - 平台 enrich：
