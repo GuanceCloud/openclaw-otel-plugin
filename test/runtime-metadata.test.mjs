@@ -13,7 +13,7 @@ test("resolveRuntimeMetadata reads runtime environment and agent name from sessi
   fs.writeFileSync(
     path.join(sessionsDir, "sessions.json"),
     JSON.stringify({
-      "agent:main:main": {
+      "agent:main:feishu:direct:ou_8f4b1d1bb3cd1cedf6003669dea4b2bf": {
         sessionId: "s1",
         sessionFile: "/tmp/s1.jsonl",
       },
@@ -23,6 +23,6 @@ test("resolveRuntimeMetadata reads runtime environment and agent name from sessi
   const metadata = resolveRuntimeMetadata(stateDir);
 
   assert.equal(metadata.runtimeEnvironment, "main");
-  assert.equal(metadata.agentName, "main");
+  assert.equal(metadata.agentName, "feishu");
   assert.ok(typeof metadata.openclawVersion === "string" && metadata.openclawVersion.length > 0);
 });

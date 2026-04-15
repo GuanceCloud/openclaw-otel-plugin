@@ -22,7 +22,7 @@ test("resolveSpanWindow keeps instant events at the same timestamp", () => {
 test("stringAttrs maps openclaw fields to canonical aliases", () => {
   const attrs = stringAttrs({
     "openclaw.sessionId": "session-1",
-    "openclaw.sessionKey": "agent:main:main",
+    "openclaw.sessionKey": "agent:main:feishu:direct:ou_8f4b1d1bb3cd1cedf6003669dea4b2bf",
     "openclaw.channel": "webchat",
     "openclaw.provider": "doubao",
     "openclaw.model": "ark-code-latest",
@@ -43,7 +43,12 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   });
 
   assert.equal(attrs.session_id, "session-1");
-  assert.equal(attrs.session_key, "agent:main:main");
+  assert.equal(attrs.session_key, "agent:main:feishu:direct:ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
+  assert.equal(attrs.session_namespace, "agent");
+  assert.equal(attrs.session_runtime, "main");
+  assert.equal(attrs.session_agent, "feishu");
+  assert.equal(attrs.session_scope, "direct");
+  assert.equal(attrs.session_target_id, "ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
   assert.equal(attrs.channel, "webchat");
   assert.equal(attrs.model_provider, "doubao");
   assert.equal(attrs.model_name, "ark-code-latest");

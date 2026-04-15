@@ -8,6 +8,7 @@ import {
   extractMentionedSkillNames,
   extractToolTarget,
   inferSkillNameFromToolIdentity,
+  parseSessionKey,
   readJsonLines,
   uniqStrings,
 } from "./service-utils.js";
@@ -315,17 +316,10 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
 }
 
 function parseAgentKey(value: string | undefined): { runtimeEnvironment?: string; agentName?: string } {
-  const normalized = value?.trim();
-  if (!normalized) {
-    return {};
-  }
-  const match = normalized.match(/^agent:([^:]+):([^:]+)$/);
-  if (!match) {
-    return {};
-  }
+  const parsed = parseSessionKey(value);
   return {
-    runtimeEnvironment: match[1]?.trim() || undefined,
-    agentName: match[2]?.trim() || undefined,
+    runtimeEnvironment: parsed.sessionRuntime,
+    agentName: parsed.sessionAgent,
   };
 }
 

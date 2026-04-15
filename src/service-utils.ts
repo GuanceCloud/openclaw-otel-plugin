@@ -90,6 +90,33 @@ export function sessionIdentity(evt: {
   return evt.sessionKey ?? evt.sessionId;
 }
 
+export function parseSessionKey(
+  value: string | undefined,
+): {
+  sessionNamespace?: string;
+  sessionRuntime?: string;
+  sessionAgent?: string;
+  sessionScope?: string;
+  sessionTargetId?: string;
+} {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return {};
+  }
+  const segments = normalized.split(":");
+  if (segments.length < 3 || segments[0] !== "agent") {
+    return {};
+  }
+  const [, sessionRuntime, sessionAgent, sessionScope, ...rest] = segments;
+  return {
+    sessionNamespace: "agent",
+    sessionRuntime: sessionRuntime?.trim() || undefined,
+    sessionAgent: sessionAgent?.trim() || undefined,
+    sessionScope: sessionScope?.trim() || undefined,
+    sessionTargetId: rest.join(":").trim() || undefined,
+  };
+}
+
 function promoteAlias(
   target: Record<string, string | number | boolean | undefined>,
   aliasKey: string,
@@ -144,6 +171,24 @@ function withCanonicalAliases(
   promotePrefixedKeys(next, "openclaw.tool.", "tool_");
   promoteAlias(next, "session_id", "openclaw.sessionId");
   promoteAlias(next, "session_key", "openclaw.sessionKey");
+  const sessionKeyParts = parseSessionKey(
+    typeof next.session_key === "string" ? next.session_key : undefined,
+  );
+  if (sessionKeyParts.sessionNamespace && (next.session_namespace === undefined || next.session_namespace === "")) {
+    next.session_namespace = sessionKeyParts.sessionNamespace;
+  }
+  if (sessionKeyParts.sessionRuntime && (next.session_runtime === undefined || next.session_runtime === "")) {
+    next.session_runtime = sessionKeyParts.sessionRuntime;
+  }
+  if (sessionKeyParts.sessionAgent && (next.session_agent === undefined || next.session_agent === "")) {
+    next.session_agent = sessionKeyParts.sessionAgent;
+  }
+  if (sessionKeyParts.sessionScope && (next.session_scope === undefined || next.session_scope === "")) {
+    next.session_scope = sessionKeyParts.sessionScope;
+  }
+  if (sessionKeyParts.sessionTargetId && (next.session_target_id === undefined || next.session_target_id === "")) {
+    next.session_target_id = sessionKeyParts.sessionTargetId;
+  }
   promoteAlias(next, "channel", "openclaw.channel", "openclaw.session.lastChannel");
   promoteAlias(next, "source_app", "openclaw.session.origin.provider");
   promoteAlias(next, "entry_point", "openclaw.session.origin.surface");

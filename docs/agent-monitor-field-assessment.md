@@ -29,6 +29,7 @@
 | --- | --- |
 | `openclaw.sessionId` | `session_id` |
 | `openclaw.sessionKey` | `session_key` |
+| `openclaw.sessionKey` 结构化拆分 | `session_namespace` / `session_runtime` / `session_agent` / `session_scope` / `session_target_id` |
 | `openclaw.channel` / `openclaw.session.lastChannel` | `channel` |
 | `openclaw.session.origin.provider` | `source_app` |
 | `openclaw.session.origin.surface` | `entry_point` |
@@ -91,6 +92,11 @@
 | `service_name` | resource | `service.name` | 直接可取，不要重复塞自定义字段 |
 | `session_id` | span attr | `session_id` | 直接可取 |
 | `session_key` | span attr | `session_key` | 直接可取 |
+| `session_namespace` | span attr | `session_namespace` | 可由 `session_key` 结构化提取 |
+| `session_runtime` | span attr | `session_runtime` | 可由 `session_key` 结构化提取 |
+| `session_agent` | span attr | `session_agent` | 可由 `session_key` 结构化提取 |
+| `session_scope` | span attr | `session_scope` | 可由 `session_key` 结构化提取 |
+| `session_target_id` | span attr | `session_target_id` | 可由 `session_key` 结构化提取 |
 | `channel` | span attr | `channel` | 直接可取 |
 | `source_app / origin.provider` | span attr | `source_app` | 直接可取 |
 | `entry_point` | span attr | `entry_point` | 当前够用 |
@@ -244,7 +250,7 @@
 最适合当前插件的一期字段方案：
 
 - 链路直接取：
-  `trace_id`、`span_id`、`parent_span_id`、`service.name`、`session_id`、`session_key`、`channel`、`model_provider`、`model_name`、`input_tokens`、`output_tokens`、`total_tokens`、`tool_call_id`、`tool_name`、`tool_phase`、`tool_result_status`、`tool_outcome`、`tool_target`、`skill_call_id`、`skill_name`、`skill_type`、`skill_source`、`final_status`
+  `trace_id`、`span_id`、`parent_span_id`、`service.name`、`session_id`、`session_key`、`session_namespace`、`session_runtime`、`session_agent`、`session_scope`、`session_target_id`、`channel`、`model_provider`、`model_name`、`input_tokens`、`output_tokens`、`total_tokens`、`tool_call_id`、`tool_name`、`tool_phase`、`tool_result_status`、`tool_outcome`、`tool_target`、`skill_call_id`、`skill_name`、`skill_type`、`skill_source`、`final_status`
 - 全局 tag 补：
   `agent_provider`、`agent_version`、`runtime_environment`、`agent_name`、`deployment.environment`、`app_id`、`app_name`、`agent_id`、`agent_type`、`agent_source`
 - 平台 enrich：
