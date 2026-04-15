@@ -71,9 +71,9 @@ Example configuration:
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/traces",
-          "metricsPath": "v1/write/otel-metrics",
+          "metricsPath": "v1/metrics",
           "logsEnabled": true,
-          "logsPath": "v1/write/otel-logs",
+          "logsPath": "v1/logs",
           "headers": {
             "Authorization": "Bearer <token>",
             "X-Env": "prod"
@@ -102,7 +102,7 @@ Notes:
 
 - `flushIntervalMs` is also used as the OTLP metrics export interval
 - `tracePath` defaults to `v1/traces` and can be changed to routes such as `v1/llms`
-- `metricsPath` defaults to `v1/metrics` and can be changed to custom routes such as `/v1/write/otel-metrics`
+- `metricsPath` defaults to `v1/metrics` and can be changed to custom routes such as `/v1/metrics`
 - `logsEnabled` is disabled by default; OTEL logs are exported only when explicitly set to `true`
 - `logsPath` defaults to `v1/logs` and is used for OpenClaw diagnostics log export; it can be changed to routes such as `/v1/write/otel-logs`
 - `headers` can be used to attach fixed HTTP headers to trace, metrics, and logs exports
@@ -191,24 +191,24 @@ You should see something like:
 
 ```text
 [otel-plugin] trace exporter enabled (http/protobuf) -> http://localhost:4318/v1/traces
-[otel-plugin] metric exporter enabled (http/protobuf) -> http://localhost:4318/v1/write/otel-metrics
+[otel-plugin] metric exporter enabled (http/protobuf) -> http://localhost:4318/v1/metrics
 [otel-plugin] log exporter disabled
 ```
 
 If log export is enabled:
 
 ```text
-[otel-plugin] log exporter enabled (http/protobuf) -> http://localhost:4318/v1/write/otel-logs
+[otel-plugin] log exporter enabled (http/protobuf) -> http://localhost:4318/v1/logs
 [otel-plugin] trace export succeeded -> http://localhost:4318/v1/traces (8ms, items=3)
-[otel-plugin] metric export succeeded -> http://localhost:4318/v1/write/otel-metrics (5ms, items=12)
-[otel-plugin] log export succeeded -> http://localhost:4318/v1/write/otel-logs (4ms, items=6)
+[otel-plugin] metric export succeeded -> http://localhost:4318/v1/metrics (5ms, items=12)
+[otel-plugin] log export succeeded -> http://localhost:4318/v1/logs (4ms, items=6)
 ```
 
 If export fails, an error log is also emitted, for example:
 
 ```text
 [otel-plugin] trace export failed -> http://localhost:4318/v1/traces (13ms, items=2): 401 Unauthorized
-[otel-plugin] log export failed -> http://localhost:4318/v1/write/otel-logs (7ms, items=3): 401 Unauthorized
+[otel-plugin] log export failed -> http://localhost:4318/v1/logs (7ms, items=3): 401 Unauthorized
 ```
 
 Then send a test message in OpenClaw and query in your tracing platform with:

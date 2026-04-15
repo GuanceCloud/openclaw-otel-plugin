@@ -72,9 +72,9 @@ npm run build
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/traces",
-          "metricsPath": "v1/write/otel-metrics",
+          "metricsPath": "v1/metrics",
           "logsEnabled": true,
-          "logsPath": "v1/write/otel-logs",
+          "logsPath": "v1/logs",
           "headers": {
             "Authorization": "Bearer <token>",
             "X-Env": "prod"
@@ -192,24 +192,24 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 
 ```text
 [otel-plugin] trace exporter enabled (http/protobuf) -> http://localhost:4318/v1/traces
-[otel-plugin] metric exporter enabled (http/protobuf) -> http://localhost:4318/v1/write/otel-metrics
+[otel-plugin] metric exporter enabled (http/protobuf) -> http://localhost:4318/v1/metrics
 [otel-plugin] log exporter disabled
 ```
 
 如果开启日志上报：
 
 ```text
-[otel-plugin] log exporter enabled (http/protobuf) -> http://localhost:4318/v1/write/otel-logs
+[otel-plugin] log exporter enabled (http/protobuf) -> http://localhost:4318/v1/logs
 [otel-plugin] trace export succeeded -> http://localhost:4318/v1/traces (8ms, items=3)
-[otel-plugin] metric export succeeded -> http://localhost:4318/v1/write/otel-metrics (5ms, items=12)
-[otel-plugin] log export succeeded -> http://localhost:4318/v1/write/otel-logs (4ms, items=6)
+[otel-plugin] metric export succeeded -> http://localhost:4318/v1/metrics (5ms, items=12)
+[otel-plugin] log export succeeded -> http://localhost:4318/v1/logs (4ms, items=6)
 ```
 
 如果上报失败，也会记录错误日志，例如：
 
 ```text
 [otel-plugin] trace export failed -> http://localhost:4318/v1/traces (13ms, items=2): 401 Unauthorized
-[otel-plugin] log export failed -> http://localhost:4318/v1/write/otel-logs (7ms, items=3): 401 Unauthorized
+[otel-plugin] log export failed -> http://localhost:4318/v1/logs (7ms, items=3): 401 Unauthorized
 ```
 
 然后在 OpenClaw 中发送一条测试消息，再到链路平台中按以下条件查询：
