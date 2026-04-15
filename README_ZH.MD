@@ -79,17 +79,15 @@ npm run build
             "Authorization": "Bearer <token>",
             "X-Env": "prod"
           },
-          "agentProvider": "openclaw",
-          "globalTags": {
-            "team": "apm",
-            "cluster": "prod-cn"
-          },
           "protocol": "http/protobuf",
           "serviceName": "openclaw-otel-plugin",
           "flushIntervalMs": 15000,
           "rootSpanTtlMs": 600000,
           "resourceAttributes": {
-            "service.namespace": "openclaw",
+            "agent_provider": "openclaw",
+            "agent_name": "main",
+            "team": "apm",
+            "cluster": "prod-cn",
             "deployment.environment": "local"
           }
         }
@@ -107,8 +105,8 @@ npm run build
 - `logsEnabled` 默认关闭，只有显式设置为 `true` 才会上报 `otel-logs`
 - `logsPath` 默认为 `v1/logs`，用于上报 OpenClaw diagnostics 日志，可改成 `/v1/write/otel-logs`
 - `headers` 可用于给 trace、metrics 和 logs 上报统一附加 HTTP Header
-- `agentProvider` 默认为 `openclaw`，会作为全局资源标签 `agent_provider` 附加到 trace 和 metrics
-- `globalTags` 用于追加固定全局标签，适合配置团队、集群、环境标识等
+- `resourceAttributes` 是固定资源标签的主配置入口；如果要固定 `agent_name`、`agent.id`、团队、环境等标签，直接写这里
+- `agentProvider` 和 `globalTags` 仍兼容读取，但只建议用于兼容旧配置；内部会统一折叠到 `resourceAttributes`
 - traces 走 `endpoint + / + tracePath`
 - metrics 走 `endpoint + / + metricsPath`
 - logs 走 `endpoint + / + logsPath`
@@ -123,7 +121,6 @@ npm run build
 标签合并优先级：
 
 - 自动标签
-- `globalTags`
 - `resourceAttributes`
 
 自定义 trace 路由示例：
@@ -137,8 +134,8 @@ npm run build
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/llms",
-          "agentProvider": "openclaw",
-          "globalTags": {
+          "resourceAttributes": {
+            "agent_provider": "openclaw",
             "team": "apm"
           }
         }

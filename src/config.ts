@@ -5,8 +5,6 @@ export type OtelPluginConfig = {
   metricsPath: string;
   logsEnabled: boolean;
   logsPath: string;
-  agentProvider: string;
-  globalTags?: Record<string, string | number | boolean>;
   protocol: "http/protobuf";
   serviceName: string;
   headers?: Record<string, string>;
@@ -97,6 +95,20 @@ function normalizeMs(value: unknown, fallback: number): number {
   return Math.max(1000, Math.floor(value));
 }
 
+function resolveResourceAttributes(
+  raw: Record<string, unknown>,
+): Record<string, string | number | boolean> {
+  const legacyAgentProvider = normalizeNonEmptyString(
+    typeof raw.agentProvider === "string" ? raw.agentProvider : undefined,
+    DEFAULT_AGENT_PROVIDER,
+  );
+  return {
+    agent_provider: legacyAgentProvider,
+    ...(asResourceAttributes(raw.globalTags) ?? {}),
+    ...(asResourceAttributes(raw.resourceAttributes) ?? {}),
+  };
+}
+
 export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {
   const raw = asRecord(rawConfig) ?? {};
   return {
@@ -112,11 +124,6 @@ export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {
       typeof raw.logsPath === "string" ? raw.logsPath : undefined,
       DEFAULT_LOGS_PATH,
     ),
-    agentProvider: normalizeNonEmptyString(
-      typeof raw.agentProvider === "string" ? raw.agentProvider : undefined,
-      DEFAULT_AGENT_PROVIDER,
-    ),
-    globalTags: asResourceAttributes(raw.globalTags),
     protocol: "http/protobuf",
     serviceName:
       typeof raw.serviceName === "string" && raw.serviceName.trim()
@@ -126,6 +133,6 @@ export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {
     sampleRate: normalizeRate(raw.sampleRate),
     flushIntervalMs: normalizeMs(raw.flushIntervalMs, DEFAULT_FLUSH_INTERVAL_MS),
     rootSpanTtlMs: normalizeMs(raw.rootSpanTtlMs, DEFAULT_ROOT_SPAN_TTL_MS),
-    resourceAttributes: asResourceAttributes(raw.resourceAttributes),
+    resourceAttributes: resolveResourceAttributes(raw),
   };
 }

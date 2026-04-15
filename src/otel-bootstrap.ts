@@ -150,15 +150,14 @@ export async function startOtelBootstrap(
 
   const resource = resourceFromAttributes(compactResourceAttrs({
     [ATTR_SERVICE_NAME]: config.serviceName,
-    agent_provider: config.agentProvider,
     agent_version: runtimeMetadata?.openclawVersion,
     runtime_environment: runtimeMetadata?.runtimeEnvironment,
     agent_name: runtimeMetadata?.agentName,
-    ...(config.globalTags ?? {}),
     ...(config.resourceAttributes ?? {}),
   }));
 
   const sdk = new NodeSDK({
+    serviceName: config.serviceName,
     resource,
     traceExporter,
     metricReader: new PeriodicExportingMetricReader({

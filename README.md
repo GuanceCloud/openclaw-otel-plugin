@@ -78,17 +78,15 @@ Example configuration:
             "Authorization": "Bearer <token>",
             "X-Env": "prod"
           },
-          "agentProvider": "openclaw",
-          "globalTags": {
-            "team": "apm",
-            "cluster": "prod-cn"
-          },
           "protocol": "http/protobuf",
           "serviceName": "openclaw-otel-plugin",
           "flushIntervalMs": 15000,
           "rootSpanTtlMs": 600000,
           "resourceAttributes": {
-            "service.namespace": "openclaw",
+            "agent_provider": "openclaw",
+            "agent_name": "main",
+            "team": "apm",
+            "cluster": "prod-cn",
             "deployment.environment": "local"
           }
         }
@@ -106,8 +104,8 @@ Notes:
 - `logsEnabled` is disabled by default; OTEL logs are exported only when explicitly set to `true`
 - `logsPath` defaults to `v1/logs` and is used for OpenClaw diagnostics log export; it can be changed to routes such as `/v1/write/otel-logs`
 - `headers` can be used to attach fixed HTTP headers to trace, metrics, and logs exports
-- `agentProvider` defaults to `openclaw` and is attached to traces and metrics as the global resource tag `agent_provider`
-- `globalTags` is for fixed global tags such as team, cluster, or environment markers
+- `resourceAttributes` is the canonical place for fixed resource tags such as `agent_name`, `agent.id`, team, cluster, or environment markers
+- `agentProvider` and `globalTags` are still accepted for backward compatibility and are normalized into `resourceAttributes`
 - Traces are exported to `endpoint + / + tracePath`
 - Metrics are exported to `endpoint + / + metricsPath`
 - Logs are exported to `endpoint + / + logsPath`
@@ -122,7 +120,6 @@ These global tags are added automatically by default:
 Tag merge priority:
 
 - automatic tags
-- `globalTags`
 - `resourceAttributes`
 
 Custom trace route example:
@@ -136,8 +133,8 @@ Custom trace route example:
         "config": {
           "endpoint": "http://localhost:4318",
           "tracePath": "v1/llms",
-          "agentProvider": "openclaw",
-          "globalTags": {
+          "resourceAttributes": {
+            "agent_provider": "openclaw",
             "team": "apm"
           }
         }

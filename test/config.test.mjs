@@ -3,21 +3,25 @@ import assert from "node:assert/strict";
 
 import { resolveOtelPluginConfig } from "../dist/src/config.js";
 
-test("resolveOtelPluginConfig uses openclaw as the default agent provider", () => {
+test("resolveOtelPluginConfig keeps openclaw as the default agent_provider resource attribute", () => {
   const config = resolveOtelPluginConfig({});
 
-  assert.equal(config.agentProvider, "openclaw");
+  assert.deepEqual(config.resourceAttributes, {
+    agent_provider: "openclaw",
+  });
 });
 
-test("resolveOtelPluginConfig allows overriding the agent provider", () => {
+test("resolveOtelPluginConfig keeps agentProvider as a compatibility alias", () => {
   const config = resolveOtelPluginConfig({
     agentProvider: "custom-agent",
   });
 
-  assert.equal(config.agentProvider, "custom-agent");
+  assert.deepEqual(config.resourceAttributes, {
+    agent_provider: "custom-agent",
+  });
 });
 
-test("resolveOtelPluginConfig accepts fixed global tags", () => {
+test("resolveOtelPluginConfig folds globalTags into resourceAttributes", () => {
   const config = resolveOtelPluginConfig({
     globalTags: {
       team: "apm",
@@ -26,10 +30,34 @@ test("resolveOtelPluginConfig accepts fixed global tags", () => {
     },
   });
 
-  assert.deepEqual(config.globalTags, {
+  assert.deepEqual(config.resourceAttributes, {
+    agent_provider: "openclaw",
     team: "apm",
     enabled: true,
     priority: 3,
+  });
+});
+
+test("resolveOtelPluginConfig lets resourceAttributes override compatibility fields", () => {
+  const config = resolveOtelPluginConfig({
+    agentProvider: "legacy-provider",
+    globalTags: {
+      team: "apm",
+      agent_name: "legacy-agent",
+    },
+    resourceAttributes: {
+      team: "platform",
+      agent_provider: "resource-provider",
+      agent_name: "fixed-agent",
+      "agent.id": "agent-01",
+    },
+  });
+
+  assert.deepEqual(config.resourceAttributes, {
+    agent_provider: "resource-provider",
+    team: "platform",
+    agent_name: "fixed-agent",
+    "agent.id": "agent-01",
   });
 });
 
