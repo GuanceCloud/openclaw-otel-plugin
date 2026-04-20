@@ -49,7 +49,7 @@ test("resolveOtelPluginConfig lets resourceAttributes override compatibility fie
       team: "platform",
       agent_provider: "resource-provider",
       agent_name: "fixed-agent",
-      "agent.id": "agent-01",
+      agent_id: "agent-01",
     },
   });
 
@@ -57,7 +57,7 @@ test("resolveOtelPluginConfig lets resourceAttributes override compatibility fie
     agent_provider: "resource-provider",
     team: "platform",
     agent_name: "fixed-agent",
-    "agent.id": "agent-01",
+    agent_id: "agent-01",
   });
 });
 

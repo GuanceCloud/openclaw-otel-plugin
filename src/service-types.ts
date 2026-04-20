@@ -86,6 +86,7 @@ export type RuntimeLike = {
 export type RuntimeMetadata = {
   openclawVersion?: string;
   runtimeEnvironment?: string;
+  agentId?: string;
   agentName?: string;
 };
 

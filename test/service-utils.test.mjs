@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { extractToolResultStatus, resolveSpanWindow, stringAttrs } from "../dist/src/service-utils.js";
+import {
+  extractToolResultStatus,
+  resolveSessionSpanName,
+  resolveSpanWindow,
+  stringAttrs,
+} from "../dist/src/service-utils.js";
 
 test("resolveSpanWindow backfills start time from event end time", () => {
   const { startTime, endTime, effectiveDurationMs } = resolveSpanWindow(2000, 300);
@@ -17,6 +22,21 @@ test("resolveSpanWindow keeps instant events at the same timestamp", () => {
   assert.equal(startTime.getTime(), 2000);
   assert.equal(endTime.getTime(), 2000);
   assert.equal(effectiveDurationMs, undefined);
+});
+
+test("resolveSessionSpanName prefers session_key over fallback names", () => {
+  assert.equal(
+    resolveSessionSpanName({ sessionKey: "agent:coder:main" }, "main"),
+    "agent:coder:main",
+  );
+  assert.equal(
+    resolveSessionSpanName({ sessionId: "session-1" }, "main"),
+    "session-1",
+  );
+  assert.equal(
+    resolveSessionSpanName({}, "main"),
+    "main",
+  );
 });
 
 test("stringAttrs maps openclaw fields to canonical aliases", () => {
@@ -45,8 +65,8 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs.session_key, "agent:main:feishu:direct:ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
   assert.equal(attrs.session_namespace, "agent");
-  assert.equal(attrs.session_runtime, "main");
-  assert.equal(attrs.session_agent, "feishu");
+  assert.equal(attrs.session_agent, "main");
+  assert.equal(attrs.session_runtime, "feishu");
   assert.equal(attrs.session_scope, "direct");
   assert.equal(attrs.session_target_id, "ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
   assert.equal(attrs.channel, "webchat");
@@ -69,6 +89,16 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal("openclaw.sessionId" in attrs, false);
   assert.equal("openclaw.tool.call_id" in attrs, false);
   assert.equal("openclaw.skill.call_id" in attrs, false);
+});
+
+test("stringAttrs parses multi-agent session keys with agent name in the second segment", () => {
+  const attrs = stringAttrs({
+    "openclaw.sessionKey": "agent:coder:main",
+  });
+
+  assert.equal(attrs.session_key, "agent:coder:main");
+  assert.equal(attrs.session_agent, "coder");
+  assert.equal(attrs.session_runtime, "main");
 });
 
 test("extractToolResultStatus only uses explicit status fields", () => {

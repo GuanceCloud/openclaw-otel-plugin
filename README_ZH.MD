@@ -105,7 +105,7 @@ npm run build
 - `logsEnabled` 默认关闭，只有显式设置为 `true` 才会上报 `otel-logs`
 - `logsPath` 默认为 `v1/logs`，用于上报 OpenClaw diagnostics 日志，可改成 `/v1/write/otel-logs`
 - `headers` 可用于给 trace、metrics 和 logs 上报统一附加 HTTP Header
-- `resourceAttributes` 是固定资源标签的主配置入口；如果要固定 `agent_name`、`agent.id`、团队、环境等标签，直接写这里
+- `resourceAttributes` 是固定资源标签的主配置入口；如果要固定 `agent_name`、`agent_id`、团队、环境等标签，直接写这里
 - `agentProvider` 和 `globalTags` 仍兼容读取，但只建议用于兼容旧配置；内部会统一折叠到 `resourceAttributes`
 - traces 走 `endpoint + / + tracePath`
 - metrics 走 `endpoint + / + metricsPath`

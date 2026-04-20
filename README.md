@@ -104,7 +104,7 @@ Notes:
 - `logsEnabled` is disabled by default; OTEL logs are exported only when explicitly set to `true`
 - `logsPath` defaults to `v1/logs` and is used for OpenClaw diagnostics log export; it can be changed to routes such as `/v1/write/otel-logs`
 - `headers` can be used to attach fixed HTTP headers to trace, metrics, and logs exports
-- `resourceAttributes` is the canonical place for fixed resource tags such as `agent_name`, `agent.id`, team, cluster, or environment markers
+- `resourceAttributes` is the canonical place for fixed resource tags such as `agent_name`, `agent_id`, team, cluster, or environment markers
 - `agentProvider` and `globalTags` are still accepted for backward compatibility and are normalized into `resourceAttributes`
 - Traces are exported to `endpoint + / + tracePath`
 - Metrics are exported to `endpoint + / + metricsPath`

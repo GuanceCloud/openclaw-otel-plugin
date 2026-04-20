@@ -13,6 +13,75 @@ import {
   uniqStrings,
 } from "./service-utils.js";
 
+type ConfiguredAgent = {
+  id: string;
+  name?: string;
+  isDefault?: boolean;
+};
+
+function listSessionsIndexPaths(stateDir: string): string[] {
+  const agentsDir = path.join(stateDir, "agents");
+  const discovered: string[] = [];
+  try {
+    const dirents = fs.readdirSync(agentsDir, { withFileTypes: true });
+    for (const dirent of dirents) {
+      if (!dirent.isDirectory()) {
+        continue;
+      }
+      const candidate = path.join(agentsDir, dirent.name, "sessions", "sessions.json");
+      if (fs.existsSync(candidate)) {
+        discovered.push(candidate);
+      }
+    }
+  } catch {
+    // Ignore missing or unreadable agents directories.
+  }
+  return uniqStrings([
+    ...discovered,
+    path.join(stateDir, "agents", "main", "sessions", "sessions.json"),
+    path.join(stateDir, "agents", "main-agent", "sessions", "sessions.json"),
+  ].filter((candidate) => fs.existsSync(candidate)));
+}
+
+function getAgentNameFromSessionsIndexPath(sessionsIndexPath: string): string | undefined {
+  const agentDir = path.basename(path.dirname(path.dirname(sessionsIndexPath)));
+  return agentDir.trim() || undefined;
+}
+
+export function resolveConfiguredAgents(stateDir: string): ConfiguredAgent[] {
+  const configPath = path.join(stateDir, "openclaw.json");
+  try {
+    if (!fs.existsSync(configPath)) {
+      return [];
+    }
+    const raw = fs.readFileSync(configPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      agents?: {
+        list?: Array<{
+          id?: unknown;
+          name?: unknown;
+          default?: unknown;
+        }>;
+      };
+    };
+    return (parsed.agents?.list ?? [])
+      .map((agent) => {
+        const id = typeof agent?.id === "string" ? agent.id.trim() : "";
+        if (!id) {
+          return undefined;
+        }
+        return {
+          id,
+          name: typeof agent?.name === "string" && agent.name.trim() ? agent.name.trim() : undefined,
+          isDefault: agent?.default === true,
+        };
+      })
+      .filter(Boolean) as ConfiguredAgent[];
+  } catch {
+    return [];
+  }
+}
+
 export function createSessionSnapshotStore(stateDir: string): SessionSnapshotStore {
   const transcriptSnapshotBySession = new Map<string, SessionSnapshot>();
   const latestAssistantTextBySession = new Map<string, string>();
@@ -27,20 +96,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
     originProvider?: string;
     originSurface?: string;
   }>();
-  const sessionsIndexPathCandidates = [
-    path.join(stateDir, "agents", "main", "sessions", "sessions.json"),
-    path.join(stateDir, "agents", "main-agent", "sessions", "sessions.json"),
-  ];
   const workspaceSkillsDir = path.join(stateDir, "workspace", "skills");
-
-  const resolveSessionsIndexPath = () => {
-    for (const candidate of sessionsIndexPathCandidates) {
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-    return sessionsIndexPathCandidates[0];
-  };
 
   const mergeSessionSkills = (sessionKey: string, entries: SkillCatalogEntry[]) => {
     if (entries.length === 0) {
@@ -96,53 +152,59 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
 
   const refreshSessionsIndex = () => {
     try {
-      const raw = fs.readFileSync(resolveSessionsIndexPath(), "utf8");
-      const parsed = JSON.parse(raw) as Record<string, {
-        sessionFile?: string;
-        sessionId?: string;
-        updatedAt?: number;
-        chatType?: string;
-        lastChannel?: string;
-        origin?: { provider?: string; surface?: string };
-        modelProvider?: string;
-        model?: string;
-        skillsSnapshot?: { resolvedSkills?: Array<{ name?: string; description?: string }> };
-      }>;
       sessionFileBySessionKey.clear();
       sessionSkillsBySessionKey.clear();
       sessionModelBySessionKey.clear();
       sessionMetaBySessionKey.clear();
-      for (const [sessionKey, sessionState] of Object.entries(parsed)) {
-        if (typeof sessionState?.sessionFile === "string" && sessionState.sessionFile.trim()) {
-          sessionFileBySessionKey.set(sessionKey, sessionState.sessionFile);
-        }
-        if (Array.isArray(sessionState?.skillsSnapshot?.resolvedSkills)) {
-          const skillEntries = sessionState.skillsSnapshot.resolvedSkills
-            .map((skill) => {
-              const skillName = typeof skill?.name === "string" ? skill.name.trim() : "";
-              const description =
-                typeof skill?.description === "string" ? skill.description.trim() : undefined;
-              return skillName ? buildSkillCatalogEntry(skillName, description) : undefined;
-            })
-            .filter(Boolean) as SkillCatalogEntry[];
-          if (skillEntries.length > 0) {
-            sessionSkillsBySessionKey.set(sessionKey, skillEntries);
+      for (const sessionsIndexPath of listSessionsIndexPaths(stateDir)) {
+        try {
+          const raw = fs.readFileSync(sessionsIndexPath, "utf8");
+          const parsed = JSON.parse(raw) as Record<string, {
+            sessionFile?: string;
+            sessionId?: string;
+            updatedAt?: number;
+            chatType?: string;
+            lastChannel?: string;
+            origin?: { provider?: string; surface?: string };
+            modelProvider?: string;
+            model?: string;
+            skillsSnapshot?: { resolvedSkills?: Array<{ name?: string; description?: string }> };
+          }>;
+          for (const [sessionKey, sessionState] of Object.entries(parsed)) {
+            if (typeof sessionState?.sessionFile === "string" && sessionState.sessionFile.trim()) {
+              sessionFileBySessionKey.set(sessionKey, sessionState.sessionFile);
+            }
+            if (Array.isArray(sessionState?.skillsSnapshot?.resolvedSkills)) {
+              const skillEntries = sessionState.skillsSnapshot.resolvedSkills
+                .map((skill) => {
+                  const skillName = typeof skill?.name === "string" ? skill.name.trim() : "";
+                  const description =
+                    typeof skill?.description === "string" ? skill.description.trim() : undefined;
+                  return skillName ? buildSkillCatalogEntry(skillName, description) : undefined;
+                })
+                .filter(Boolean) as SkillCatalogEntry[];
+              if (skillEntries.length > 0) {
+                sessionSkillsBySessionKey.set(sessionKey, skillEntries);
+              }
+            }
+            sessionModelBySessionKey.set(sessionKey, {
+              provider: typeof sessionState?.modelProvider === "string" ? sessionState.modelProvider : undefined,
+              model: typeof sessionState?.model === "string" ? sessionState.model : undefined,
+            });
+            sessionMetaBySessionKey.set(sessionKey, {
+              sessionId: typeof sessionState?.sessionId === "string" ? sessionState.sessionId : undefined,
+              updatedAt: typeof sessionState?.updatedAt === "number" ? sessionState.updatedAt : undefined,
+              chatType: typeof sessionState?.chatType === "string" ? sessionState.chatType : undefined,
+              lastChannel: typeof sessionState?.lastChannel === "string" ? sessionState.lastChannel : undefined,
+              originProvider:
+                typeof sessionState?.origin?.provider === "string" ? sessionState.origin.provider : undefined,
+              originSurface:
+                typeof sessionState?.origin?.surface === "string" ? sessionState.origin.surface : undefined,
+            });
           }
+        } catch {
+          // Try the next sessions index file.
         }
-        sessionModelBySessionKey.set(sessionKey, {
-          provider: typeof sessionState?.modelProvider === "string" ? sessionState.modelProvider : undefined,
-          model: typeof sessionState?.model === "string" ? sessionState.model : undefined,
-        });
-        sessionMetaBySessionKey.set(sessionKey, {
-          sessionId: typeof sessionState?.sessionId === "string" ? sessionState.sessionId : undefined,
-          updatedAt: typeof sessionState?.updatedAt === "number" ? sessionState.updatedAt : undefined,
-          chatType: typeof sessionState?.chatType === "string" ? sessionState.chatType : undefined,
-          lastChannel: typeof sessionState?.lastChannel === "string" ? sessionState.lastChannel : undefined,
-          originProvider:
-            typeof sessionState?.origin?.provider === "string" ? sessionState.origin.provider : undefined,
-          originSurface:
-            typeof sessionState?.origin?.surface === "string" ? sessionState.origin.surface : undefined,
-        });
       }
       refreshWorkspaceSkills();
     } catch {
@@ -348,10 +410,14 @@ function detectOpenClawVersion(): string | undefined {
 }
 
 export function resolveRuntimeMetadata(stateDir: string): RuntimeMetadata {
-  const sessionsIndexCandidates = [
-    path.join(stateDir, "agents", "main", "sessions", "sessions.json"),
-    path.join(stateDir, "agents", "main-agent", "sessions", "sessions.json"),
-  ];
+  const sessionsIndexCandidates = listSessionsIndexPaths(stateDir);
+  const configuredAgents = resolveConfiguredAgents(stateDir);
+  const discoveredAgentNames = uniqStrings(
+    sessionsIndexCandidates
+      .map((candidate) => getAgentNameFromSessionsIndexPath(candidate))
+      .filter(Boolean) as string[],
+  );
+  const singleConfiguredAgent = configuredAgents.length === 1 ? configuredAgents[0] : undefined;
   for (const candidate of sessionsIndexCandidates) {
     try {
       if (!fs.existsSync(candidate)) {
@@ -363,8 +429,18 @@ export function resolveRuntimeMetadata(stateDir: string): RuntimeMetadata {
       const { runtimeEnvironment, agentName } = parseAgentKey(firstSessionKey);
       return {
         openclawVersion: detectOpenClawVersion(),
-        runtimeEnvironment: runtimeEnvironment ?? (process.env.NODE_ENV?.trim() || undefined),
-        agentName,
+        runtimeEnvironment:
+          discoveredAgentNames.length === 1
+            ? runtimeEnvironment ?? (process.env.NODE_ENV?.trim() || undefined)
+            : (process.env.NODE_ENV?.trim() || undefined),
+        agentId:
+          discoveredAgentNames.length === 1
+            ? singleConfiguredAgent?.id ?? agentName
+            : undefined,
+        agentName:
+          discoveredAgentNames.length === 1
+            ? singleConfiguredAgent?.name ?? singleConfiguredAgent?.id ?? discoveredAgentNames[0] ?? agentName
+            : undefined,
       };
     } catch {
       // Try the next candidate.
@@ -373,6 +449,7 @@ export function resolveRuntimeMetadata(stateDir: string): RuntimeMetadata {
   return {
     openclawVersion: detectOpenClawVersion(),
     runtimeEnvironment: process.env.NODE_ENV?.trim() || undefined,
-    agentName: undefined,
+    agentId: singleConfiguredAgent?.id,
+    agentName: singleConfiguredAgent?.name ?? singleConfiguredAgent?.id,
   };
 }

@@ -90,6 +90,14 @@ export function sessionIdentity(evt: {
   return evt.sessionKey ?? evt.sessionId;
 }
 
+export function resolveSessionSpanName(
+  evt: { sessionKey?: string; sessionId?: string },
+  fallback: string,
+): string {
+  const name = sessionIdentity(evt)?.trim();
+  return name || fallback;
+}
+
 export function parseSessionKey(
   value: string | undefined,
 ): {
@@ -107,7 +115,7 @@ export function parseSessionKey(
   if (segments.length < 3 || segments[0] !== "agent") {
     return {};
   }
-  const [, sessionRuntime, sessionAgent, sessionScope, ...rest] = segments;
+  const [, sessionAgent, sessionRuntime, sessionScope, ...rest] = segments;
   return {
     sessionNamespace: "agent",
     sessionRuntime: sessionRuntime?.trim() || undefined,

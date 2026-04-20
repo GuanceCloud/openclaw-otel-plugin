@@ -6,7 +6,11 @@ import { onDiagnosticEvent } from "openclaw/plugin-sdk";
 import type { OtelPluginConfig } from "./config.js";
 import { createDiagnosticEventHandler } from "./diagnostic-event-handler.js";
 import { startOtelBootstrap } from "./otel-bootstrap.js";
-import { createSessionSnapshotStore, resolveRuntimeMetadata } from "./session-store.js";
+import {
+  createSessionSnapshotStore,
+  resolveConfiguredAgents,
+  resolveRuntimeMetadata,
+} from "./session-store.js";
 import type {
   ActiveRootSpan,
   ActiveRunSpan,
@@ -26,7 +30,9 @@ import {
   MIN_VISIBLE_MODEL_MS,
   normalizeReasoningPreview,
   normalizeUserInputPreview,
+  parseSessionKey,
   redactSensitiveText,
+  resolveSessionSpanName,
   resolveSpanWindow,
   sessionIdentity,
   stringAttrs,
@@ -57,6 +63,9 @@ export function createOtelPluginService(
       }
 
       sessionStore = createSessionSnapshotStore(ctx.stateDir);
+      const configuredAgentById = new Map(
+        resolveConfiguredAgents(ctx.stateDir).map((agent) => [agent.id, agent]),
+      );
       const runtimeMetadata = resolveRuntimeMetadata(ctx.stateDir);
       const {
         sdk: otelSdk,
@@ -79,12 +88,24 @@ export function createOtelPluginService(
         sessionKey: string | undefined,
         attrs: Record<string, string | number | boolean | undefined>,
       ) => {
+        const parsedSessionKey = parseSessionKey(sessionKey);
+        const configuredAgent = parsedSessionKey.sessionAgent
+          ? configuredAgentById.get(parsedSessionKey.sessionAgent)
+          : undefined;
+        const dynamicAgentId = parsedSessionKey.sessionAgent;
+        const dynamicAgentName = configuredAgent?.name ?? configuredAgent?.id ?? dynamicAgentId;
         const snapshot = loadSessionSnapshot(sessionKey);
         if (!snapshot) {
-          return attrs;
+          return {
+            ...attrs,
+            agent_id: attrs.agent_id ?? dynamicAgentId,
+            agent_name: attrs.agent_name ?? dynamicAgentName,
+          };
         }
         return {
           ...attrs,
+          agent_id: attrs.agent_id ?? dynamicAgentId,
+          agent_name: attrs.agent_name ?? dynamicAgentName,
           session_id: snapshot.sessionId,
           "openclaw.sessionId": attrs["openclaw.sessionId"] ?? snapshot.sessionId,
           "openclaw.session.file": snapshot.sessionFile,
@@ -177,7 +198,7 @@ export function createOtelPluginService(
           return undefined;
         }
         const span = tracer.startSpan(
-          "openclaw_request",
+          resolveSessionSpanName(evt, "openclaw_request"),
           {
             startTime: eventTimestamp(evt),
             kind: SpanKind.SERVER,
@@ -220,7 +241,7 @@ export function createOtelPluginService(
         }
         const userCtx = current?.userCtx;
         const span = tracer.startSpan(
-          "main",
+          resolveSessionSpanName(evt, "main"),
           {
             startTime: eventTimestamp(evt),
             kind: SpanKind.INTERNAL,

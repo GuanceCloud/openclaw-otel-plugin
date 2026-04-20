@@ -152,6 +152,7 @@ export async function startOtelBootstrap(
     [ATTR_SERVICE_NAME]: config.serviceName,
     agent_version: runtimeMetadata?.openclawVersion,
     runtime_environment: runtimeMetadata?.runtimeEnvironment,
+    agent_id: runtimeMetadata?.agentId,
     agent_name: runtimeMetadata?.agentName,
     ...(config.resourceAttributes ?? {}),
   }));
