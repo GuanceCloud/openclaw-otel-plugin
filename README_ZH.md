@@ -151,6 +151,68 @@ npm run build
 http://localhost:4318/v1/llms
 ```
 
+## 配置dataway
+
+如果接收端是 Dataway，可以在 `~/.openclaw/openclaw.json` 中按下面方式配置。需要同时配置 `endpoint`、`tracePath`、`metricsPath`、`logsPath` 和 `headers`，其中 `headers.X-Token` 替换成你的 Dataway 写入 Token。
+
+```json
+{
+  "plugins": {
+    "allow": [
+      "openclaw-otel-plugin"
+    ],
+    "load": {
+      "paths": [
+        "/Users/yourname/.openclaw/extensions/openclaw-otel-plugin"
+      ]
+    },
+    "entries": {
+      "openclaw-otel-plugin": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://<dataway-host>",
+          "tracePath": "v1/write/otel-llm",
+          "metricsPath": "v1/write/otel-metrics",
+          "logsEnabled": true,
+          "logsPath": "v1/write/otel-logs",
+          "headers": {
+            "X-Token": "<your-dataway-token>",
+            "To-Headless": "true"
+          },
+          "protocol": "http/protobuf",
+          "serviceName": "openclaw-otel-plugin",
+          "flushIntervalMs": 15000,
+          "rootSpanTtlMs": 600000,
+          "resourceAttributes": {
+            "agent_provider": "openclaw",
+            "service.namespace": "openclaw",
+            "deployment.environment": "local"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+按上面的配置，插件会上报到以下地址：
+
+```text
+trace:   http://<dataway-host>/v1/write/otel-llm
+metrics: http://<dataway-host>/v1/write/otel-metrics
+logs:    http://<dataway-host>/v1/write/otel-logs
+```
+
+说明：
+
+- `endpoint` 只填写 Dataway 的协议、域名和端口，不要把 `/v1/write/...` 写进 `endpoint`
+- `tracePath`、`metricsPath`、`logsPath` 分别对应 trace、metrics、logs 的 Dataway 写入路由
+- `logsEnabled` 设置为 `true`，否则不会上报 diagnostics logs
+- `headers.X-Token` 用于 Dataway 鉴权，可以使用空间 token 和 client_token ，如果是 client_token 则 必须带上请求头 To-Headless=true
+- `headers.To-Headless`  用于开启 headless 写入场景鉴权用户 token
+
+> 特别注意： client_token 和 空间 token 的区别。
+
 ## 重启网关
 
 修改配置后，优先使用 OpenClaw 官方 CLI 重启网关服务：
