@@ -175,7 +175,7 @@ If your receiver is Dataway, configure `~/.openclaw/openclaw.json` as shown belo
           "logsEnabled": true,
           "logsPath": "v1/write/otel-logs",
           "headers": {
-            "X-Token": "<your-dataway-token>",
+            "X-Token": "<your-dataway-client_token>",
             "To-Headless": "true"
           },
           "protocol": "http/protobuf",
@@ -207,8 +207,8 @@ Notes:
 - `endpoint` should contain only the Dataway scheme, host, and port. Do not include `/v1/write/...` in `endpoint`
 - `tracePath`, `metricsPath`, and `logsPath` map to the Dataway write routes for traces, metrics, and logs
 - Set `logsEnabled` to `true`; otherwise diagnostics logs are not exported
-- `headers.X-Token` is used for Dataway authentication. You can use either a workspace token or a client token. If you use a client token, you must include the `To-Headless=true` request header
-- `headers.To-Headless` enables headless-write authentication for user tokens
+- `headers.X-Token` is used for Dataway authentication and must be a client token
+- `headers.To-Headless` enables headless-write authentication for user tokens. It must be `true` here so it can work with client-token authentication
 
 > Important: note the difference between a client token and a workspace token.
 
