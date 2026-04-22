@@ -150,6 +150,68 @@ The configuration above exports traces to:
 http://localhost:4318/v1/llms
 ```
 
+## Configure Dataway
+
+If your receiver is Dataway, configure `~/.openclaw/openclaw.json` as shown below. You need to set `endpoint`, `tracePath`, `metricsPath`, `logsPath`, and `headers`. Replace `headers.X-Token` with your Dataway write token.
+
+```json
+{
+  "plugins": {
+    "allow": [
+      "openclaw-otel-plugin"
+    ],
+    "load": {
+      "paths": [
+        "/Users/yourname/.openclaw/extensions/openclaw-otel-plugin"
+      ]
+    },
+    "entries": {
+      "openclaw-otel-plugin": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://<dataway-host>",
+          "tracePath": "v1/write/otel-llm",
+          "metricsPath": "v1/write/otel-metrics",
+          "logsEnabled": true,
+          "logsPath": "v1/write/otel-logs",
+          "headers": {
+            "X-Token": "<your-dataway-token>",
+            "To-Headless": "true"
+          },
+          "protocol": "http/protobuf",
+          "serviceName": "openclaw-otel-plugin",
+          "flushIntervalMs": 15000,
+          "rootSpanTtlMs": 600000,
+          "resourceAttributes": {
+            "agent_provider": "openclaw",
+            "service.namespace": "openclaw",
+            "deployment.environment": "local"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+With the configuration above, the plugin exports to:
+
+```text
+trace:   http://<dataway-host>/v1/write/otel-llm
+metrics: http://<dataway-host>/v1/write/otel-metrics
+logs:    http://<dataway-host>/v1/write/otel-logs
+```
+
+Notes:
+
+- `endpoint` should contain only the Dataway scheme, host, and port. Do not include `/v1/write/...` in `endpoint`
+- `tracePath`, `metricsPath`, and `logsPath` map to the Dataway write routes for traces, metrics, and logs
+- Set `logsEnabled` to `true`; otherwise diagnostics logs are not exported
+- `headers.X-Token` is used for Dataway authentication. You can use either a workspace token or a client token. If you use a client token, you must include the `To-Headless=true` request header
+- `headers.To-Headless` enables headless-write authentication for user tokens
+
+> Important: note the difference between a client token and a workspace token.
+
 ## Restart Gateway
 
 After changing configuration, use the official OpenClaw CLI to restart the gateway service:
