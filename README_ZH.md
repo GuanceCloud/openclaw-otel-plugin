@@ -176,7 +176,7 @@ http://localhost:4318/v1/llms
           "logsEnabled": true,
           "logsPath": "v1/write/otel-logs",
           "headers": {
-            "X-Token": "<your-dataway-token>",
+            "X-Token": "<your-dataway-client_token>",
             "To-Headless": "true"
           },
           "protocol": "http/protobuf",
@@ -208,8 +208,8 @@ logs:    http://<dataway-host>/v1/write/otel-logs
 - `endpoint` 只填写 Dataway 的协议、域名和端口，不要把 `/v1/write/...` 写进 `endpoint`
 - `tracePath`、`metricsPath`、`logsPath` 分别对应 trace、metrics、logs 的 Dataway 写入路由
 - `logsEnabled` 设置为 `true`，否则不会上报 diagnostics logs
-- `headers.X-Token` 用于 Dataway 鉴权，可以使用空间 token 和 client_token ，如果是 client_token 则 必须带上请求头 To-Headless=true
-- `headers.To-Headless`  用于开启 headless 写入场景鉴权用户 token
+- `headers.X-Token` 用于 Dataway 鉴权，必须使用 client_token
+- `headers.To-Headless`  用于开启 headless 写入场景鉴权用户 token，此处必须是 true ，用于配合client_token 鉴权使用。
 
 > 特别注意： client_token 和 空间 token 的区别。
 
