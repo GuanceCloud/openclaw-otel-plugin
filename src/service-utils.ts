@@ -102,10 +102,10 @@ export function parseSessionKey(
   value: string | undefined,
 ): {
   sessionNamespace?: string;
-  sessionRuntime?: string;
+  sessionChannel?: string;
   sessionAgent?: string;
   sessionScope?: string;
-  sessionTargetId?: string;
+  sessionChannelTarget?: string;
 } {
   const normalized = value?.trim();
   if (!normalized) {
@@ -118,10 +118,10 @@ export function parseSessionKey(
   const [, sessionAgent, sessionRuntime, sessionScope, ...rest] = segments;
   return {
     sessionNamespace: "agent",
-    sessionRuntime: sessionRuntime?.trim() || undefined,
+    sessionChannel: sessionRuntime?.trim() || undefined,
     sessionAgent: sessionAgent?.trim() || undefined,
     sessionScope: sessionScope?.trim() || undefined,
-    sessionTargetId: rest.join(":").trim() || undefined,
+    sessionChannelTarget: rest.join(":").trim() || undefined,
   };
 }
 
@@ -185,8 +185,8 @@ function withCanonicalAliases(
   if (sessionKeyParts.sessionNamespace && (next.session_namespace === undefined || next.session_namespace === "")) {
     next.session_namespace = sessionKeyParts.sessionNamespace;
   }
-  if (sessionKeyParts.sessionRuntime && (next.session_runtime === undefined || next.session_runtime === "")) {
-    next.session_runtime = sessionKeyParts.sessionRuntime;
+  if (sessionKeyParts.sessionChannel && (next.session_channel === undefined || next.session_channel === "")) {
+    next.session_channel = sessionKeyParts.sessionChannel;
   }
   if (sessionKeyParts.sessionAgent && (next.session_agent === undefined || next.session_agent === "")) {
     next.session_agent = sessionKeyParts.sessionAgent;
@@ -194,8 +194,11 @@ function withCanonicalAliases(
   if (sessionKeyParts.sessionScope && (next.session_scope === undefined || next.session_scope === "")) {
     next.session_scope = sessionKeyParts.sessionScope;
   }
-  if (sessionKeyParts.sessionTargetId && (next.session_target_id === undefined || next.session_target_id === "")) {
-    next.session_target_id = sessionKeyParts.sessionTargetId;
+  if (
+    sessionKeyParts.sessionChannelTarget &&
+    (next.session_channel_target === undefined || next.session_channel_target === "")
+  ) {
+    next.session_channel_target = sessionKeyParts.sessionChannelTarget;
   }
   promoteAlias(next, "channel", "openclaw.channel", "openclaw.session.lastChannel");
   promoteAlias(next, "source_app", "openclaw.session.origin.provider");

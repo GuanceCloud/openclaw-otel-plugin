@@ -380,7 +380,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
 function parseAgentKey(value: string | undefined): { runtimeEnvironment?: string; agentName?: string } {
   const parsed = parseSessionKey(value);
   return {
-    runtimeEnvironment: parsed.sessionRuntime,
+    runtimeEnvironment: parsed.sessionChannel,
     agentName: parsed.sessionAgent,
   };
 }

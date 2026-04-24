@@ -66,9 +66,9 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.session_key, "agent:main:feishu:direct:ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
   assert.equal(attrs.session_namespace, "agent");
   assert.equal(attrs.session_agent, "main");
-  assert.equal(attrs.session_runtime, "feishu");
+  assert.equal(attrs.session_channel, "feishu");
   assert.equal(attrs.session_scope, "direct");
-  assert.equal(attrs.session_target_id, "ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
+  assert.equal(attrs.session_channel_target, "ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
   assert.equal(attrs.channel, "webchat");
   assert.equal(attrs.model_provider, "doubao");
   assert.equal(attrs.model_name, "ark-code-latest");
@@ -98,7 +98,7 @@ test("stringAttrs parses multi-agent session keys with agent name in the second 
 
   assert.equal(attrs.session_key, "agent:coder:main");
   assert.equal(attrs.session_agent, "coder");
-  assert.equal(attrs.session_runtime, "main");
+  assert.equal(attrs.session_channel, "main");
 });
 
 test("extractToolResultStatus only uses explicit status fields", () => {
