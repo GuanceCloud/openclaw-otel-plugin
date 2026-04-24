@@ -1,34 +1,86 @@
 # openclaw-otel-plugin
 
-`openclaw-otel-plugin` is an OpenClaw observability export plugin. It converts OpenClaw diagnostic events into session-oriented traces, exports supplemental metrics and diagnostics logs, and reports them to any OpenTelemetry-compatible receiver via `OTLP HTTP/protobuf`.
+[中文说明](./README_ZH.md)
 
-## Features
+`openclaw-otel-plugin` exports OpenClaw runtime and diagnostics data to any OTLP HTTP/protobuf receiver. It turns session activity into traces, adds plugin-level metrics, mirrors built-in OpenClaw diagnostics metrics, and can optionally mirror diagnostics events to OTEL logs.
 
-- Exports root traces such as `openclaw_request`
-- Exports runtime traces such as `main`, `user_message`, and `assistant_message`
-- Exports model-, skill-, and tool-related spans
-- Exports diagnostic spans such as `openclaw.session.stuck`
-- Adds OpenClaw-specific attributes to make troubleshooting easier in tracing platforms
-- Exports supplemental metrics such as request count, request duration, tool calls, tool errors, tool duration, skill activations, and model calls
-- Mirrors the latest built-in OpenClaw diagnostics metrics such as `openclaw.tokens`, `openclaw.cost.usd`, `openclaw.message.queued`, and `openclaw.queue.depth`
-- Mirrors OpenClaw diagnostics events to OTEL logs such as `session.state`, `message.processed`, and `webhook.error`
+## What It Exports
+
+### Traces
+
+- A session-scoped root span. When `sessionKey` or `sessionId` is available, that value is used as the span name; otherwise it falls back to `openclaw_request`
+- A session-scoped run span. When `sessionKey` or `sessionId` is available, that value is used as the span name; otherwise it falls back to `main`
+- Runtime spans such as `user_message` and `assistant_message`
+- Model spans such as `<provider>/<model>`
+- Skill summary spans such as `skill:<name>`
+- Skill call spans such as `skill_call:<name>`
+- Tool spans such as `tool:<name>`
+- Diagnostic spans such as `openclaw.session.stuck`, `openclaw.webhook.received`, `openclaw.webhook.processed`, `openclaw.webhook.error`, `queue.lane.enqueue`, `queue.lane.dequeue`, `diagnostic.heartbeat`, and `tool.loop`
+
+### Metrics
+
+Plugin-added metrics:
+
+- `openclaw.requests`
+- `openclaw.request.duration`
+- `openclaw.tool.calls`
+- `openclaw.tool.errors`
+- `openclaw.tool.duration`
+- `openclaw.skill.activations`
+- `openclaw.model.calls`
+
+Mirrored diagnostics metrics:
+
+- `openclaw.tokens`
+- `openclaw.cost.usd`
+- `openclaw.run.duration_ms`
+- `openclaw.context.tokens`
+- `openclaw.webhook.received`
+- `openclaw.webhook.error`
+- `openclaw.webhook.duration_ms`
+- `openclaw.message.queued`
+- `openclaw.message.processed`
+- `openclaw.message.duration_ms`
+- `openclaw.queue.lane.enqueue`
+- `openclaw.queue.lane.dequeue`
+- `openclaw.queue.depth`
+- `openclaw.queue.wait_ms`
+- `openclaw.session.state`
+- `openclaw.session.stuck`
+- `openclaw.session.stuck_age_ms`
+- `openclaw.run.attempt`
+
+### Logs
+
+When `logsEnabled=true`, the plugin mirrors diagnostics events to OTEL logs, including:
+
+- `session.state`
+- `run.attempt`
+- `message.queued`
+- `model.usage`
+- `message.processed`
+- `webhook.received`
+- `webhook.processed`
+- `webhook.error`
+- `session.stuck`
+- `queue.lane.enqueue`
+- `queue.lane.dequeue`
+- `diagnostic.heartbeat`
+- `tool.loop`
 
 ## Requirements
 
 - OpenClaw `2026.3.23+`
 - Node.js `22.x`
-- A working OTLP HTTP/protobuf receiver
-- Default example endpoint: `http://localhost:4318`
+- An OTLP HTTP/protobuf receiver
 
 Compatibility notes:
 
-- This plugin is updated for the post-`2026.3.23` OpenClaw plugin SDK entrypoint changes
-- It is verified against locally installed OpenClaw `2026.3.23-2`
-- If you use an older OpenClaw version, upgrade first before installing this plugin
+- This repository is adapted to the post-`2026.3.23` OpenClaw plugin entrypoint changes
+- It is validated against locally installed OpenClaw `2026.3.23-2`
+- Older OpenClaw versions should be upgraded first
 
-## Installation
-
-Clone this repository into your local OpenClaw extension directory:
+## Install
 
 ```bash
 cd ~/.openclaw/extensions
@@ -38,21 +90,9 @@ npm install
 npm run build
 ```
 
-Notes:
+## Configure
 
-- `npm install`: installs runtime dependencies
-- `npm run build`: compiles `index.ts` and `src/*.ts` into `dist/`
-- Both steps are required on first install, otherwise the plugin may fail to load
-
-## Configuration
-
-Edit `~/.openclaw/openclaw.json` and add this plugin to:
-
-- `plugins.allow`
-- `plugins.load.paths`
-- `plugins.entries`
-
-Example configuration:
+Add the plugin to `~/.openclaw/openclaw.json`:
 
 ```json
 {
@@ -69,25 +109,23 @@ Example configuration:
       "openclaw-otel-plugin": {
         "enabled": true,
         "config": {
-          "endpoint": "http://localhost:4318",
+          "endpoint": "http://127.0.0.1:4318/otel",
           "tracePath": "v1/traces",
           "metricsPath": "v1/metrics",
-          "logsEnabled": true,
+          "logsEnabled": false,
           "logsPath": "v1/logs",
           "headers": {
-            "Authorization": "Bearer <token>",
-            "X-Env": "prod"
+            "Authorization": "Bearer <token>"
           },
-          "protocol": "http/protobuf",
+          "sampleRate": 1,
           "serviceName": "openclaw-otel-plugin",
           "flushIntervalMs": 15000,
           "rootSpanTtlMs": 600000,
           "resourceAttributes": {
             "agent_provider": "openclaw",
-            "agent_name": "main",
-            "team": "apm",
-            "cluster": "prod-cn",
-            "deployment.environment": "local"
+            "env": "prod",
+            "app_name":"openclaw-agent",
+	          "app_id":"999999990000000000iuui"
           }
         }
       }
@@ -96,75 +134,45 @@ Example configuration:
 }
 ```
 
-Notes:
+### Config Reference
 
-- `flushIntervalMs` is also used as the OTLP metrics export interval
-- `tracePath` defaults to `v1/traces` and can be changed to routes such as `v1/llms`
-- `metricsPath` defaults to `v1/metrics` and can be changed to custom routes such as `/v1/metrics`
-- `logsEnabled` is disabled by default; OTEL logs are exported only when explicitly set to `true`
-- `logsPath` defaults to `v1/logs` and is used for OpenClaw diagnostics log export; it can be changed to routes such as `/v1/write/otel-logs`
-- `headers` can be used to attach fixed HTTP headers to trace, metrics, and logs exports
-- `resourceAttributes` is the canonical place for fixed resource tags such as `agent_name`, `agent_id`, team, cluster, or environment markers
-- `agentProvider` and `globalTags` are still accepted for backward compatibility and are normalized into `resourceAttributes`
-- Traces are exported to `endpoint + / + tracePath`
-- Metrics are exported to `endpoint + / + metricsPath`
-- Logs are exported to `endpoint + / + logsPath`
+| Field | Default | Notes |
+| --- | --- | --- |
+| `endpoint` | `http://127.0.0.1:4318/otel` | Receiver base URL. Trailing `/` is removed automatically |
+| `tracePath` | `v1/traces` | Trace route appended to `endpoint` |
+| `metricsPath` | `v1/metrics` | Metrics route appended to `endpoint` |
+| `logsEnabled` | `false` | Logs are exported only when explicitly enabled |
+| `logsPath` | `v1/logs` | Logs route appended to `endpoint` |
+| `protocol` | `http/protobuf` | The only supported protocol |
+| `serviceName` | `openclaw-otel-plugin` | Exported as OTEL `service.name` |
+| `headers` | unset | Fixed HTTP headers applied to traces, metrics, and logs |
+| `sampleRate` | unset | Optional root sampler ratio in `[0, 1]` |
+| `flushIntervalMs` | `15000` | Metrics export interval |
+| `rootSpanTtlMs` | `600000` | Closes stale root/run spans after inactivity |
+| `resourceAttributes` | `{ "agent_provider": "openclaw" }` | Fixed OTEL resource attributes |
 
-These global tags are added automatically by default:
+Compatibility fields still accepted:
 
-- `agent_provider`
+- `agentProvider`: compatibility alias for `resourceAttributes.agent_provider`
+- `globalTags`: compatibility alias merged into `resourceAttributes`
+
+Resource attributes are resolved in this order:
+
+- runtime metadata discovered from OpenClaw state, when available
+- resolved config resource attributes, including the default `agent_provider`, compatibility fields, and explicit `resourceAttributes`
+
+Runtime metadata may contribute:
+
 - `agent_version`
 - `runtime_environment`
+- `agent_id`
 - `agent_name`
 
-Tag merge priority:
-
-- automatic tags
-- `resourceAttributes`
-
-Custom trace route example:
+## Dataway Example
 
 ```json
 {
   "plugins": {
-    "entries": {
-      "openclaw-otel-plugin": {
-        "enabled": true,
-        "config": {
-          "endpoint": "http://localhost:4318",
-          "tracePath": "v1/llms",
-          "resourceAttributes": {
-            "agent_provider": "openclaw",
-            "team": "apm"
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-The configuration above exports traces to:
-
-```text
-http://localhost:4318/v1/llms
-```
-
-## Configure Dataway
-
-If your receiver is Dataway, configure `~/.openclaw/openclaw.json` as shown below. You need to set `endpoint`, `tracePath`, `metricsPath`, `logsPath`, and `headers`. Replace `headers.X-Token` with your Dataway write token.
-
-```json
-{
-  "plugins": {
-    "allow": [
-      "openclaw-otel-plugin"
-    ],
-    "load": {
-      "paths": [
-        "/Users/yourname/.openclaw/extensions/openclaw-otel-plugin"
-      ]
-    },
     "entries": {
       "openclaw-otel-plugin": {
         "enabled": true,
@@ -178,14 +186,12 @@ If your receiver is Dataway, configure `~/.openclaw/openclaw.json` as shown belo
             "X-Token": "<your-dataway-client_token>",
             "To-Headless": "true"
           },
-          "protocol": "http/protobuf",
           "serviceName": "openclaw-otel-plugin",
-          "flushIntervalMs": 15000,
-          "rootSpanTtlMs": 600000,
           "resourceAttributes": {
             "agent_provider": "openclaw",
-            "service.namespace": "openclaw",
-            "deployment.environment": "local"
+            "env": "prod",
+            "app_name":"openclaw-agent",
+	          "app_id":"999999990000000000iuui"
           }
         }
       }
@@ -194,49 +200,28 @@ If your receiver is Dataway, configure `~/.openclaw/openclaw.json` as shown belo
 }
 ```
 
-With the configuration above, the plugin exports to:
-
-```text
-trace:   http://<dataway-host>/v1/write/otel-llm
-metrics: http://<dataway-host>/v1/write/otel-metrics
-logs:    http://<dataway-host>/v1/write/otel-logs
-```
-
 Notes:
 
-- `endpoint` should contain only the Dataway scheme, host, and port. Do not include `/v1/write/...` in `endpoint`
-- `tracePath`, `metricsPath`, and `logsPath` map to the Dataway write routes for traces, metrics, and logs
-- Set `logsEnabled` to `true`; otherwise diagnostics logs are not exported
-- `headers.X-Token` is used for Dataway authentication and must be a client token
-- `headers.To-Headless` enables headless-write authentication for user tokens. It must be `true` here so it can work with client-token authentication
+- Keep `endpoint` as scheme + host + port only
+- Put the write routes in `tracePath`, `metricsPath`, and `logsPath`
+- `logsEnabled` must be `true` if you want diagnostics logs
+- `headers.X-Token` should be a Dataway client token
 
-> Important: note the difference between a client token and a workspace token.
-
-## Restart Gateway
-
-After changing configuration, use the official OpenClaw CLI to restart the gateway service:
-
-```bash
-openclaw gateway restart
-```
-
-If you changed plugin TypeScript code, rebuild before restarting the gateway:
+## Development
 
 ```bash
 npm run build
+npm test
 openclaw gateway restart
 ```
 
-If you are developing the plugin locally, you can run watch mode to auto-build and restart the gateway on source changes:
+For local development with rebuild + restart:
 
 ```bash
 npm run dev
 ```
 
-Notes:
-
-- `npm run dev` watches `index.ts`, `src/`, and `openclaw.plugin.json`
-- On every detected change, it automatically runs `npm run build` and `openclaw gateway restart`
+`npm run dev` watches `index.ts`, `src/`, and `openclaw.plugin.json`, then runs build and gateway restart automatically.
 
 ## Verification
 
@@ -246,107 +231,61 @@ Check gateway logs:
 tail -n 50 ~/.openclaw/logs/gateway.log
 ```
 
-You should see something like:
+Expected startup logs:
 
 ```text
-[otel-plugin] trace exporter enabled (http/protobuf) -> http://localhost:4318/v1/traces
-[otel-plugin] metric exporter enabled (http/protobuf) -> http://localhost:4318/v1/metrics
+[otel-plugin] trace exporter enabled (http/protobuf) -> http://127.0.0.1:4318/otel/v1/traces
+[otel-plugin] metric exporter enabled (http/protobuf) -> http://127.0.0.1:4318/otel/v1/metrics
 [otel-plugin] log exporter disabled
 ```
 
-If log export is enabled:
+If logs are enabled:
 
 ```text
-[otel-plugin] log exporter enabled (http/protobuf) -> http://localhost:4318/v1/logs
-[otel-plugin] trace export succeeded -> http://localhost:4318/v1/traces (8ms, items=3)
-[otel-plugin] metric export succeeded -> http://localhost:4318/v1/metrics (5ms, items=12)
-[otel-plugin] log export succeeded -> http://localhost:4318/v1/logs (4ms, items=6)
+[otel-plugin] log exporter enabled (http/protobuf) -> http://127.0.0.1:4318/otel/v1/logs
+[otel-plugin] trace export succeeded -> ...
+[otel-plugin] metric export succeeded -> ...
+[otel-plugin] log export succeeded -> ...
 ```
 
-If export fails, an error log is also emitted, for example:
+Then send a test message in OpenClaw and query by:
 
-```text
-[otel-plugin] trace export failed -> http://localhost:4318/v1/traces (13ms, items=2): 401 Unauthorized
-[otel-plugin] log export failed -> http://localhost:4318/v1/logs (7ms, items=3): 401 Unauthorized
-```
-
-Then send a test message in OpenClaw and query in your tracing platform with:
-
-- `service = openclaw-otel-plugin`
+- `service.name = openclaw-otel-plugin`
 - latest `trace_id`
 
-If your receiver supports metrics, you can also query:
+## Behavior Notes
 
-- `openclaw.requests`
-- `openclaw.request.duration`
-- `openclaw.tool.calls`
-- `openclaw.tool.errors`
-- `openclaw.tool.duration`
-- `openclaw.skill.activations`
-- `openclaw.model.calls`
-- `openclaw.tokens`
-- `openclaw.cost.usd`
-- `openclaw.run.duration_ms`
-- `openclaw.context.tokens`
-- `openclaw.webhook.received`
-- `openclaw.message.queued`
-- `openclaw.message.processed`
-- `openclaw.message.duration_ms`
-- `openclaw.queue.depth`
-- `openclaw.queue.wait_ms`
-- `openclaw.session.state`
-- `openclaw.session.stuck`
-- `openclaw.run.attempt`
+- The plugin enriches spans and logs with session, agent, provider, model, and preview fields derived from OpenClaw session snapshots
+- Skill attribution prefers runtime tool identity, then falls back to session skill snapshots, transcript content, and local skill catalogs under `~/.openclaw/workspace/skills`
+- Transcript-derived skill spans prefer actually invoked skills over merely mentioned skills
+- Tool loop diagnostics are attached to the active tool span when possible; critical loops mark the tool span as error
+- Canonical aliases such as `session_id`, `session_key`, `tool_name`, `tool_call_id`, `model_provider`, and `model_name` are emitted for easier querying
 
-If your receiver supports logs, the `otel-logs` route will also contain mirrored OpenClaw diagnostics events such as:
+## Common Issues
 
-- `session.state`
-- `message.queued`
-- `model.usage`
-- `message.processed`
-- `webhook.received`
-- `webhook.error`
-- `session.stuck`
-- `queue.lane.enqueue`
+### No data exported
 
-## Trace Notes
+- Check receiver reachability
+- Check `endpoint` and signal paths
+- Check auth headers
+- Check whether the plugin entry is enabled
+- Check `gateway.log` for `enabled`, `succeeded`, or `failed` exporter lines
 
-- Main trace hierarchy is `openclaw_request -> user_message -> main -> skill:* -> skill_call:* -> tool:* / provider:model -> assistant_message`
-- Tool execution exports independent `tool:<name>` spans with attributes such as `openclaw.tool.call_id` and `openclaw.tool.outcome`
-- `openclaw.session.stuck` is reported as a diagnostic alert and is not marked as an error
-- Skill identification combines session metadata, transcript content, and local skill data under `~/.openclaw/workspace/skills`
-- Metrics are split into two groups: plugin-added request/tool/skill/model metrics, and mirrored official `openclaw.*` diagnostics metrics
+### Logs missing
 
-## FAQ
+- Set `logsEnabled=true`
+- Make sure the receiver supports OTLP logs
+- Check `logsPath` and auth headers separately from trace and metrics routes
 
-### 1. No traces received
+### Config not taking effect
 
-Check the following in order:
-
-- Whether the OTLP receiver is available
-- Whether `endpoint` is configured correctly
-- Whether `headers` match the receiver authentication requirements
-- Whether the plugin is enabled in `openclaw.json`
-- Whether `gateway.log` contains the exporter enabled / export succeeded / export failed log lines
-- If validating `otel-logs`, confirm `logsEnabled=true`
-
-### 2. Incomplete skill names
-
-Check:
-
-- Whether the skill exists in session metadata or local workspace skills
-- Whether the skill name or description appears in transcript, reasoning, or output
-- Whether the gateway has been restarted after adding a local skill
-
-### 3. Configuration not taking effect
-
-Plugin custom config must be placed under:
+Custom fields must live under:
 
 ```text
 plugins.entries.openclaw-otel-plugin.config
 ```
 
-Do not place these fields directly at the plugin entry top level:
+Do not place these fields directly beside `enabled`:
 
 - `endpoint`
 - `tracePath`
@@ -354,23 +293,10 @@ Do not place these fields directly at the plugin entry top level:
 - `logsEnabled`
 - `logsPath`
 - `headers`
-- `agentProvider`
-- `globalTags`
+- `sampleRate`
 - `serviceName`
-- `resourceAttributes`
 - `flushIntervalMs`
 - `rootSpanTtlMs`
-
-## Repository Structure
-
-- `index.ts`: plugin entry
-- `src/config.ts`: config parsing
-- `src/service.ts`: trace, metrics, and logs generation/export logic
-- `src/trace-runtime.js`: runtime helper functions
-- `openclaw.plugin.json`: plugin manifest
-- `test/trace-runtime.test.mjs`: runtime tests
-
-## Todo
-
-- Add and consolidate `channel` traces
-- Refine protocol-level structure and compatibility
+- `agentProvider`
+- `globalTags`
+- `resourceAttributes`
