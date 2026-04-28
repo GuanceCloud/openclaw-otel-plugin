@@ -32,7 +32,6 @@ import {
   normalizeUserInputPreview,
   parseSessionKey,
   redactSensitiveText,
-  resolveSessionSpanName,
   resolveSpanWindow,
   sessionIdentity,
   stringAttrs,
@@ -117,7 +116,8 @@ export function createOtelPluginService(
           "openclaw.session.cwd": snapshot.sessionCwd,
           "openclaw.input.preview": normalizeUserInputPreview(snapshot.lastUserText),
           "openclaw.output.preview": clipPreview(snapshot.lastAssistantText),
-          "openclaw.reasoning.preview": normalizeReasoningPreview(snapshot.lastAssistantThinking),
+          output_summary: normalizeReasoningPreview(snapshot.lastAssistantThinking),
+          output_text_length: snapshot.lastAssistantThinking?.length,
           "openclaw.provider": attrs["openclaw.provider"] ?? snapshot.lastProvider,
           "openclaw.model": attrs["openclaw.model"] ?? snapshot.lastModel,
         };
@@ -198,7 +198,7 @@ export function createOtelPluginService(
           return undefined;
         }
         const span = tracer.startSpan(
-          resolveSessionSpanName(evt, "openclaw_request"),
+          "openclaw_request",
           {
             startTime: eventTimestamp(evt),
             kind: SpanKind.SERVER,
@@ -241,7 +241,7 @@ export function createOtelPluginService(
         }
         const userCtx = current?.userCtx;
         const span = tracer.startSpan(
-          resolveSessionSpanName(evt, "main"),
+          "agent_run",
           {
             startTime: eventTimestamp(evt),
             kind: SpanKind.INTERNAL,
@@ -268,35 +268,20 @@ export function createOtelPluginService(
           return undefined;
         }
         const existing = activeRuns.get(key);
-        if (existing?.userSpan) {
-          return existing;
-        }
         const root = getRoot(evt, true);
         if (!root) {
           return undefined;
         }
         const snapshot = loadSessionSnapshot(evt.sessionKey);
-        const userSpan = tracer.startSpan(
-          "user_message",
-          {
-            startTime: eventTime(evt.ts),
-            kind: SpanKind.CONSUMER,
-            attributes: stringAttrs({
-              "openclaw.channel": evt.channel,
-              "openclaw.source": evt.source,
-              "openclaw.queueDepth": evt.queueDepth,
-              "span.kind": "input",
-              "openclaw.input.preview": normalizeUserInputPreview(snapshot?.lastUserText),
-              "openclaw.input.length": snapshot?.lastUserText?.length,
-            }),
-          },
-          root.ctx,
-        );
-        userSpan.setStatus({ code: SpanStatusCode.OK });
-        const userCtx = trace.setSpan(root.ctx, userSpan);
-        const run = existing ?? createRunState(userCtx, evt.ts);
-        run.userSpan = userSpan;
-        run.userCtx = userCtx;
+        root.span.setAttributes(stringAttrs({
+          "openclaw.channel": evt.channel,
+          "openclaw.source": evt.source,
+          "openclaw.queueDepth": evt.queueDepth,
+          "openclaw.input.preview": normalizeUserInputPreview(snapshot?.lastUserText),
+          "openclaw.input.length": snapshot?.lastUserText?.length,
+        }));
+        const run = existing ?? createRunState(root.ctx, evt.ts);
+        run.userCtx = root.ctx;
         run.userStartTs = evt.ts;
         run.lastTouchedAt = Date.now();
         activeRuns.set(key, run as ActiveRunSpan);
@@ -494,13 +479,9 @@ export function createOtelPluginService(
           name,
           {
             startTime,
-            kind: name === "assistant_message"
-              ? SpanKind.PRODUCER
-              : name === "user_message"
-                ? SpanKind.CONSUMER
-                : name.includes("/")
-                  ? SpanKind.CLIENT
-                  : SpanKind.INTERNAL,
+            kind: name.includes("/")
+              ? SpanKind.CLIENT
+              : SpanKind.INTERNAL,
             attributes: stringAttrs(attrs),
           },
           parentCtx ?? root?.ctx,
@@ -586,11 +567,55 @@ export function createOtelPluginService(
       const {
         annotateToolLoop,
         emitSyntheticModelSpan,
+        emitTranscriptToolSpans,
         ensureSkillSpan,
         ensureTranscriptSkillSpans,
         getActiveSkillCtx,
         handleAgentEvent,
       } = toolSpanManager;
+
+      const emitFallbackThinkingSpan = (
+        evt: { sessionKey?: string; sessionId?: string; ts?: number; channel?: string },
+      ) => {
+        const key = sessionIdentity(evt);
+        if (!key) {
+          return;
+        }
+        const run = getRun(evt, false);
+        if (!run) {
+          return;
+        }
+        const snapshot = loadSessionSnapshot(evt.sessionKey ?? key);
+        const reasoningPreview = normalizeReasoningPreview(snapshot?.lastAssistantThinking);
+        if (!reasoningPreview || run.thinkingSpanEmitted) {
+          return;
+        }
+        const parentCtx = run.modelCtx ?? getActiveSkillCtx(run) ?? run.ctx;
+        const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
+          "thinking",
+          {
+            type: "message.processed",
+            sessionKey: evt.sessionKey,
+            sessionId: evt.sessionId,
+            ts: evt.ts ?? Date.now(),
+            channel: evt.channel ?? snapshot?.lastChannel,
+            outcome: "completed",
+          } as DiagnosticEventPayload,
+          {
+            session_channel: evt.channel ?? snapshot?.lastChannel,
+            "span.kind": "thinking",
+            output_summary: reasoningPreview,
+            output_text_length: snapshot?.lastAssistantThinking?.length,
+            "openclaw.provider": snapshot?.lastProvider,
+            "openclaw.model": snapshot?.lastModel,
+          },
+          MIN_VISIBLE_CHILD_MS,
+          parentCtx,
+        );
+        span.setStatus({ code: SpanStatusCode.OK });
+        span.end(endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs));
+        run.thinkingSpanEmitted = true;
+      };
 
       unsubscribeAgent = runtime?.events?.onAgentEvent?.(handleAgentEvent) ?? null;
 
@@ -619,6 +644,8 @@ export function createOtelPluginService(
         getActiveSkillCtx,
         ensureTranscriptSkillSpans,
         emitSyntheticModelSpan,
+        emitTranscriptToolSpans,
+        emitFallbackThinkingSpan,
         annotateToolLoop,
       });
 

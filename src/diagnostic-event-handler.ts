@@ -12,6 +12,7 @@ import {
   endTimeFromStart,
   eventTime,
   MIN_VISIBLE_CHILD_MS,
+  normalizeReasoningPreview,
   redactSensitiveText,
   setError,
   stringAttrs,
@@ -82,7 +83,9 @@ type DiagnosticEventHandlerDeps = {
   ): void;
   getActiveSkillCtx(run: ActiveRunSpan | undefined): any;
   ensureTranscriptSkillSpans(evt: { sessionKey?: string; sessionId?: string; ts?: number }): void;
-  emitSyntheticModelSpan(evt: Extract<DiagnosticEventPayload, { type: "message.processed" }>): void;
+  emitSyntheticModelSpan(evt: SessionEvent): void;
+  emitTranscriptToolSpans(evt: SessionEvent): void;
+  emitFallbackThinkingSpan(evt: SessionEvent): void;
   annotateToolLoop(evt: Extract<DiagnosticEventPayload, { type: "tool.loop" }>): boolean;
 };
 
@@ -107,6 +110,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     getActiveSkillCtx,
     ensureTranscriptSkillSpans,
     emitSyntheticModelSpan,
+    emitTranscriptToolSpans,
+    emitFallbackThinkingSpan,
     annotateToolLoop,
   } = deps;
 
@@ -177,6 +182,9 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           }
         }
         if (shouldCloseForSessionState(evt.state)) {
+          emitTranscriptToolSpans(evt);
+          emitSyntheticModelSpan(evt);
+          emitFallbackThinkingSpan(evt);
           endRun(evt, stringAttrs({
             "openclaw.state": evt.state,
             "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
@@ -335,6 +343,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       }
       case "message.processed": {
         const snapshot = loadSessionSnapshot(evt.sessionKey);
+        const reasoningPreview = normalizeReasoningPreview(snapshot?.lastAssistantThinking);
         const processedAttrs = {
           "openclaw.channel": evt.channel,
           "openclaw.messageId": evt.messageId ? String(evt.messageId) : undefined,
@@ -364,19 +373,28 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         ensureTranscriptSkillSpans(evt);
         emitSyntheticModelSpan(evt);
         const run = getRun(evt, true);
-        const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
-          "assistant_message",
-          evt,
-          processedAttrs,
-          evt.durationMs ?? MIN_VISIBLE_CHILD_MS,
-          run?.modelCtx ?? getActiveSkillCtx(run) ?? run?.ctx,
-        );
-        if (evt.outcome === "error") {
-          setError(span, SpanStatusCode.ERROR, evt.error ?? evt.reason);
-        } else {
-          span.setStatus({ code: SpanStatusCode.OK });
+        const outputParentCtx = run?.modelCtx ?? getActiveSkillCtx(run) ?? run?.ctx;
+        if (reasoningPreview) {
+          const { span: reasoningSpan, effectiveDurationMs, startTime, endTime } = createChildSpan(
+            "thinking",
+            evt,
+            {
+              session_channel: evt.channel,
+              "openclaw.messageId": evt.messageId ? String(evt.messageId) : undefined,
+              "openclaw.chatId": evt.chatId ? String(evt.chatId) : undefined,
+              "span.kind": "thinking",
+              output_summary: reasoningPreview,
+              output_text_length: snapshot?.lastAssistantThinking?.length,
+              "openclaw.provider": snapshot?.lastProvider,
+              "openclaw.model": snapshot?.lastModel,
+            },
+            evt.durationMs ?? MIN_VISIBLE_CHILD_MS,
+            outputParentCtx,
+          );
+          reasoningSpan.setStatus({ code: SpanStatusCode.OK });
+          reasoningSpan.end(endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs));
+          run && (run.thinkingSpanEmitted = true);
         }
-        span.end(endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs));
         logDiagnosticEvent(evt, processedAttrs, {
           body: `message.processed ${evt.outcome}`,
           severityNumber: evt.outcome === "error" ? SeverityNumber.ERROR : SeverityNumber.INFO,

@@ -56,6 +56,7 @@ export type ActiveRunSpan = {
   lastTouchedAt: number;
   mainStartTs: number;
   modelSpanEmitted: boolean;
+  thinkingSpanEmitted?: boolean;
   usedSkillNames: Set<string>;
   usedToolNames: Set<string>;
   usedToolTargets: Set<string>;
@@ -118,6 +119,17 @@ export type MetricInstruments = {
   diagnosticsRunAttemptCounter: any;
 };
 
+export type TranscriptToolCall = {
+  callId: string;
+  name: string;
+  args?: unknown;
+  result?: unknown;
+  meta?: unknown;
+  isError?: boolean;
+  startedAt?: number;
+  endedAt?: number;
+};
+
 export type SessionSnapshot = {
   sessionFile: string;
   sessionKey?: string;
@@ -132,6 +144,7 @@ export type SessionSnapshot = {
   mentionedSkillNames?: string[];
   invokedSkillNames?: string[];
   toolCallSkillNamesById?: Record<string, string>;
+  lastRunToolCalls?: TranscriptToolCall[];
   lastUserText?: string;
   lastAssistantText?: string;
   lastAssistantThinking?: string;

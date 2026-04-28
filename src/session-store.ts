@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { RuntimeMetadata, SessionSnapshot, SessionSnapshotStore, SkillCatalogEntry } from "./service-types.js";
+import type {
+  RuntimeMetadata,
+  SessionSnapshot,
+  SessionSnapshotStore,
+  SkillCatalogEntry,
+  TranscriptToolCall,
+} from "./service-types.js";
 import {
   buildSkillCatalogEntry,
   extractContentText,
@@ -46,6 +52,17 @@ function listSessionsIndexPaths(stateDir: string): string[] {
 function getAgentNameFromSessionsIndexPath(sessionsIndexPath: string): string | undefined {
   const agentDir = path.basename(path.dirname(path.dirname(sessionsIndexPath)));
   return agentDir.trim() || undefined;
+}
+
+function parseMessageTimestamp(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 export function resolveConfiguredAgents(stateDir: string): ConfiguredAgent[] {
@@ -244,6 +261,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       let lastAssistantUsage: SessionSnapshot["lastAssistantUsage"];
       const invokedSkillNames = new Set<string>();
       const toolCallSkillNamesById: Record<string, string> = {};
+      const currentRunToolCalls = new Map<string, TranscriptToolCall>();
       for (const line of lines) {
         if (line.type === "session" && typeof line.cwd === "string" && !sessionCwd) {
           sessionCwd = line.cwd;
@@ -258,12 +276,14 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         const message = envelope as Record<string, unknown>;
         if (message.role === "user") {
           lastUserText = extractContentText(message.content, "text") ?? lastUserText;
+          currentRunToolCalls.clear();
         }
         if (message.role === "assistant") {
           lastAssistantText = extractContentText(message.content, "text") ?? lastAssistantText;
           lastAssistantThinking = extractContentText(message.content, "thinking") ?? lastAssistantThinking;
           lastProvider = typeof message.provider === "string" ? message.provider : lastProvider;
           lastModel = typeof message.model === "string" ? message.model : lastModel;
+          const startedAt = parseMessageTimestamp(message.timestamp) ?? parseMessageTimestamp(line.timestamp);
           if (Array.isArray(message.content)) {
             for (const item of message.content) {
               if (!item || typeof item !== "object") {
@@ -279,6 +299,17 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
               if (!toolCallId || !toolName) {
                 continue;
               }
+              const existing = currentRunToolCalls.get(toolCallId);
+              currentRunToolCalls.set(toolCallId, {
+                callId: toolCallId,
+                name: toolName,
+                args,
+                result: existing?.result,
+                meta: existing?.meta,
+                isError: existing?.isError,
+                startedAt: existing?.startedAt ?? startedAt,
+                endedAt: existing?.endedAt,
+              });
               const skillName = inferSkillNameFromToolIdentity(
                 toolName,
                 extractToolTarget(toolName, args, undefined),
@@ -303,6 +334,24 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
                 typeof usage.totalTokens === "number" ? usage.totalTokens : undefined,
             };
           }
+        }
+        if (message.role === "toolResult") {
+          const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId.trim() : "";
+          const toolName = typeof message.toolName === "string" ? message.toolName.trim() : "";
+          if (!toolCallId || !toolName) {
+            continue;
+          }
+          const existing = currentRunToolCalls.get(toolCallId);
+          currentRunToolCalls.set(toolCallId, {
+            callId: toolCallId,
+            name: toolName,
+            args: existing?.args,
+            result: message.details ?? extractContentText(message.content, "text"),
+            meta: message.details,
+            isError: message.isError === true,
+            startedAt: existing?.startedAt,
+            endedAt: parseMessageTimestamp(message.timestamp) ?? parseMessageTimestamp(line.timestamp),
+          });
         }
       }
 
@@ -334,6 +383,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         mentionedSkillNames: Array.from(mentionedSkillNames),
         invokedSkillNames: Array.from(invokedSkillNames),
         toolCallSkillNamesById,
+        lastRunToolCalls: Array.from(currentRunToolCalls.values()),
         lastUserText,
         lastAssistantText: liveAssistantText ?? lastAssistantText,
         lastAssistantThinking,

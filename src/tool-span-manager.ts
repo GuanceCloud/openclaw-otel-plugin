@@ -568,9 +568,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     return true;
   };
 
-  const emitSyntheticModelSpan = (
-    evt: Extract<DiagnosticEventPayload, { type: "message.processed" }>,
-  ) => {
+  const emitSyntheticModelSpan = (evt: SessionEvent) => {
     const run = getRun(evt, false);
     const snapshot = loadSessionSnapshot(evt.sessionKey);
     if (!run || run.modelSpanEmitted || (!snapshot?.lastProvider && !snapshot?.lastModel)) {
@@ -607,6 +605,47 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     run.modelCtx = trace.setSpan(getActiveSkillCtx(run) ?? run.ctx, span);
     run.modelStartTs = startTs;
     run.modelSpanEmitted = true;
+  };
+
+  const emitTranscriptToolSpans = (evt: SessionEvent) => {
+    const sessionKey = evt.sessionKey;
+    if (!sessionKey) {
+      return;
+    }
+    const run = getRun({ sessionKey }, false) ?? ensureUserSpan({ sessionKey, ts: evt.ts ?? Date.now() });
+    if (!run || run.usedToolNames.size > 0) {
+      return;
+    }
+    const snapshot = loadSessionSnapshot(sessionKey);
+    for (const toolCall of snapshot?.lastRunToolCalls ?? []) {
+      handleAgentEvent({
+        sessionKey,
+        ts: toolCall.startedAt ?? evt.ts ?? Date.now(),
+        stream: "tool",
+        data: {
+          name: toolCall.name,
+          toolCallId: toolCall.callId,
+          phase: "start",
+          args: toolCall.args,
+        },
+      });
+      if (toolCall.result === undefined && toolCall.isError !== true) {
+        continue;
+      }
+      handleAgentEvent({
+        sessionKey,
+        ts: toolCall.endedAt ?? toolCall.startedAt ?? evt.ts ?? Date.now(),
+        stream: "tool",
+        data: {
+          name: toolCall.name,
+          toolCallId: toolCall.callId,
+          phase: "result",
+          result: toolCall.result,
+          meta: toolCall.meta,
+          isError: toolCall.isError === true,
+        },
+      });
+    }
   };
 
   const handleAgentEvent = (evt: any) => {
@@ -752,6 +791,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
   return {
     annotateToolLoop,
     emitSyntheticModelSpan,
+    emitTranscriptToolSpans,
     endToolSpan,
     ensureSkillSpan,
     ensureToolSpan,

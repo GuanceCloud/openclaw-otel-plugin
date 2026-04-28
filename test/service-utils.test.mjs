@@ -44,6 +44,7 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
     "openclaw.sessionId": "session-1",
     "openclaw.sessionKey": "agent:main:feishu:direct:ou_8f4b1d1bb3cd1cedf6003669dea4b2bf",
     "openclaw.channel": "webchat",
+    "openclaw.session.cwd": "/tmp/workspace",
     "openclaw.provider": "doubao",
     "openclaw.model": "ark-code-latest",
     "openclaw.tokens.input": 12,
@@ -70,6 +71,7 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.session_scope, "direct");
   assert.equal(attrs.session_channel_target, "ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
   assert.equal(attrs.channel, "webchat");
+  assert.equal(attrs.session_cwd, "/tmp/workspace");
   assert.equal(attrs.model_provider, "doubao");
   assert.equal(attrs.model_name, "ark-code-latest");
   assert.equal(attrs.input_tokens, 12);
@@ -87,6 +89,7 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.skill_source, "runtime");
   assert.equal(attrs.final_status, "completed");
   assert.equal("openclaw.sessionId" in attrs, false);
+  assert.equal("openclaw.session.cwd" in attrs, false);
   assert.equal("openclaw.tool.call_id" in attrs, false);
   assert.equal("openclaw.skill.call_id" in attrs, false);
 });

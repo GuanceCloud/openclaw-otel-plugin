@@ -1,6 +1,7 @@
 # openclaw-otel-plugin
 
 [English](./README.md)
+[变更记录](./CHANGELOG.md)
 
 `openclaw-otel-plugin` 用于把 OpenClaw 的运行时事件和诊断事件导出到任意兼容 `OTLP HTTP/protobuf` 的接收端。它会把会话过程整理成 trace，补充插件侧 metrics，镜像 OpenClaw 内建 diagnostics metrics，并可选地把 diagnostics 事件同步为 OTEL logs。
 
@@ -8,14 +9,22 @@
 
 ### Traces
 
-- 会话级 root span：有 `sessionKey` 或 `sessionId` 时直接用它作为 span 名称，否则回退为 `openclaw_request`
-- 会话级 run span：有 `sessionKey` 或 `sessionId` 时直接用它作为 span 名称，否则回退为 `main`
-- 运行时 span，例如 `user_message`、`assistant_message`
+- 会话级 root span：固定命名为 `openclaw_request`
+- 会话级 run span：固定命名为 `agent_run`
+- 运行时 span，例如 `thinking`
 - 模型 span，例如 `<provider>/<model>`
 - Skill 汇总 span，例如 `skill:<name>`
 - Skill 调用 span，例如 `skill_call:<name>`
 - Tool span，例如 `tool:<name>`
 - 诊断 span，例如 `openclaw.session.stuck`、`openclaw.webhook.received`、`openclaw.webhook.processed`、`openclaw.webhook.error`、`queue.lane.enqueue`、`queue.lane.dequeue`、`diagnostic.heartbeat`、`tool.loop`
+
+`thinking` span 说明：
+
+- span 名称固定为 `thinking`
+- `span.kind = thinking`
+- `thinking` span 上使用 `session_channel`，不再使用旧的通用 `channel`
+- `output_summary` 保存归一化后的 thinking 预览
+- `output_text_length` 保存原始 thinking 文本长度
 
 ### Metrics
 
@@ -256,8 +265,11 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 ## 行为说明
 
 - 插件会从 OpenClaw 会话快照里补齐 session、agent、provider、model，以及输入/输出预览等属性
+- root 和 run 是两层有意分开的会话级 span：前者表示请求入口，后者表示 `agent_run` 执行生命周期
+- 当运行时缺少细粒度事件时，插件会回放 transcript 状态来补 `thinking`、model 和 tool spans
 - Skill 归因优先使用运行时 tool 身份，其次回退到会话技能快照、transcript 内容和 `~/.openclaw/workspace/skills` 下的本地技能目录
 - transcript 推导 skill 时，优先使用“实际调用过的 skill”，而不是只在文本里提到过的 skill
+- 如果无法推导出 skill 身份，插件会保留 tool spans，但不会凭空制造一个通用 skill span
 - `tool.loop` 事件如果能命中活跃 tool span，会直接回写到该 tool span；`critical` 级别会把 tool span 标记为 error
 - 导出时会补一组便于查询的别名字段，例如 `session_id`、`session_key`、`tool_name`、`tool_call_id`、`model_provider`、`model_name`
 

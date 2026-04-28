@@ -1,6 +1,7 @@
 # openclaw-otel-plugin
 
 [中文说明](./README_ZH.md)
+[Changelog](./CHANGELOG.md)
 
 `openclaw-otel-plugin` exports OpenClaw runtime and diagnostics data to any OTLP HTTP/protobuf receiver. It turns session activity into traces, adds plugin-level metrics, mirrors built-in OpenClaw diagnostics metrics, and can optionally mirror diagnostics events to OTEL logs.
 
@@ -8,14 +9,22 @@
 
 ### Traces
 
-- A session-scoped root span. When `sessionKey` or `sessionId` is available, that value is used as the span name; otherwise it falls back to `openclaw_request`
-- A session-scoped run span. When `sessionKey` or `sessionId` is available, that value is used as the span name; otherwise it falls back to `main`
-- Runtime spans such as `user_message` and `assistant_message`
+- A session-scoped root span named `openclaw_request`
+- A session-scoped run span named `agent_run`
+- Runtime spans such as `thinking`
 - Model spans such as `<provider>/<model>`
 - Skill summary spans such as `skill:<name>`
 - Skill call spans such as `skill_call:<name>`
 - Tool spans such as `tool:<name>`
 - Diagnostic spans such as `openclaw.session.stuck`, `openclaw.webhook.received`, `openclaw.webhook.processed`, `openclaw.webhook.error`, `queue.lane.enqueue`, `queue.lane.dequeue`, `diagnostic.heartbeat`, and `tool.loop`
+
+Thinking span notes:
+
+- Span name: `thinking`
+- `span.kind = thinking`
+- `session_channel` is attached to the thinking span instead of the older generic `channel`
+- `output_summary` carries the normalized thinking preview
+- `output_text_length` carries the original thinking text length
 
 ### Metrics
 
@@ -256,8 +265,11 @@ Then send a test message in OpenClaw and query by:
 ## Behavior Notes
 
 - The plugin enriches spans and logs with session, agent, provider, model, and preview fields derived from OpenClaw session snapshots
+- Root and run spans are intentionally separate. The root span models the inbound request envelope, while `agent_run` models the agent execution lifecycle.
+- When fine-grained runtime events are missing, the plugin can replay transcript state to backfill `thinking`, model, and tool spans.
 - Skill attribution prefers runtime tool identity, then falls back to session skill snapshots, transcript content, and local skill catalogs under `~/.openclaw/workspace/skills`
 - Transcript-derived skill spans prefer actually invoked skills over merely mentioned skills
+- If no skill identity can be inferred, the plugin will keep tool spans without fabricating a generic skill span.
 - Tool loop diagnostics are attached to the active tool span when possible; critical loops mark the tool span as error
 - Canonical aliases such as `session_id`, `session_key`, `tool_name`, `tool_call_id`, `model_provider`, and `model_name` are emitted for easier querying
 

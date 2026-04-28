@@ -39,6 +39,7 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
     lastTouchedAt: startedAt,
     mainStartTs,
     modelSpanEmitted: false,
+    thinkingSpanEmitted: false,
     aggregate: createRunAggregate(),
     usedSkillNames: new Set<string>(),
     usedToolNames: new Set<string>(),
@@ -201,6 +202,7 @@ function withCanonicalAliases(
     next.session_channel_target = sessionKeyParts.sessionChannelTarget;
   }
   promoteAlias(next, "channel", "openclaw.channel", "openclaw.session.lastChannel");
+  promoteAlias(next, "session_cwd", "openclaw.session.cwd");
   promoteAlias(next, "source_app", "openclaw.session.origin.provider");
   promoteAlias(next, "entry_point", "openclaw.session.origin.surface");
   promoteAlias(next, "model_provider", "openclaw.provider");
