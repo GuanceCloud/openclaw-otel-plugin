@@ -193,6 +193,18 @@ export async function startOtelBootstrap(
       description: "OpenClaw request duration in milliseconds",
       unit: "ms",
     }),
+    sessionInputTokensCounter: meter.createCounter("openclaw.session.tokens.input", {
+      description: "Session-scoped input tokens emitted by periodic session scans",
+    }),
+    sessionOutputTokensCounter: meter.createCounter("openclaw.session.tokens.output", {
+      description: "Session-scoped output tokens emitted by periodic session scans",
+    }),
+    sessionTotalTokensCounter: meter.createCounter("openclaw.session.tokens.total", {
+      description: "Session-scoped total tokens emitted by periodic session scans",
+    }),
+    sessionTraceCounter: meter.createCounter("openclaw.session.traces", {
+      description: "Session trace count emitted by periodic session scans with session_id tagging",
+    }),
     toolCallCounter: meter.createCounter("openclaw.tool.calls", {
       description: "Total OpenClaw tool calls observed by the plugin",
     }),

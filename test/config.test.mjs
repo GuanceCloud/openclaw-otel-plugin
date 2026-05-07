@@ -97,3 +97,9 @@ test("resolveOtelPluginConfig keeps logs disabled by default and allows enabling
   assert.equal(disabledConfig.logsEnabled, false);
   assert.equal(enabledConfig.logsEnabled, true);
 });
+
+test("resolveOtelPluginConfig uses 30s as the default metrics export interval", () => {
+  const config = resolveOtelPluginConfig({});
+
+  assert.equal(config.flushIntervalMs, 30000);
+});

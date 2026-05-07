@@ -1,4 +1,6 @@
 export type ActiveRootSpan = {
+  requestKey?: string;
+  sessionIdentity?: string;
   span: any;
   ctx: any;
   startedAt: number;
@@ -49,12 +51,28 @@ export type RunAggregate = {
   lastModel?: string;
 };
 
+export type SessionUsageTotals = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+};
+
 export type ActiveRunSpan = {
+  requestKey?: string;
+  sessionIdentity?: string;
   span: any;
   ctx: any;
   startedAt: number;
   lastTouchedAt: number;
   mainStartTs: number;
+  messageQueuedTs?: number;
+  orchestrationCursorTs?: number;
+  channelIngressEmitted?: boolean;
+  dispatchQueueEmitted?: boolean;
+  sessionProcessingEmitted?: boolean;
+  channelEgressEmitted?: boolean;
   modelSpanEmitted: boolean;
   thinkingSpanEmitted?: boolean;
   usedSkillNames: Set<string>;
@@ -72,6 +90,7 @@ export type ActiveRunSpan = {
   modelSpan?: any;
   modelCtx?: any;
   modelStartTs?: number;
+  modelEndTs?: number;
   aggregate: RunAggregate;
 };
 
@@ -94,6 +113,10 @@ export type RuntimeMetadata = {
 export type MetricInstruments = {
   requestCounter: any;
   requestDuration: any;
+  sessionInputTokensCounter: any;
+  sessionOutputTokensCounter: any;
+  sessionTotalTokensCounter: any;
+  sessionTraceCounter: any;
   toolCallCounter: any;
   toolErrorCounter: any;
   toolDuration: any;
@@ -130,10 +153,23 @@ export type TranscriptToolCall = {
   endedAt?: number;
 };
 
+export type TranscriptAssistantTurn = {
+  startedAt?: number;
+  endedAt?: number;
+  provider?: string;
+  model?: string;
+  inputPreview?: string;
+  thinking?: string;
+  text?: string;
+  outputPreview?: string;
+  outputKind?: string;
+};
+
 export type SessionSnapshot = {
   sessionFile: string;
   sessionKey?: string;
   sessionId?: string;
+  createdAt?: number;
   updatedAt?: number;
   chatType?: string;
   lastChannel?: string;
@@ -145,8 +181,11 @@ export type SessionSnapshot = {
   invokedSkillNames?: string[];
   toolCallSkillNamesById?: Record<string, string>;
   lastRunToolCalls?: TranscriptToolCall[];
+  lastRunAssistantTurns?: TranscriptAssistantTurn[];
   lastUserText?: string;
+  lastUserTs?: number;
   lastAssistantText?: string;
+  lastAssistantTs?: number;
   lastAssistantThinking?: string;
   lastProvider?: string;
   lastModel?: string;
@@ -157,6 +196,8 @@ export type SessionSnapshot = {
     cacheWrite?: number;
     totalTokens?: number;
   };
+  sessionUsageTotals?: SessionUsageTotals;
+  traceCount?: number;
   mtimeMs: number;
 };
 

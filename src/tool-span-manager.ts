@@ -16,8 +16,6 @@ import {
   clipValuePreview,
   collectToolSummaryValues,
   endSpanSafely,
-  endTimeFromStart,
-  eventTime,
   extractToolResultStatus,
   inferSkillNameFromTool,
   inferSkillNameFromToolIdentity,
@@ -80,6 +78,36 @@ type ToolSpanManagerDeps = {
   createChildSpan: ChildSpanFactory;
   eventTimestamp(evt: { ts?: number }): Date;
   setLatestAssistantText(sessionKey: string, text: string): void;
+  emitRuntimeOrchestrationSpan(
+    evt: SessionEvent,
+    startTs: number | undefined,
+    endTs: number | undefined,
+    phase: string,
+    attrs?: Record<string, string | number | boolean | undefined>,
+    parentCtx?: any,
+  ): any;
+  ensureRuntimeLifecycleSpans(
+    evt: {
+      sessionKey?: string;
+      sessionId?: string;
+      ts?: number;
+      channel?: string;
+      source?: string;
+      outcome?: string;
+    },
+    options?: {
+      createIfMissing?: boolean;
+      startTsHint?: number;
+      processingStartTs?: number;
+      nextActionTs?: number;
+      emitEgress?: boolean;
+      snapshot?: SessionSnapshot | undefined;
+      outputPreview?: string;
+      outputLength?: number;
+      outcome?: string;
+    },
+  ): ActiveRunSpan | undefined;
+  emitModelTurnDebugLog(payload: Record<string, unknown>): void;
 };
 
 export type ToolSpanManager = ReturnType<typeof createToolSpanManager>;
@@ -99,6 +127,9 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     createChildSpan,
     eventTimestamp,
     setLatestAssistantText,
+    emitRuntimeOrchestrationSpan,
+    ensureRuntimeLifecycleSpans,
+    emitModelTurnDebugLog,
   } = deps;
 
   const getActiveSkillCtx = (run: ActiveRunSpan | undefined) => {
@@ -536,6 +567,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       ? new Date(Math.max(evt.ts, tool.startedAt + MIN_VISIBLE_CHILD_MS))
       : undefined;
     endSpanSafely(tool.span, endTs);
+    run.orchestrationCursorTs = endTs?.getTime() ?? evt.ts ?? run.orchestrationCursorTs;
     if (tool.skillName) {
       endSkillInvocationSpan(evt, tool.toolCallId, endTs, isError);
     }
@@ -568,24 +600,199 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     return true;
   };
 
-  const emitSyntheticModelSpan = (evt: SessionEvent) => {
-    const run = getRun(evt, false);
+  const firstToolStartedAt = (snapshot: SessionSnapshot | undefined): number | undefined => {
+    const values = (snapshot?.lastRunToolCalls ?? [])
+      .map((toolCall) => toolCall.startedAt)
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+      .sort((a, b) => a - b);
+    return values[0];
+  };
+
+  const resolveReplayRunStartTs = (
+    snapshot: SessionSnapshot | undefined,
+    fallbackTs: number,
+  ): number => {
+    const candidates = [
+      snapshot?.lastUserTs,
+      firstToolStartedAt(snapshot),
+      snapshot?.lastAssistantTs,
+      fallbackTs,
+    ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    return candidates.length > 0 ? Math.min(...candidates) : fallbackTs;
+  };
+
+  const resolveSyntheticModelEndTs = (
+    snapshot: SessionSnapshot | undefined,
+    fallbackTs: number,
+  ): number => firstToolStartedAt(snapshot) ?? snapshot?.lastAssistantTs ?? fallbackTs;
+
+  const emitTranscriptModelSpans = (evt: SessionEvent) => {
     const snapshot = loadSessionSnapshot(evt.sessionKey);
+    const turns = (snapshot?.lastRunAssistantTurns ?? [])
+      .filter((turn) => typeof turn.endedAt === "number" && Number.isFinite(turn.endedAt))
+      .sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+    if (turns.length === 0) {
+      return false;
+    }
+    const replayEndTs = typeof evt.ts === "number" ? evt.ts : Date.now();
+    const replayStartTs = resolveReplayRunStartTs(snapshot, replayEndTs);
+    const run = getRun({
+      sessionKey: evt.sessionKey,
+      sessionId: evt.sessionId,
+      ts: replayStartTs,
+    }, true);
+    if (!run || run.modelSpanEmitted) {
+      return run?.modelSpanEmitted === true;
+    }
+    ensureRuntimeLifecycleSpans(
+      {
+        sessionKey: evt.sessionKey,
+        sessionId: evt.sessionId,
+        ts: replayStartTs,
+        channel: snapshot?.lastChannel,
+      },
+      {
+        createIfMissing: true,
+        startTsHint: replayStartTs,
+        processingStartTs: replayStartTs,
+        nextActionTs: turns[0]?.startedAt,
+        snapshot,
+      },
+    );
+
+    for (const [index, turn] of turns.entries()) {
+      if (index === 0 && typeof run.orchestrationCursorTs === "number") {
+        emitRuntimeOrchestrationSpan(
+          evt,
+          run.orchestrationCursorTs,
+          turn.startedAt,
+          "pre_model",
+          {
+            "openclaw.provider": turn.provider ?? snapshot?.lastProvider,
+            "openclaw.model": turn.model ?? snapshot?.lastModel,
+          },
+          run.ctx,
+        );
+      }
+      const rawStartTs = typeof turn.startedAt === "number" ? turn.startedAt : replayStartTs;
+      const rawEndTs = typeof turn.endedAt === "number" ? turn.endedAt : rawStartTs + 1;
+      const startTs = Math.max(rawStartTs, run.mainStartTs);
+      const endTs = Math.max(rawEndTs, startTs + 1);
+      const span = tracer.startSpan(
+        "model_request",
+        {
+          startTime: new Date(startTs),
+          kind: SpanKind.CLIENT,
+          attributes: stringAttrs(enrichWithTranscript(evt.sessionKey, {
+            __suppress_session_output_preview: true,
+            __suppress_session_output_summary: true,
+            "span.kind": "model",
+            "openclaw.input.preview": turn.inputPreview,
+            "openclaw.output.preview": turn.outputPreview,
+            "openclaw.output.kind": turn.outputKind,
+            output_summary: clipPreview(turn.thinking?.trim()),
+            output_text_length: turn.thinking?.length,
+            "openclaw.provider": turn.provider ?? snapshot?.lastProvider,
+            "openclaw.model": turn.model ?? snapshot?.lastModel,
+            "llm.provider": turn.provider ?? snapshot?.lastProvider,
+            "llm.model": turn.model ?? snapshot?.lastModel,
+          })),
+        },
+        run.ctx,
+      );
+      span.setStatus({ code: SpanStatusCode.OK });
+      endSpanSafely(span, new Date(endTs));
+      run.modelCtx = trace.setSpan(run.ctx, span);
+      run.modelStartTs = startTs;
+      run.modelEndTs = endTs;
+      run.orchestrationCursorTs = endTs;
+      emitModelTurnDebugLog({
+        source: "transcript",
+        trace_id: typeof span.spanContext === "function" ? span.spanContext().traceId : undefined,
+        span_id: typeof span.spanContext === "function" ? span.spanContext().spanId : undefined,
+        session_key: evt.sessionKey,
+        session_id: evt.sessionId,
+        turn_index: index + 1,
+        provider: turn.provider ?? snapshot?.lastProvider,
+        model: turn.model ?? snapshot?.lastModel,
+        start_ts: startTs,
+        end_ts: endTs,
+        duration_ms: Math.max(endTs - startTs, 1),
+        input_preview: turn.inputPreview,
+        output_preview: turn.outputPreview,
+        output_kind: turn.outputKind,
+        thinking_summary: clipPreview(turn.thinking?.trim()),
+      });
+    }
+
+    run.modelSpanEmitted = true;
+    return true;
+  };
+
+  const emitSyntheticModelSpan = (evt: SessionEvent) => {
+    const snapshot = loadSessionSnapshot(evt.sessionKey);
+    const endTs = typeof evt.ts === "number" ? evt.ts : Date.now();
+    const replayStartTs = resolveReplayRunStartTs(snapshot, endTs);
+    const run = getRun({
+      sessionKey: evt.sessionKey,
+      sessionId: evt.sessionId,
+      ts: replayStartTs,
+    }, true);
     if (!run || run.modelSpanEmitted || (!snapshot?.lastProvider && !snapshot?.lastModel)) {
       return;
     }
+    const modelEndTs = resolveSyntheticModelEndTs(snapshot, endTs);
+    ensureRuntimeLifecycleSpans(
+      {
+        sessionKey: evt.sessionKey,
+        sessionId: evt.sessionId,
+        ts: replayStartTs,
+        channel: snapshot?.lastChannel,
+      },
+      {
+        createIfMissing: true,
+        startTsHint: replayStartTs,
+        processingStartTs: replayStartTs,
+        nextActionTs: modelEndTs,
+        snapshot,
+      },
+    );
     if (run.usedSkillNames.size === 0) {
       ensureTranscriptSkillSpans(evt);
     }
-    const totalDuration = Math.max(evt.durationMs ?? 0, MIN_VISIBLE_MODEL_MS);
-    const startTs = Math.max(evt.ts - totalDuration, run.mainStartTs + MIN_VISIBLE_CHILD_MS * 2);
+    const totalDuration = Math.max(
+      typeof evt.durationMs === "number" ? evt.durationMs : 0,
+      modelEndTs - replayStartTs,
+      MIN_VISIBLE_MODEL_MS,
+    );
+    const minStartTs = Math.min(run.mainStartTs + MIN_VISIBLE_CHILD_MS * 2, modelEndTs - 1);
+    const startTs = Math.max(modelEndTs - totalDuration, minStartTs);
+    const lastTurn = snapshot.lastRunAssistantTurns?.at(-1);
+    emitRuntimeOrchestrationSpan(
+      evt,
+      run.mainStartTs,
+      startTs,
+      "pre_model",
+      {
+        "openclaw.provider": snapshot.lastProvider,
+        "openclaw.model": snapshot.lastModel,
+      },
+      run.ctx,
+    );
     const span = tracer.startSpan(
-      `${snapshot.lastProvider ?? "model"}/${snapshot.lastModel ?? "unknown"}`,
+      "model_request",
       {
         startTime: new Date(startTs),
         kind: SpanKind.CLIENT,
         attributes: stringAttrs(enrichWithTranscript(evt.sessionKey, {
+          __suppress_session_output_preview: true,
+          __suppress_session_output_summary: true,
           "span.kind": "model",
+          "openclaw.input.preview": lastTurn?.inputPreview ?? snapshot.lastUserText,
+          "openclaw.output.preview": lastTurn?.outputPreview ?? clipPreview(snapshot.lastAssistantText),
+          "openclaw.output.kind": lastTurn?.outputKind ?? (snapshot.lastAssistantText ? "text" : undefined),
+          output_summary: clipPreview(snapshot.lastAssistantThinking?.trim()),
+          output_text_length: snapshot.lastAssistantThinking?.length,
           "openclaw.provider": snapshot.lastProvider,
           "openclaw.model": snapshot.lastModel,
           "llm.provider": snapshot.lastProvider,
@@ -604,7 +811,26 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     run.modelSpan = span;
     run.modelCtx = trace.setSpan(getActiveSkillCtx(run) ?? run.ctx, span);
     run.modelStartTs = startTs;
+    run.modelEndTs = modelEndTs;
     run.modelSpanEmitted = true;
+    run.orchestrationCursorTs = modelEndTs;
+    emitModelTurnDebugLog({
+      source: "synthetic",
+      trace_id: typeof span.spanContext === "function" ? span.spanContext().traceId : undefined,
+      span_id: typeof span.spanContext === "function" ? span.spanContext().spanId : undefined,
+      session_key: evt.sessionKey,
+      session_id: evt.sessionId,
+      turn_index: lastTurn ? snapshot.lastRunAssistantTurns?.length : undefined,
+      provider: snapshot.lastProvider,
+      model: snapshot.lastModel,
+      start_ts: startTs,
+      end_ts: modelEndTs,
+      duration_ms: Math.max(modelEndTs - startTs, 1),
+      input_preview: lastTurn?.inputPreview ?? snapshot.lastUserText,
+      output_preview: lastTurn?.outputPreview ?? clipPreview(snapshot.lastAssistantText),
+      output_kind: lastTurn?.outputKind ?? (snapshot.lastAssistantText ? "text" : undefined),
+      thinking_summary: clipPreview(snapshot.lastAssistantThinking?.trim()),
+    });
   };
 
   const emitTranscriptToolSpans = (evt: SessionEvent) => {
@@ -612,11 +838,16 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (!sessionKey) {
       return;
     }
-    const run = getRun({ sessionKey }, false) ?? ensureUserSpan({ sessionKey, ts: evt.ts ?? Date.now() });
+    const snapshot = loadSessionSnapshot(sessionKey);
+    const replayStartTs = resolveReplayRunStartTs(snapshot, evt.ts ?? Date.now());
+    const run = getRun({
+      sessionKey,
+      sessionId: evt.sessionId,
+      ts: replayStartTs,
+    }, true);
     if (!run || run.usedToolNames.size > 0) {
       return;
     }
-    const snapshot = loadSessionSnapshot(sessionKey);
     for (const toolCall of snapshot?.lastRunToolCalls ?? []) {
       handleAgentEvent({
         sessionKey,
@@ -790,6 +1021,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
 
   return {
     annotateToolLoop,
+    emitTranscriptModelSpans,
     emitSyntheticModelSpan,
     emitTranscriptToolSpans,
     endToolSpan,

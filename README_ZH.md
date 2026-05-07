@@ -9,22 +9,20 @@
 
 ### Traces
 
-- 会话级 root span：固定命名为 `openclaw_request`
-- 会话级 run span：固定命名为 `agent_run`
-- 运行时 span，例如 `thinking`
-- 模型 span，例如 `<provider>/<model>`
+- 按单条用户消息生成的 root span：固定命名为 `openclaw_request`
+- 按单条用户消息生成的 run span：固定命名为 `agent_run`
+- 运行时生命周期 span，例如 `channel_ingress`、`dispatch_queue`、`session_processing`、`runtime_orchestration`、`channel_egress`
+- 模型 span：固定命名为 `model_request`
 - Skill 汇总 span，例如 `skill:<name>`
 - Skill 调用 span，例如 `skill_call:<name>`
 - Tool span，例如 `tool:<name>`
-- 诊断 span，例如 `openclaw.session.stuck`、`openclaw.webhook.received`、`openclaw.webhook.processed`、`openclaw.webhook.error`、`queue.lane.enqueue`、`queue.lane.dequeue`、`diagnostic.heartbeat`、`tool.loop`
+- 诊断 span，例如 `openclaw.session.stuck`、`openclaw.webhook.received`、`openclaw.webhook.processed`、`openclaw.webhook.error`、`tool.loop`
 
-`thinking` span 说明：
+Trace 说明：
 
-- span 名称固定为 `thinking`
-- `span.kind = thinking`
-- `thinking` span 上使用 `session_channel`，不再使用旧的通用 `channel`
-- `output_summary` 保存归一化后的 thinking 预览
-- `output_text_length` 保存原始 thinking 文本长度
+- 一条入站用户消息对应一条 trace
+- `message.processed` 会优先按 transcript 回放完整 turn；后续 `session.state idle` 只作为 fallback 收尾
+- transcript 回放会按 assistant turn 逐个产出 `model_request`，多工具会话会显示成 `model -> tool -> model` 循环，而不是一个超长模型 span
 
 ### Metrics
 
@@ -32,6 +30,10 @@
 
 - `openclaw.requests`
 - `openclaw.request.duration`
+- `openclaw.session.tokens.input`
+- `openclaw.session.tokens.output`
+- `openclaw.session.tokens.total`
+- `openclaw.session.traces`
 - `openclaw.tool.calls`
 - `openclaw.tool.errors`
 - `openclaw.tool.duration`
@@ -128,7 +130,7 @@ npm run build
           },
           "sampleRate": 1,
           "serviceName": "openclaw-otel-plugin",
-          "flushIntervalMs": 15000,
+          "flushIntervalMs": 30000,
           "rootSpanTtlMs": 600000,
           "resourceAttributes": {
             "agent_provider": "openclaw",
@@ -156,7 +158,7 @@ npm run build
 | `serviceName` | `openclaw-otel-plugin` | 会作为 OTEL `service.name` 导出 |
 | `headers` | 未设置 | 对 traces、metrics、logs 统一附加的 HTTP Header |
 | `sampleRate` | 未设置 | 可选采样率，取值范围 `[0, 1]` |
-| `flushIntervalMs` | `15000` | metrics 周期导出间隔 |
+| `flushIntervalMs` | `30000` | metrics 周期导出间隔 |
 | `rootSpanTtlMs` | `600000` | root/run span 长时间无活动后自动收尾 |
 | `resourceAttributes` | `{ "agent_provider": "openclaw" }` | 固定 OTEL resource attributes |
 
@@ -267,6 +269,9 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 - 插件会从 OpenClaw 会话快照里补齐 session、agent、provider、model，以及输入/输出预览等属性
 - root 和 run 是两层有意分开的会话级 span：前者表示请求入口，后者表示 `agent_run` 执行生命周期
 - 当运行时缺少细粒度事件时，插件会回放 transcript 状态来补 `thinking`、model 和 tool spans
+- 插件会在启动后开始对激活中的 session 做周期扫描，按 `flushIntervalMs` 周期继续扫描，默认周期是 `30s`；session 指标按扫描结果增量上报，并带上 `session_id` tag
+- `openclaw.session.tokens.*` 和 `openclaw.session.traces` 统计的是 session 级累计值，不再绑定单次 run 结束时机
+- `openclaw.session.tokens.*` 的累计值优先来自运行时 `model.usage` 事件，不依赖 transcript 中的 `message.usage` 是否落盘
 - Skill 归因优先使用运行时 tool 身份，其次回退到会话技能快照、transcript 内容和 `~/.openclaw/workspace/skills` 下的本地技能目录
 - transcript 推导 skill 时，优先使用“实际调用过的 skill”，而不是只在文本里提到过的 skill
 - 如果无法推导出 skill 身份，插件会保留 tool spans，但不会凭空制造一个通用 skill span

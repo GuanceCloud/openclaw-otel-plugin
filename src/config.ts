@@ -20,7 +20,7 @@ const DEFAULT_METRICS_PATH = "v1/metrics";
 const DEFAULT_LOGS_PATH = "v1/logs";
 const DEFAULT_AGENT_PROVIDER = "openclaw";
 const DEFAULT_SERVICE_NAME = "openclaw-otel-plugin";
-const DEFAULT_FLUSH_INTERVAL_MS = 15000;
+const DEFAULT_FLUSH_INTERVAL_MS = 30000;
 const DEFAULT_ROOT_SPAN_TTL_MS = 10 * 60 * 1000;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

@@ -2,9 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildSessionMetricAttrs,
+  computeSessionMetricDelta,
   extractToolResultStatus,
+  resolveIngressLifecycleWindows,
   resolveSessionSpanName,
   resolveSpanWindow,
+  resolveSessionMetricTotals,
   stringAttrs,
 } from "../dist/src/service-utils.js";
 
@@ -37,6 +41,24 @@ test("resolveSessionSpanName prefers session_key over fallback names", () => {
     resolveSessionSpanName({}, "main"),
     "main",
   );
+});
+
+test("resolveIngressLifecycleWindows emits a queue window when processing starts much later", () => {
+  const windows = resolveIngressLifecycleWindows(1000, 4000);
+
+  assert.deepEqual(windows, {
+    ingressEndTs: 1120,
+    queueStartTs: 1120,
+    queueEndTs: 4000,
+  });
+});
+
+test("resolveIngressLifecycleWindows keeps only a short ingress window when processing is immediate", () => {
+  const windows = resolveIngressLifecycleWindows(1000, 1080);
+
+  assert.deepEqual(windows, {
+    ingressEndTs: 1080,
+  });
 });
 
 test("stringAttrs maps openclaw fields to canonical aliases", () => {
@@ -87,11 +109,15 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.skill_name, "monitor");
   assert.equal(attrs.skill_type, "call");
   assert.equal(attrs.skill_source, "runtime");
+  assert.equal(attrs["openclaw.skill.call_id"], "skill-call-1");
+  assert.equal(attrs["openclaw.skill.name"], "monitor");
+  assert.equal(attrs["openclaw.skill.kind"], "call");
+  assert.equal(attrs["openclaw.skill.source"], "runtime");
   assert.equal(attrs.final_status, "completed");
   assert.equal("openclaw.sessionId" in attrs, false);
   assert.equal("openclaw.session.cwd" in attrs, false);
   assert.equal("openclaw.tool.call_id" in attrs, false);
-  assert.equal("openclaw.skill.call_id" in attrs, false);
+  assert.equal("openclaw.skill.call_id" in attrs, true);
 });
 
 test("stringAttrs parses multi-agent session keys with agent name in the second segment", () => {
@@ -109,4 +135,62 @@ test("extractToolResultStatus only uses explicit status fields", () => {
   assert.equal(extractToolResultStatus({ status: "timeout" }), "timeout");
   assert.equal(extractToolResultStatus({ outcome: "error" }), undefined);
   assert.equal(extractToolResultStatus({}), undefined);
+});
+
+test("resolveSessionMetricTotals reads cumulative values from a session snapshot", () => {
+  const totals = resolveSessionMetricTotals({
+    sessionUsageTotals: {
+      input: 40,
+      output: 10,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 50,
+    },
+    traceCount: 3,
+  });
+
+  assert.deepEqual(totals, {
+    inputTokens: 40,
+    outputTokens: 10,
+    totalTokens: 50,
+    traceCount: 3,
+  });
+});
+
+test("computeSessionMetricDelta only emits monotonic increments for session counters", () => {
+  assert.deepEqual(
+    computeSessionMetricDelta(
+      { inputTokens: 40, outputTokens: 10, totalTokens: 50, traceCount: 3 },
+      { inputTokens: 35, outputTokens: 8, totalTokens: 43, traceCount: 2 },
+    ),
+    { inputTokens: 5, outputTokens: 2, totalTokens: 7, traceCount: 1 },
+  );
+
+  assert.deepEqual(
+    computeSessionMetricDelta(
+      { inputTokens: 12, outputTokens: 4, totalTokens: 16, traceCount: 1 },
+      { inputTokens: 20, outputTokens: 9, totalTokens: 29, traceCount: 3 },
+    ),
+    { inputTokens: 12, outputTokens: 4, totalTokens: 16, traceCount: 1 },
+  );
+});
+
+test("buildSessionMetricAttrs prefers runtime model overrides for session metrics", () => {
+  const attrs = buildSessionMetricAttrs(
+    {
+      sessionId: "session-1",
+      lastProvider: "snapshot-provider",
+      lastModel: "snapshot-model",
+    },
+    "agent:main:main",
+    {
+      modelProvider: "runtime-provider",
+      modelName: "runtime-model",
+    },
+  );
+
+  assert.equal(attrs.session_id, "session-1");
+  assert.equal(attrs.session_key, "agent:main:main");
+  assert.equal(attrs.model_provider, "runtime-provider");
+  assert.equal(attrs.model_name, "runtime-model");
 });

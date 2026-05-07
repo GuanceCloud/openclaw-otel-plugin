@@ -13,6 +13,7 @@ const REASONING_PREVIEW_LIMIT = 360;
 
 export const MIN_VISIBLE_CHILD_MS = 120;
 export const MIN_VISIBLE_MODEL_MS = 800;
+export const MAX_OPENCLAW_THINKING_MS = 1500;
 
 export function redactSensitiveText(text: string): string {
   return text;
@@ -38,6 +39,11 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
     startedAt,
     lastTouchedAt: startedAt,
     mainStartTs,
+    orchestrationCursorTs: mainStartTs,
+    channelIngressEmitted: false,
+    dispatchQueueEmitted: false,
+    sessionProcessingEmitted: false,
+    channelEgressEmitted: false,
     modelSpanEmitted: false,
     thinkingSpanEmitted: false,
     aggregate: createRunAggregate(),
@@ -52,12 +58,48 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
   };
 }
 
+export function resolveIngressLifecycleWindows(
+  ingressStartTs: number,
+  processingStartTs?: number,
+): {
+  ingressEndTs: number;
+  queueStartTs?: number;
+  queueEndTs?: number;
+} {
+  const ingressEndTs = typeof processingStartTs === "number"
+    ? Math.max(Math.min(ingressStartTs + MIN_VISIBLE_CHILD_MS, processingStartTs), ingressStartTs + 1)
+    : ingressStartTs + MIN_VISIBLE_CHILD_MS;
+  if (typeof processingStartTs !== "number" || processingStartTs <= ingressEndTs) {
+    return { ingressEndTs };
+  }
+  return {
+    ingressEndTs,
+    queueStartTs: ingressEndTs,
+    queueEndTs: processingStartTs,
+  };
+}
+
 export function eventTime(ts: number): Date {
   return new Date(ts);
 }
 
 export function endTimeFromStart(startTs: number, durationMs: number): Date {
   return new Date(startTs + Math.max(durationMs, 1));
+}
+
+export function resolveOpenClawThinkingDurationMs(
+  modelWindowMs: number,
+  requestedDurationMs?: number,
+): number {
+  const boundedModelWindowMs = Math.max(modelWindowMs, MIN_VISIBLE_CHILD_MS);
+  const maxDurationMs = Math.min(
+    MAX_OPENCLAW_THINKING_MS,
+    Math.max(MIN_VISIBLE_CHILD_MS, Math.floor(boundedModelWindowMs / 4)),
+  );
+  const preferredDurationMs = typeof requestedDurationMs === "number"
+    ? requestedDurationMs
+    : maxDurationMs;
+  return Math.max(MIN_VISIBLE_CHILD_MS, Math.min(preferredDurationMs, maxDurationMs));
 }
 
 export function resolveSpanWindow(
@@ -152,6 +194,32 @@ function promoteAlias(
   }
 }
 
+function mirrorAlias(
+  target: Record<string, string | number | boolean | undefined>,
+  aliasKey: string,
+  ...sourceKeys: string[]
+) {
+  let value = target[aliasKey];
+  if (value === undefined || value === "") {
+    for (const sourceKey of sourceKeys) {
+      const sourceValue = target[sourceKey];
+      if (sourceValue !== undefined && sourceValue !== "") {
+        value = sourceValue;
+        target[aliasKey] = sourceValue;
+        break;
+      }
+    }
+  }
+  if (value === undefined || value === "") {
+    return;
+  }
+  for (const sourceKey of sourceKeys) {
+    if (target[sourceKey] === undefined || target[sourceKey] === "") {
+      target[sourceKey] = value;
+    }
+  }
+}
+
 function promotePrefixedKeys(
   target: Record<string, string | number | boolean | undefined>,
   prefix: string,
@@ -210,10 +278,10 @@ function withCanonicalAliases(
   promoteAlias(next, "input_tokens", "openclaw.tokens.input");
   promoteAlias(next, "output_tokens", "openclaw.tokens.output");
   promoteAlias(next, "total_tokens", "openclaw.tokens.total");
-  promoteAlias(next, "skill_call_id", "openclaw.skill.call_id");
-  promoteAlias(next, "skill_name", "openclaw.skill.name");
-  promoteAlias(next, "skill_type", "openclaw.skill.kind");
-  promoteAlias(next, "skill_source", "openclaw.skill.source");
+  mirrorAlias(next, "skill_call_id", "openclaw.skill.call_id");
+  mirrorAlias(next, "skill_name", "openclaw.skill.name");
+  mirrorAlias(next, "skill_type", "openclaw.skill.kind");
+  mirrorAlias(next, "skill_source", "openclaw.skill.source");
   promoteAlias(next, "final_status", "openclaw.outcome", "openclaw.final_state");
   return next;
 }
@@ -272,6 +340,19 @@ export function clipPreview(text: string | undefined): string | undefined {
     ? `${normalized.slice(0, PREVIEW_LIMIT - 3)}...`
     : normalized;
   return redactSensitiveText(clipped);
+}
+
+export function summarizeToolCallOutput(toolNames: string[]): string | undefined {
+  const normalized = toolNames
+    .map((name) => name.trim())
+    .filter(Boolean);
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  if (normalized.length === 1) {
+    return clipPreview(`toolCall:${normalized[0]}`);
+  }
+  return clipPreview(`toolCall:${normalized.join(",")}`);
 }
 
 export function normalizeUserInputPreview(text: string | undefined): string | undefined {
@@ -409,6 +490,9 @@ export function extractToolTarget(toolName: string, args: unknown, meta: unknown
   if (normalizedToolName === "write" && typeof argsRecord?.path === "string") {
     return argsRecord.path;
   }
+  if (normalizedToolName === "edit" && typeof argsRecord?.path === "string") {
+    return argsRecord.path;
+  }
   if (normalizedToolName === "grep" && typeof argsRecord?.pattern === "string") {
     return argsRecord.pattern;
   }
@@ -540,6 +624,79 @@ export function buildModelMetricAttrs(provider?: string, model?: string) {
   });
 }
 
+export function resolveSessionMetricTotals(snapshot: SessionSnapshot | undefined): {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  traceCount: number;
+} {
+  const usageTotals = snapshot?.sessionUsageTotals;
+  return {
+    inputTokens: usageTotals?.input ?? 0,
+    outputTokens: usageTotals?.output ?? 0,
+    totalTokens: usageTotals?.totalTokens ?? 0,
+    traceCount: snapshot?.traceCount ?? 0,
+  };
+}
+
+export function buildSessionMetricAttrs(
+  snapshot: SessionSnapshot | undefined,
+  sessionKey: string,
+  overrides?: {
+    modelProvider?: string;
+    modelName?: string;
+  },
+) {
+  return stringAttrs({
+    session_id: snapshot?.sessionId,
+    session_key: sessionKey,
+    model_provider: overrides?.modelProvider ?? snapshot?.lastProvider,
+    model_name: overrides?.modelName ?? snapshot?.lastModel,
+  });
+}
+
+export function computeSessionMetricDelta(
+  current: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    traceCount: number;
+  },
+  previous?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    traceCount: number;
+  },
+): {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  traceCount: number;
+} {
+  if (!previous) {
+    return current;
+  }
+  return {
+    inputTokens:
+      current.inputTokens >= previous.inputTokens
+        ? current.inputTokens - previous.inputTokens
+        : current.inputTokens,
+    outputTokens:
+      current.outputTokens >= previous.outputTokens
+        ? current.outputTokens - previous.outputTokens
+        : current.outputTokens,
+    totalTokens:
+      current.totalTokens >= previous.totalTokens
+        ? current.totalTokens - previous.totalTokens
+        : current.totalTokens,
+    traceCount:
+      current.traceCount >= previous.traceCount
+        ? current.traceCount - previous.traceCount
+        : current.traceCount,
+  };
+}
+
 export function buildDiagnosticsModelMetricAttrs(
   channel?: string,
   provider?: string,
@@ -639,6 +796,20 @@ function inferSkillNameFromSkillPath(text: string | undefined): string | undefin
   return match[1]?.trim();
 }
 
+function inferSkillNameFromContextText(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const normalized = text.trim().replace(/\\/g, "/").toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (/(^|[\/_\-\s])dashboard([\/_\-\s.]|$)/.test(normalized)) {
+    return "dashboard";
+  }
+  return undefined;
+}
+
 export function inferSkillNameFromToolIdentity(
   toolName: string | undefined,
   target?: string,
@@ -648,6 +819,8 @@ export function inferSkillNameFromToolIdentity(
     inferSkillNameFromTool(toolName)
     ?? inferSkillNameFromSkillPath(target)
     ?? inferSkillNameFromSkillPath(command)
+    ?? inferSkillNameFromContextText(target)
+    ?? inferSkillNameFromContextText(command)
   );
 }
 

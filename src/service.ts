@@ -19,12 +19,13 @@ import type {
 } from "./service-types.js";
 import {
   addEvent,
+  buildSessionMetricAttrs,
   buildModelMetricAttrs,
   buildRequestMetricAttrs,
   clipPreview,
+  computeSessionMetricDelta,
   createRunState,
   endSpanSafely,
-  endTimeFromStart,
   eventTime,
   MIN_VISIBLE_CHILD_MS,
   MIN_VISIBLE_MODEL_MS,
@@ -32,6 +33,8 @@ import {
   normalizeUserInputPreview,
   parseSessionKey,
   redactSensitiveText,
+  resolveIngressLifecycleWindows,
+  resolveSessionMetricTotals,
   resolveSpanWindow,
   sessionIdentity,
   stringAttrs,
@@ -50,8 +53,27 @@ export function createOtelPluginService(
   let unsubscribeDiagnostic: (() => void) | null = null;
   let unsubscribeAgent: (() => void) | null = null;
   let unsubscribeTranscript: (() => void) | null = null;
+  let sessionMetricsInterval: ReturnType<typeof setInterval> | null = null;
   const activeRoots = new Map<string, ActiveRootSpan>();
   const activeRuns = new Map<string, ActiveRunSpan>();
+  const activeRequestKeyBySession = new Map<string, string>();
+  const reportedSessionMetrics = new Map<string, {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    traceCount: number;
+  }>();
+  const replayWatermarkBySession = new Map<string, string>();
+  let requestSequence = 0;
+  const sessionMetricTokenState = new Map<string, {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    modelProvider?: string;
+    modelName?: string;
+    active: boolean;
+    dirty: boolean;
+  }>();
 
   return {
     id: "openclaw-otel-plugin",
@@ -83,10 +105,64 @@ export function createOtelPluginService(
       const loadSessionSnapshot = (sessionKey: string | undefined) =>
         sessionStore?.loadSessionSnapshot(sessionKey);
 
+      const buildReplayWatermark = (
+        snapshot: ReturnType<typeof loadSessionSnapshot>,
+      ): string | undefined => {
+        if (!snapshot) {
+          return undefined;
+        }
+        return [
+          snapshot.sessionId ?? "",
+          snapshot.lastUserTs ?? "",
+          snapshot.lastAssistantTs ?? "",
+          snapshot.lastRunAssistantTurns?.length ?? 0,
+          snapshot.lastRunToolCalls?.length ?? 0,
+          snapshot.lastAssistantText?.length ?? 0,
+          snapshot.lastAssistantThinking?.length ?? 0,
+        ].join("|");
+      };
+
+      const hasReplayWatermark = (
+        sessionKey: string | undefined,
+        snapshot: ReturnType<typeof loadSessionSnapshot>,
+      ) => {
+        if (!sessionKey) {
+          return false;
+        }
+        const watermark = buildReplayWatermark(snapshot);
+        if (!watermark) {
+          return false;
+        }
+        return replayWatermarkBySession.get(sessionKey) === watermark;
+      };
+
+      const markReplayWatermark = (
+        sessionKey: string | undefined,
+        snapshot: ReturnType<typeof loadSessionSnapshot>,
+      ) => {
+        if (!sessionKey) {
+          return;
+        }
+        const watermark = buildReplayWatermark(snapshot);
+        if (!watermark) {
+          return;
+        }
+        replayWatermarkBySession.set(sessionKey, watermark);
+      };
+
       const enrichWithTranscript = (
         sessionKey: string | undefined,
         attrs: Record<string, string | number | boolean | undefined>,
       ) => {
+        const suppressSessionInputPreview = attrs.__suppress_session_input_preview === true;
+        const suppressSessionOutputPreview = attrs.__suppress_session_output_preview === true;
+        const suppressSessionOutputSummary = attrs.__suppress_session_output_summary === true;
+        const nextAttrs = {
+          ...attrs,
+        };
+        delete nextAttrs.__suppress_session_input_preview;
+        delete nextAttrs.__suppress_session_output_preview;
+        delete nextAttrs.__suppress_session_output_summary;
         const parsedSessionKey = parseSessionKey(sessionKey);
         const configuredAgent = parsedSessionKey.sessionAgent
           ? configuredAgentById.get(parsedSessionKey.sessionAgent)
@@ -96,35 +172,299 @@ export function createOtelPluginService(
         const snapshot = loadSessionSnapshot(sessionKey);
         if (!snapshot) {
           return {
-            ...attrs,
-            agent_id: attrs.agent_id ?? dynamicAgentId,
-            agent_name: attrs.agent_name ?? dynamicAgentName,
+            ...nextAttrs,
+            agent_id: nextAttrs.agent_id ?? dynamicAgentId,
+            agent_name: nextAttrs.agent_name ?? dynamicAgentName,
           };
         }
         return {
-          ...attrs,
-          agent_id: attrs.agent_id ?? dynamicAgentId,
-          agent_name: attrs.agent_name ?? dynamicAgentName,
+          ...nextAttrs,
+          agent_id: nextAttrs.agent_id ?? dynamicAgentId,
+          agent_name: nextAttrs.agent_name ?? dynamicAgentName,
           session_id: snapshot.sessionId,
-          "openclaw.sessionId": attrs["openclaw.sessionId"] ?? snapshot.sessionId,
+          "openclaw.sessionId": nextAttrs["openclaw.sessionId"] ?? snapshot.sessionId,
           "openclaw.session.file": snapshot.sessionFile,
+          "openclaw.session.createdAt": snapshot.createdAt,
           "openclaw.session.updatedAt": snapshot.updatedAt,
           "openclaw.session.chatType": snapshot.chatType,
           "openclaw.session.lastChannel": snapshot.lastChannel,
           "openclaw.session.origin.provider": snapshot.originProvider,
           "openclaw.session.origin.surface": snapshot.originSurface,
           "openclaw.session.cwd": snapshot.sessionCwd,
-          "openclaw.input.preview": normalizeUserInputPreview(snapshot.lastUserText),
-          "openclaw.output.preview": clipPreview(snapshot.lastAssistantText),
-          output_summary: normalizeReasoningPreview(snapshot.lastAssistantThinking),
-          output_text_length: snapshot.lastAssistantThinking?.length,
-          "openclaw.provider": attrs["openclaw.provider"] ?? snapshot.lastProvider,
-          "openclaw.model": attrs["openclaw.model"] ?? snapshot.lastModel,
+          "openclaw.input.preview":
+            nextAttrs["openclaw.input.preview"] ??
+            (suppressSessionInputPreview ? undefined : normalizeUserInputPreview(snapshot.lastUserText)),
+          "openclaw.output.preview":
+            nextAttrs["openclaw.output.preview"] ??
+            (suppressSessionOutputPreview ? undefined : clipPreview(snapshot.lastAssistantText)),
+          output_summary:
+            nextAttrs.output_summary ??
+            (suppressSessionOutputSummary ? undefined : normalizeReasoningPreview(snapshot.lastAssistantThinking)),
+          output_text_length:
+            nextAttrs.output_text_length ??
+            (suppressSessionOutputSummary ? undefined : snapshot.lastAssistantThinking?.length),
+          "openclaw.provider": nextAttrs["openclaw.provider"] ?? snapshot.lastProvider,
+          "openclaw.model": nextAttrs["openclaw.model"] ?? snapshot.lastModel,
         };
       };
 
       const eventTimestamp = (evt: { ts?: number }): Date =>
         typeof evt.ts === "number" ? eventTime(evt.ts) : new Date();
+
+      const resolveSessionKey = (evt: { sessionKey?: string; sessionId?: string }) =>
+        sessionIdentity(evt);
+
+      const buildRequestKey = (evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number }) => {
+        const sessionKey = resolveSessionKey(evt);
+        if (!sessionKey) {
+          return undefined;
+        }
+        const messageId = evt.messageId !== undefined && evt.messageId !== null
+          ? String(evt.messageId)
+          : undefined;
+        const seed = messageId ?? String(typeof evt.ts === "number" ? evt.ts : Date.now());
+        requestSequence += 1;
+        return `${sessionKey}#${seed}:${requestSequence}`;
+      };
+
+      const resolveRequestKey = (
+        evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number },
+        createIfMissing = false,
+      ) => {
+        const sessionKey = resolveSessionKey(evt);
+        if (!sessionKey) {
+          return undefined;
+        }
+        const activeRequestKey = activeRequestKeyBySession.get(sessionKey);
+        if (activeRequestKey) {
+          return activeRequestKey;
+        }
+        if (!createIfMissing) {
+          return undefined;
+        }
+        const nextRequestKey = buildRequestKey(evt);
+        if (!nextRequestKey) {
+          return undefined;
+        }
+        activeRequestKeyBySession.set(sessionKey, nextRequestKey);
+        return nextRequestKey;
+      };
+
+      const beginRequestTrace = (
+        evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number },
+      ) => {
+        const sessionKey = resolveSessionKey(evt);
+        if (!sessionKey) {
+          return undefined;
+        }
+        const nextRequestKey = buildRequestKey(evt);
+        if (!nextRequestKey) {
+          return undefined;
+        }
+        activeRequestKeyBySession.set(sessionKey, nextRequestKey);
+        return nextRequestKey;
+      };
+
+      const releaseRequestKey = (
+        sessionKey: string | undefined,
+        requestKey: string | undefined,
+      ) => {
+        if (!sessionKey || !requestKey) {
+          return;
+        }
+        if (activeRequestKeyBySession.get(sessionKey) !== requestKey) {
+          return;
+        }
+        if (activeRoots.has(requestKey) || activeRuns.has(requestKey)) {
+          return;
+        }
+        activeRequestKeyBySession.delete(sessionKey);
+      };
+
+      const emitRuntimeOrchestrationSpan = (
+        evt: { sessionKey?: string; sessionId?: string },
+        startTs: number | undefined,
+        endTs: number | undefined,
+        phase: string,
+        attrs?: Record<string, string | number | boolean | undefined>,
+        parentCtx?: any,
+      ) => {
+        const sessionKey = resolveSessionKey(evt);
+        const requestKey = resolveRequestKey(evt, false);
+        if (!sessionKey || !requestKey || typeof startTs !== "number" || typeof endTs !== "number") {
+          return undefined;
+        }
+        const root = activeRoots.get(requestKey);
+        const run = activeRuns.get(requestKey);
+        const effectiveStartTs = Math.max(
+          startTs,
+          phase === "channel_ingress" || phase === "dispatch_queue"
+            ? root?.startedAt ?? startTs
+            : run?.mainStartTs ?? startTs,
+        );
+        const effectiveEndTs = Math.max(endTs, effectiveStartTs + 1);
+        if (effectiveEndTs <= effectiveStartTs) {
+          return undefined;
+        }
+        const span = tracer.startSpan(
+          phase === "channel_ingress"
+            ? "channel_ingress"
+            : phase === "dispatch_queue"
+              ? "dispatch_queue"
+            : phase === "session_processing"
+              ? "session_processing"
+              : phase === "channel_egress"
+                ? "channel_egress"
+              : "runtime_orchestration",
+          {
+            startTime: new Date(effectiveStartTs),
+            kind: SpanKind.INTERNAL,
+            attributes: stringAttrs(enrichWithTranscript(sessionKey, {
+              __suppress_session_input_preview: true,
+              __suppress_session_output_preview: true,
+              __suppress_session_output_summary: true,
+              "span.kind": "runtime",
+              "openclaw.runtime.phase": phase,
+              ...attrs,
+            })),
+          },
+          parentCtx ?? run?.ctx ?? root?.ctx ?? context.active(),
+        );
+        span.setStatus({ code: SpanStatusCode.OK });
+        endSpanSafely(span, new Date(effectiveEndTs));
+        if (run && phase !== "channel_ingress" && phase !== "session_processing" && phase !== "channel_egress") {
+          run.orchestrationCursorTs = effectiveEndTs;
+        }
+        return span;
+      };
+
+      const ensureRuntimeLifecycleSpans = (
+        evt: {
+          sessionKey?: string;
+          sessionId?: string;
+          ts?: number;
+          channel?: string;
+          source?: string;
+          outcome?: string;
+        },
+        options?: {
+          createIfMissing?: boolean;
+          startTsHint?: number;
+          processingStartTs?: number;
+          nextActionTs?: number;
+          emitEgress?: boolean;
+          snapshot?: ReturnType<typeof loadSessionSnapshot>;
+          outputPreview?: string;
+          outputLength?: number;
+          outcome?: string;
+        },
+      ) => {
+        const sessionKey = resolveSessionKey(evt);
+        if (!sessionKey) {
+          return undefined;
+        }
+        const lifecycleEvt = {
+          sessionKey: evt.sessionKey,
+          sessionId: evt.sessionId,
+          ts: options?.startTsHint ?? evt.ts,
+        };
+        const run = getRun(lifecycleEvt, options?.createIfMissing ?? false);
+        if (!run) {
+          return undefined;
+        }
+        const root = getRoot(lifecycleEvt, options?.createIfMissing ?? false);
+        const snapshot = options?.snapshot ?? loadSessionSnapshot(sessionKey);
+        const ingressStartTs = typeof run.messageQueuedTs === "number"
+          ? run.messageQueuedTs
+          : root?.startedAt ?? run.startedAt ?? lifecycleEvt.ts;
+        const processingStartTs = typeof options?.processingStartTs === "number"
+          ? options.processingStartTs
+          : run.mainStartTs;
+
+        if (!run.channelIngressEmitted && typeof ingressStartTs === "number") {
+          const { ingressEndTs } = resolveIngressLifecycleWindows(ingressStartTs, processingStartTs);
+          emitRuntimeOrchestrationSpan(
+            lifecycleEvt,
+            ingressStartTs,
+            ingressEndTs,
+            "channel_ingress",
+            {
+              "openclaw.channel": evt.channel ?? snapshot?.lastChannel,
+              "openclaw.source": evt.source,
+            },
+            root?.ctx,
+          );
+          run.channelIngressEmitted = true;
+          run.messageQueuedTs = undefined;
+        }
+
+        if (!run.dispatchQueueEmitted && typeof ingressStartTs === "number") {
+          const { queueStartTs, queueEndTs } = resolveIngressLifecycleWindows(ingressStartTs, processingStartTs);
+          if (typeof queueStartTs === "number" && typeof queueEndTs === "number") {
+            emitRuntimeOrchestrationSpan(
+              lifecycleEvt,
+              queueStartTs,
+              queueEndTs,
+              "dispatch_queue",
+              {
+                "openclaw.channel": evt.channel ?? snapshot?.lastChannel,
+                "openclaw.source": evt.source,
+                "openclaw.queue.wait_ms": Math.max(queueEndTs - queueStartTs, 1),
+              },
+              root?.ctx,
+            );
+          }
+          run.dispatchQueueEmitted = true;
+        }
+
+        if (!run.sessionProcessingEmitted && typeof processingStartTs === "number") {
+          const processingEndTs = typeof options?.nextActionTs === "number"
+            ? Math.max(Math.min(processingStartTs + MIN_VISIBLE_CHILD_MS, options.nextActionTs), processingStartTs + 1)
+            : processingStartTs + MIN_VISIBLE_CHILD_MS;
+          emitRuntimeOrchestrationSpan(
+            lifecycleEvt,
+            processingStartTs,
+            processingEndTs,
+            "session_processing",
+            {
+              "openclaw.state": "processing",
+            },
+            run.ctx,
+          );
+          run.sessionProcessingEmitted = true;
+          run.orchestrationCursorTs = Math.max(
+            run.orchestrationCursorTs ?? processingStartTs,
+            processingEndTs,
+          );
+        }
+
+        if (options?.emitEgress && !run.channelEgressEmitted && typeof evt.ts === "number") {
+          emitRuntimeOrchestrationSpan(
+            evt,
+            evt.ts,
+            evt.ts + MIN_VISIBLE_CHILD_MS,
+            "channel_egress",
+            {
+              "openclaw.channel": evt.channel ?? snapshot?.lastChannel,
+              "openclaw.outcome": options.outcome ?? evt.outcome,
+              "openclaw.output.preview": options.outputPreview,
+              "openclaw.output.length": options.outputLength,
+            },
+            run.ctx,
+          );
+          run.channelEgressEmitted = true;
+        }
+
+        return run;
+      };
+
+      const emitModelTurnDebugLog = (payload: Record<string, unknown>) => {
+        try {
+          ctx.logger.info(`[otel-plugin] model-turn ${JSON.stringify(payload)}`);
+        } catch {
+          ctx.logger.info("[otel-plugin] model-turn log failed to serialize");
+        }
+      };
 
       const emitDiagnosticLog = (
         evt: DiagnosticEventPayload,
@@ -141,15 +481,16 @@ export function createOtelPluginService(
         if (!diagnosticsLogger) {
           return;
         }
-        const key = "sessionKey" in evt || "sessionId" in evt ? sessionIdentity(evt) : undefined;
-        const currentRun = key ? activeRuns.get(key) : undefined;
-        const currentRoot = key ? activeRoots.get(key) : undefined;
+        const sessionKey = "sessionKey" in evt || "sessionId" in evt ? resolveSessionKey(evt) : undefined;
+        const requestKey = "sessionKey" in evt || "sessionId" in evt ? resolveRequestKey(evt, false) : undefined;
+        const currentRun = requestKey ? activeRuns.get(requestKey) : undefined;
+        const currentRoot = requestKey ? activeRoots.get(requestKey) : undefined;
         diagnosticsLogger.emit({
           body: options?.body ? redactSensitiveText(options.body) : evt.type,
           eventName: options?.eventName ?? evt.type,
           severityNumber: options?.severityNumber,
           severityText: options?.severityText,
-          attributes: stringAttrs(enrichWithTranscript(key, {
+          attributes: stringAttrs(enrichWithTranscript(sessionKey, {
             "openclaw.event.type": evt.type,
             ...attrs,
           })),
@@ -158,6 +499,73 @@ export function createOtelPluginService(
           observedTimestamp: new Date(),
           context: options?.context ?? currentRun?.modelCtx ?? currentRun?.ctx ?? currentRoot?.ctx ?? context.active(),
         });
+      };
+
+      const reportSessionMetrics = () => {
+        try {
+          sessionStore?.refreshSessionsIndex();
+          const pendingSessionKeys = Array.from(sessionMetricTokenState.entries())
+            .filter(([, state]) => state.dirty)
+            .map(([sessionKey]) => sessionKey);
+          const activeSessionKeys = new Set<string>([
+            ...Array.from(activeRoots.values())
+              .map((current) => current.sessionIdentity)
+              .filter((value): value is string => Boolean(value)),
+            ...Array.from(activeRuns.values())
+              .map((current) => current.sessionIdentity)
+              .filter((value): value is string => Boolean(value)),
+            ...pendingSessionKeys,
+          ]);
+          for (const sessionKey of activeSessionKeys) {
+            const snapshot = loadSessionSnapshot(sessionKey);
+            const tokenState = sessionMetricTokenState.get(sessionKey);
+            const seriesKey = snapshot?.sessionId?.trim() || sessionKey;
+            if (!seriesKey) {
+              continue;
+            }
+            const currentTotals = resolveSessionMetricTotals(snapshot);
+            currentTotals.inputTokens = Math.max(
+              currentTotals.inputTokens,
+              tokenState?.inputTokens ?? 0,
+            );
+            currentTotals.outputTokens = Math.max(
+              currentTotals.outputTokens,
+              tokenState?.outputTokens ?? 0,
+            );
+            currentTotals.totalTokens = Math.max(
+              currentTotals.totalTokens,
+              tokenState?.totalTokens ?? 0,
+            );
+            const previousTotals = reportedSessionMetrics.get(seriesKey);
+            const deltaTotals = computeSessionMetricDelta(currentTotals, previousTotals);
+            const metricAttrs = buildSessionMetricAttrs(snapshot, sessionKey, {
+              modelProvider: tokenState?.modelProvider,
+              modelName: tokenState?.modelName,
+            });
+            if (deltaTotals.inputTokens > 0) {
+              instruments.sessionInputTokensCounter.add(deltaTotals.inputTokens, metricAttrs);
+            }
+            if (deltaTotals.outputTokens > 0) {
+              instruments.sessionOutputTokensCounter.add(deltaTotals.outputTokens, metricAttrs);
+            }
+            if (deltaTotals.totalTokens > 0) {
+              instruments.sessionTotalTokensCounter.add(deltaTotals.totalTokens, metricAttrs);
+            }
+            if (deltaTotals.traceCount > 0) {
+              instruments.sessionTraceCounter.add(deltaTotals.traceCount, metricAttrs);
+            }
+            reportedSessionMetrics.set(seriesKey, currentTotals);
+            if (tokenState) {
+              tokenState.dirty = false;
+              if (!tokenState.active) {
+                sessionMetricTokenState.delete(sessionKey);
+              }
+            }
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          ctx.logger.error?.(`[otel-plugin] active session metrics scan failed: ${message}`);
+        }
       };
 
       const finalizeRunSpans = (current: ActiveRunSpan, endTime?: Date) => {
@@ -185,11 +593,12 @@ export function createOtelPluginService(
       };
 
       const getRoot = (evt: { sessionKey?: string; sessionId?: string }, createIfMissing = false) => {
-        const key = sessionIdentity(evt);
-        if (!key) {
+        const sessionKey = resolveSessionKey(evt);
+        const requestKey = resolveRequestKey(evt, createIfMissing);
+        if (!sessionKey || !requestKey) {
           return undefined;
         }
-        const current = activeRoots.get(key);
+        const current = activeRoots.get(requestKey);
         if (current) {
           current.lastTouchedAt = Date.now();
           return current;
@@ -197,25 +606,32 @@ export function createOtelPluginService(
         if (!createIfMissing) {
           return undefined;
         }
+        const seededRun = activeRuns.get(requestKey);
+        const rootStartTs = typeof seededRun?.messageQueuedTs === "number"
+          ? seededRun.messageQueuedTs
+          : eventTimestamp(evt).getTime();
         const span = tracer.startSpan(
           "openclaw_request",
           {
-            startTime: eventTimestamp(evt),
+            startTime: new Date(rootStartTs),
             kind: SpanKind.SERVER,
-            attributes: stringAttrs(enrichWithTranscript(key, {
+            attributes: stringAttrs(enrichWithTranscript(sessionKey, {
               "openclaw.sessionKey": evt.sessionKey,
               "openclaw.sessionId": evt.sessionId,
+              session_create_time: loadSessionSnapshot(sessionKey)?.createdAt,
               "span.kind": "request",
             })),
           },
         );
         const root = {
+          requestKey,
+          sessionIdentity: sessionKey,
           span,
           ctx: trace.setSpan(context.active(), span),
-          startedAt: Date.now(),
+          startedAt: rootStartTs,
           lastTouchedAt: Date.now(),
         };
-        activeRoots.set(key, root);
+        activeRoots.set(requestKey, root);
         return root;
       };
 
@@ -223,11 +639,12 @@ export function createOtelPluginService(
         evt: { sessionKey?: string; sessionId?: string },
         createIfMissing = false,
       ) => {
-        const key = sessionIdentity(evt);
-        if (!key) {
+        const sessionKey = resolveSessionKey(evt);
+        const requestKey = resolveRequestKey(evt, createIfMissing);
+        if (!sessionKey || !requestKey) {
           return undefined;
         }
-        const current = activeRuns.get(key);
+        const current = activeRuns.get(requestKey);
         if (current?.span || (current && !createIfMissing)) {
           current.lastTouchedAt = Date.now();
           return current;
@@ -245,7 +662,7 @@ export function createOtelPluginService(
           {
             startTime: eventTimestamp(evt),
             kind: SpanKind.INTERNAL,
-            attributes: stringAttrs(enrichWithTranscript(key, {
+            attributes: stringAttrs(enrichWithTranscript(sessionKey, {
               "openclaw.sessionKey": evt.sessionKey,
               "openclaw.sessionId": evt.sessionId,
               "span.kind": "agent",
@@ -253,21 +670,25 @@ export function createOtelPluginService(
           },
           userCtx ?? root.ctx,
         );
-        const run = current ?? createRunState(userCtx ?? root.ctx, Date.now());
+        const runStartTs = eventTimestamp(evt).getTime();
+        const run = current ?? createRunState(userCtx ?? root.ctx, runStartTs, runStartTs);
+        run.requestKey = requestKey;
+        run.sessionIdentity = sessionKey;
         run.span = span;
         run.ctx = trace.setSpan(userCtx ?? root.ctx, span);
-        activeRuns.set(key, run);
+        activeRuns.set(requestKey, run);
         return run;
       };
 
       const ensureUserSpan = (
         evt: { sessionKey?: string; sessionId?: string; ts: number; channel?: string; source?: string; queueDepth?: number },
       ) => {
-        const key = sessionIdentity(evt);
-        if (!key) {
+        const sessionKey = resolveSessionKey(evt);
+        const requestKey = resolveRequestKey(evt, true);
+        if (!sessionKey || !requestKey) {
           return undefined;
         }
-        const existing = activeRuns.get(key);
+        const existing = activeRuns.get(requestKey);
         const root = getRoot(evt, true);
         if (!root) {
           return undefined;
@@ -280,27 +701,30 @@ export function createOtelPluginService(
           "openclaw.input.preview": normalizeUserInputPreview(snapshot?.lastUserText),
           "openclaw.input.length": snapshot?.lastUserText?.length,
         }));
-        const run = existing ?? createRunState(root.ctx, evt.ts);
+        const run = existing ?? createRunState(root.ctx, evt.ts, evt.ts);
+        run.requestKey = requestKey;
+        run.sessionIdentity = sessionKey;
         run.userCtx = root.ctx;
         run.userStartTs = evt.ts;
         run.lastTouchedAt = Date.now();
-        activeRuns.set(key, run as ActiveRunSpan);
-        return activeRuns.get(key);
+        activeRuns.set(requestKey, run as ActiveRunSpan);
+        return activeRuns.get(requestKey);
       };
 
       const endRoot = (evt: { sessionKey?: string; sessionId?: string }, attrs?: Record<string, string | number | boolean>) => {
-        const key = sessionIdentity(evt);
-        if (!key) {
+        const sessionKey = resolveSessionKey(evt);
+        const requestKey = resolveRequestKey(evt, false);
+        if (!sessionKey || !requestKey) {
           return;
         }
-        const current = activeRoots.get(key);
+        const current = activeRoots.get(requestKey);
         if (!current) {
           return;
         }
-        const run = activeRuns.get(key);
+        const run = activeRuns.get(requestKey);
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
         const finalAttrs = stringAttrs({
-          ...enrichWithTranscript(key, summaryAttrs),
+          ...enrichWithTranscript(sessionKey, summaryAttrs),
           "openclaw.skills": run ? Array.from(run.usedSkillNames).join(", ") : undefined,
           "openclaw.skill.count": run ? run.usedSkillNames.size : undefined,
           "openclaw.tools": run ? Array.from(run.usedToolNames).join(", ") : undefined,
@@ -317,20 +741,26 @@ export function createOtelPluginService(
         }
         current.span.setStatus({ code: SpanStatusCode.OK });
         endSpanSafely(current.span, eventTimestamp(evt));
-        activeRoots.delete(key);
+        const metricState = sessionMetricTokenState.get(sessionKey);
+        if (metricState) {
+          metricState.active = false;
+        }
+        activeRoots.delete(requestKey);
+        releaseRequestKey(sessionKey, requestKey);
       };
 
       const syncRootFromRun = (evt: { sessionKey?: string; sessionId?: string }) => {
-        const key = sessionIdentity(evt);
-        if (!key) {
+        const sessionKey = resolveSessionKey(evt);
+        const requestKey = resolveRequestKey(evt, false);
+        if (!sessionKey || !requestKey) {
           return;
         }
-        const run = activeRuns.get(key);
-        const root = activeRoots.get(key);
+        const run = activeRuns.get(requestKey);
+        const root = activeRoots.get(requestKey);
         if (!run || !root) {
           return;
         }
-        const snapshot = loadSessionSnapshot(key);
+        const snapshot = loadSessionSnapshot(sessionKey);
         root.span.setAttributes(stringAttrs({
           "openclaw.tokens.input":
             run.aggregate.inputTokens || snapshot?.lastAssistantUsage?.input || 0,
@@ -362,16 +792,23 @@ export function createOtelPluginService(
         evt: { sessionKey?: string; sessionId?: string },
         attrs?: Record<string, string | number | boolean>,
       ) => {
-        const key = sessionIdentity(evt);
-        if (!key) {
+        const sessionKey = resolveSessionKey(evt);
+        const requestKey = resolveRequestKey(evt, false);
+        if (!sessionKey || !requestKey) {
           return;
         }
-        const current = activeRuns.get(key);
+        const current = activeRuns.get(requestKey);
         if (!current) {
           return;
         }
-        const snapshot = loadSessionSnapshot(key);
+        const snapshot = loadSessionSnapshot(sessionKey);
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
+        const sessionInputTokens =
+          current.aggregate.inputTokens || snapshot?.lastAssistantUsage?.input || 0;
+        const sessionOutputTokens =
+          current.aggregate.outputTokens || snapshot?.lastAssistantUsage?.output || 0;
+        const sessionTotalTokens =
+          current.aggregate.totalTokens || snapshot?.lastAssistantUsage?.totalTokens || 0;
         for (const skillName of snapshot?.invokedSkillNames ?? []) {
           if (!current.skillSpans.has(skillName)) {
             ensureSkillSpan(
@@ -386,23 +823,23 @@ export function createOtelPluginService(
           }
         }
         const finalAttrs = stringAttrs({
-          ...enrichWithTranscript(key, summaryAttrs),
+          ...enrichWithTranscript(sessionKey, summaryAttrs),
           "openclaw.tokens.input":
-            current.aggregate.inputTokens || snapshot?.lastAssistantUsage?.input || 0,
+            sessionInputTokens,
           "openclaw.tokens.output":
-            current.aggregate.outputTokens || snapshot?.lastAssistantUsage?.output || 0,
+            sessionOutputTokens,
           "openclaw.tokens.cache_read":
             current.aggregate.cacheReadTokens || snapshot?.lastAssistantUsage?.cacheRead || 0,
           "openclaw.tokens.cache_write":
             current.aggregate.cacheWriteTokens || snapshot?.lastAssistantUsage?.cacheWrite || 0,
           "openclaw.tokens.total":
-            current.aggregate.totalTokens || snapshot?.lastAssistantUsage?.totalTokens || 0,
+            sessionTotalTokens,
           "llm.input_tokens":
-            current.aggregate.inputTokens || snapshot?.lastAssistantUsage?.input || 0,
+            sessionInputTokens,
           "llm.output_tokens":
-            current.aggregate.outputTokens || snapshot?.lastAssistantUsage?.output || 0,
+            sessionOutputTokens,
           "llm.total_tokens":
-            current.aggregate.totalTokens || snapshot?.lastAssistantUsage?.totalTokens || 0,
+            sessionTotalTokens,
           "openclaw.skills": Array.from(current.usedSkillNames).join(", "),
           "openclaw.skill.count": current.usedSkillNames.size,
           "openclaw.tools": Array.from(current.usedToolNames).join(", "),
@@ -427,24 +864,33 @@ export function createOtelPluginService(
       };
 
       const clearRun = (evt: { sessionKey?: string; sessionId?: string }) => {
-        const key = sessionIdentity(evt);
-        if (!key) {
+        const sessionKey = resolveSessionKey(evt);
+        const requestKey = resolveRequestKey(evt, false);
+        if (!sessionKey || !requestKey) {
           return;
         }
-        activeRuns.delete(key);
+        activeRuns.delete(requestKey);
+        releaseRequestKey(sessionKey, requestKey);
       };
 
       const cleanupExpiredRoots = () => {
         const now = Date.now();
-        for (const [key, current] of activeRoots.entries()) {
+        for (const [requestKey, current] of activeRoots.entries()) {
           if (now - current.lastTouchedAt < config.rootSpanTtlMs) {
             continue;
           }
           addEvent(current.span, "session.timeout", { "openclaw.root.ttl_ms": config.rootSpanTtlMs });
           endSpanSafely(current.span);
-          activeRoots.delete(key);
+          const metricState = current.sessionIdentity
+            ? sessionMetricTokenState.get(current.sessionIdentity)
+            : undefined;
+          if (metricState) {
+            metricState.active = false;
+          }
+          activeRoots.delete(requestKey);
+          releaseRequestKey(current.sessionIdentity, requestKey);
         }
-        for (const [key, current] of activeRuns.entries()) {
+        for (const [requestKey, current] of activeRuns.entries()) {
           if (now - current.lastTouchedAt < config.rootSpanTtlMs) {
             continue;
           }
@@ -454,7 +900,14 @@ export function createOtelPluginService(
             addEvent(current.userSpan, "run.timeout", { "openclaw.root.ttl_ms": config.rootSpanTtlMs });
           }
           finalizeRunSpans(current);
-          activeRuns.delete(key);
+          const metricState = current.sessionIdentity
+            ? sessionMetricTokenState.get(current.sessionIdentity)
+            : undefined;
+          if (metricState) {
+            metricState.active = false;
+          }
+          activeRuns.delete(requestKey);
+          releaseRequestKey(current.sessionIdentity, requestKey);
         }
       };
 
@@ -508,6 +961,24 @@ export function createOtelPluginService(
         run.aggregate.modelCalls += 1;
         run.aggregate.lastProvider = evt.provider ?? run.aggregate.lastProvider;
         run.aggregate.lastModel = evt.model ?? run.aggregate.lastModel;
+        const sessionKey = resolveSessionKey(evt);
+        if (sessionKey) {
+          const metricState = sessionMetricTokenState.get(sessionKey) ?? {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            active: true,
+            dirty: false,
+          };
+          metricState.inputTokens += evt.usage.input ?? 0;
+          metricState.outputTokens += evt.usage.output ?? 0;
+          metricState.totalTokens += evt.usage.total ?? 0;
+          metricState.modelProvider = evt.provider ?? metricState.modelProvider;
+          metricState.modelName = evt.model ?? metricState.modelName;
+          metricState.active = true;
+          metricState.dirty = true;
+          sessionMetricTokenState.set(sessionKey, metricState);
+        }
         instruments.modelCallCounter.add(
           1,
           buildModelMetricAttrs(
@@ -563,9 +1034,13 @@ export function createOtelPluginService(
         setLatestAssistantText(sessionKey, text) {
           sessionStore?.setLatestAssistantText(sessionKey, text);
         },
+        emitRuntimeOrchestrationSpan,
+        ensureRuntimeLifecycleSpans,
+        emitModelTurnDebugLog,
       });
       const {
         annotateToolLoop,
+        emitTranscriptModelSpans,
         emitSyntheticModelSpan,
         emitTranscriptToolSpans,
         ensureSkillSpan,
@@ -575,47 +1050,8 @@ export function createOtelPluginService(
       } = toolSpanManager;
 
       const emitFallbackThinkingSpan = (
-        evt: { sessionKey?: string; sessionId?: string; ts?: number; channel?: string },
-      ) => {
-        const key = sessionIdentity(evt);
-        if (!key) {
-          return;
-        }
-        const run = getRun(evt, false);
-        if (!run) {
-          return;
-        }
-        const snapshot = loadSessionSnapshot(evt.sessionKey ?? key);
-        const reasoningPreview = normalizeReasoningPreview(snapshot?.lastAssistantThinking);
-        if (!reasoningPreview || run.thinkingSpanEmitted) {
-          return;
-        }
-        const parentCtx = run.modelCtx ?? getActiveSkillCtx(run) ?? run.ctx;
-        const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
-          "thinking",
-          {
-            type: "message.processed",
-            sessionKey: evt.sessionKey,
-            sessionId: evt.sessionId,
-            ts: evt.ts ?? Date.now(),
-            channel: evt.channel ?? snapshot?.lastChannel,
-            outcome: "completed",
-          } as DiagnosticEventPayload,
-          {
-            session_channel: evt.channel ?? snapshot?.lastChannel,
-            "span.kind": "thinking",
-            output_summary: reasoningPreview,
-            output_text_length: snapshot?.lastAssistantThinking?.length,
-            "openclaw.provider": snapshot?.lastProvider,
-            "openclaw.model": snapshot?.lastModel,
-          },
-          MIN_VISIBLE_CHILD_MS,
-          parentCtx,
-        );
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end(endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs));
-        run.thinkingSpanEmitted = true;
-      };
+        _evt: { sessionKey?: string; sessionId?: string; ts?: number; channel?: string },
+      ) => {};
 
       unsubscribeAgent = runtime?.events?.onAgentEvent?.(handleAgentEvent) ?? null;
 
@@ -625,9 +1061,11 @@ export function createOtelPluginService(
       }) ?? null;
 
       const handleDiagnosticEvent = createDiagnosticEventHandler({
+        trace,
         instruments,
         SpanStatusCode,
         cleanupExpiredRoots,
+        beginRequestTrace,
         getRoot,
         getRun,
         ensureUserSpan,
@@ -640,16 +1078,26 @@ export function createOtelPluginService(
         enrichWithTranscript,
         createChildSpan,
         emitDiagnosticLog,
+        emitRuntimeOrchestrationSpan,
+        ensureRuntimeLifecycleSpans,
+        emitModelTurnDebugLog,
         SeverityNumber,
         getActiveSkillCtx,
         ensureTranscriptSkillSpans,
+        emitTranscriptModelSpans,
         emitSyntheticModelSpan,
         emitTranscriptToolSpans,
         emitFallbackThinkingSpan,
         annotateToolLoop,
+        hasReplayWatermark,
+        markReplayWatermark,
       });
 
       unsubscribeDiagnostic = onDiagnosticEvent(handleDiagnosticEvent);
+
+      reportSessionMetrics();
+      sessionMetricsInterval = setInterval(reportSessionMetrics, config.flushIntervalMs);
+      sessionMetricsInterval.unref?.();
 
       ctx.logger.info(
         `[otel-plugin] trace exporter enabled (${config.protocol}) -> ${resolveOtelUrl(config.endpoint, config.tracePath)}`,
@@ -672,6 +1120,10 @@ export function createOtelPluginService(
       unsubscribeAgent = null;
       unsubscribeTranscript?.();
       unsubscribeTranscript = null;
+      if (sessionMetricsInterval) {
+        clearInterval(sessionMetricsInterval);
+        sessionMetricsInterval = null;
+      }
       for (const current of activeRuns.values()) {
         toolSpanManager.finalizeToolAndSkillSpans(current);
         endSpanSafely(current.modelSpan);
@@ -683,6 +1135,10 @@ export function createOtelPluginService(
         endSpanSafely(span);
       }
       activeRoots.clear();
+      activeRequestKeyBySession.clear();
+      replayWatermarkBySession.clear();
+      reportedSessionMetrics.clear();
+      sessionMetricTokenState.clear();
       sessionStore?.clear();
       sessionStore = null;
       await sdk?.shutdown();

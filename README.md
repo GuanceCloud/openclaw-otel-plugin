@@ -9,22 +9,20 @@
 
 ### Traces
 
-- A session-scoped root span named `openclaw_request`
-- A session-scoped run span named `agent_run`
-- Runtime spans such as `thinking`
-- Model spans such as `<provider>/<model>`
+- A request-scoped root span named `openclaw_request`
+- A request-scoped run span named `agent_run`
+- Runtime lifecycle spans such as `channel_ingress`, `dispatch_queue`, `session_processing`, `runtime_orchestration`, and `channel_egress`
+- Model spans named `model_request`
 - Skill summary spans such as `skill:<name>`
 - Skill call spans such as `skill_call:<name>`
 - Tool spans such as `tool:<name>`
-- Diagnostic spans such as `openclaw.session.stuck`, `openclaw.webhook.received`, `openclaw.webhook.processed`, `openclaw.webhook.error`, `queue.lane.enqueue`, `queue.lane.dequeue`, `diagnostic.heartbeat`, and `tool.loop`
+- Diagnostic spans such as `openclaw.session.stuck`, `openclaw.webhook.received`, `openclaw.webhook.processed`, `openclaw.webhook.error`, and `tool.loop`
 
-Thinking span notes:
+Trace notes:
 
-- Span name: `thinking`
-- `span.kind = thinking`
-- `session_channel` is attached to the thinking span instead of the older generic `channel`
-- `output_summary` carries the normalized thinking preview
-- `output_text_length` carries the original thinking text length
+- One inbound user message maps to one trace
+- `message.processed` replays transcript turns first; trailing `session.state idle` only acts as a fallback close path
+- Transcript replay emits one `model_request` per assistant turn so multi-tool sessions show `model -> tool -> model` loops instead of one oversized model span
 
 ### Metrics
 
@@ -32,6 +30,10 @@ Plugin-added metrics:
 
 - `openclaw.requests`
 - `openclaw.request.duration`
+- `openclaw.session.tokens.input`
+- `openclaw.session.tokens.output`
+- `openclaw.session.tokens.total`
+- `openclaw.session.traces`
 - `openclaw.tool.calls`
 - `openclaw.tool.errors`
 - `openclaw.tool.duration`
@@ -128,7 +130,7 @@ Add the plugin to `~/.openclaw/openclaw.json`:
           },
           "sampleRate": 1,
           "serviceName": "openclaw-otel-plugin",
-          "flushIntervalMs": 15000,
+          "flushIntervalMs": 30000,
           "rootSpanTtlMs": 600000,
           "resourceAttributes": {
             "agent_provider": "openclaw",
@@ -156,7 +158,7 @@ Add the plugin to `~/.openclaw/openclaw.json`:
 | `serviceName` | `openclaw-otel-plugin` | Exported as OTEL `service.name` |
 | `headers` | unset | Fixed HTTP headers applied to traces, metrics, and logs |
 | `sampleRate` | unset | Optional root sampler ratio in `[0, 1]` |
-| `flushIntervalMs` | `15000` | Metrics export interval |
+| `flushIntervalMs` | `30000` | Metrics export interval |
 | `rootSpanTtlMs` | `600000` | Closes stale root/run spans after inactivity |
 | `resourceAttributes` | `{ "agent_provider": "openclaw" }` | Fixed OTEL resource attributes |
 
@@ -267,6 +269,9 @@ Then send a test message in OpenClaw and query by:
 - The plugin enriches spans and logs with session, agent, provider, model, and preview fields derived from OpenClaw session snapshots
 - Root and run spans are intentionally separate. The root span models the inbound request envelope, while `agent_run` models the agent execution lifecycle.
 - When fine-grained runtime events are missing, the plugin can replay transcript state to backfill `thinking`, model, and tool spans.
+- The plugin periodically scans active sessions on the `flushIntervalMs` cadence (default `30s`); session metrics are emitted as scan-time deltas and carry `session_id` as a metric tag.
+- `openclaw.session.tokens.*` and `openclaw.session.traces` represent session-level cumulative totals instead of being tied to individual run completion.
+- `openclaw.session.tokens.*` is accumulated from runtime `model.usage` events first, so it does not depend on transcript `message.usage` being persisted.
 - Skill attribution prefers runtime tool identity, then falls back to session skill snapshots, transcript content, and local skill catalogs under `~/.openclaw/workspace/skills`
 - Transcript-derived skill spans prefer actually invoked skills over merely mentioned skills
 - If no skill identity can be inferred, the plugin will keep tool spans without fabricating a generic skill span.
