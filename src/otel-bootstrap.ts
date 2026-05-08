@@ -9,6 +9,11 @@ type OtelLogger = {
   error?: (message: string) => void;
 };
 
+type TracePayloadDebugOptions = {
+  enabled: boolean;
+  traceIds?: string[];
+};
+
 function compactResourceAttrs(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean> {
@@ -54,18 +59,79 @@ function countExportItems(signal: "trace" | "metric", items: unknown): number | 
   return count;
 }
 
+function hrTimeToUnixMs(value: unknown): number | undefined {
+  if (!Array.isArray(value) || value.length < 2) {
+    return undefined;
+  }
+  const seconds = Number(value[0]);
+  const nanos = Number(value[1]);
+  if (!Number.isFinite(seconds) || !Number.isFinite(nanos)) {
+    return undefined;
+  }
+  return Math.floor((seconds * 1_000) + (nanos / 1_000_000));
+}
+
+function collectTracePayloadSummary(
+  items: unknown,
+  debugOptions?: TracePayloadDebugOptions,
+): {
+  traceIds: string[];
+  spans: Array<Record<string, string | number | boolean | undefined>>;
+} | undefined {
+  if (!debugOptions?.enabled || !Array.isArray(items) || items.length === 0) {
+    return undefined;
+  }
+  const filter = new Set((debugOptions.traceIds ?? []).filter(Boolean));
+  const spans = items
+    .map((item) => {
+      const spanContext = typeof (item as { spanContext?: unknown }).spanContext === "function"
+        ? ((item as { spanContext: () => { traceId?: string; spanId?: string } }).spanContext())
+        : (item as { spanContext?: { traceId?: string; spanId?: string } }).spanContext;
+      const traceId = spanContext?.traceId;
+      if (!traceId || (filter.size > 0 && !filter.has(traceId))) {
+        return undefined;
+      }
+      const parent = (item as { parentSpanContext?: { spanId?: string } }).parentSpanContext;
+      const resourceAttrs = (item as { resource?: { attributes?: Record<string, unknown> } }).resource?.attributes ?? {};
+      const attrs = (item as { attributes?: Record<string, unknown> }).attributes ?? {};
+      return {
+        trace_id: traceId,
+        span_id: spanContext?.spanId,
+        parent_id: parent?.spanId ?? "0",
+        resource: String((item as { name?: unknown }).name ?? ""),
+        service: typeof resourceAttrs["service.name"] === "string"
+          ? String(resourceAttrs["service.name"])
+          : undefined,
+        start_time: hrTimeToUnixMs((item as { startTime?: unknown }).startTime),
+        end_time: hrTimeToUnixMs((item as { endTime?: unknown }).endTime),
+        session_id: typeof attrs.session_id === "string" ? String(attrs.session_id) : undefined,
+        session_key: typeof attrs.session_key === "string" ? String(attrs.session_key) : undefined,
+      };
+    })
+    .filter(Boolean) as Array<Record<string, string | number | boolean | undefined>>;
+  if (spans.length === 0) {
+    return undefined;
+  }
+  const traceIds = Array.from(new Set(spans.map((span) => String(span.trace_id))));
+  return { traceIds, spans };
+}
+
 function withExportLogging<T extends { export: (items: any, callback: (result: any) => void) => void }>(
   exporter: T,
   options: {
     signal: "trace" | "metric" | "log";
     url: string;
     logger?: OtelLogger;
+    tracePayloadDebug?: TracePayloadDebugOptions;
   },
 ): T {
   const originalExport = exporter.export.bind(exporter);
   exporter.export = (items: any, callback: (result: any) => void) => {
     const startedAt = Date.now();
     const itemCount = countExportItems(options.signal, items);
+    const tracePayloadSummary = options.signal === "trace"
+      ? collectTracePayloadSummary(items, options.tracePayloadDebug)
+      : undefined;
     try {
       originalExport(items, (result: any) => {
         const durationMs = Date.now() - startedAt;
@@ -74,6 +140,17 @@ function withExportLogging<T extends { export: (items: any, callback: (result: a
         })`;
         if (result?.code === 0) {
           options.logger?.info?.(`[otel-plugin] ${options.signal} export succeeded${suffix}`);
+          if (tracePayloadSummary) {
+            try {
+              options.logger?.info?.(`[otel-plugin] trace export payload ${JSON.stringify({
+                trace_ids: tracePayloadSummary.traceIds,
+                span_count: tracePayloadSummary.spans.length,
+                spans: tracePayloadSummary.spans,
+              })}`);
+            } catch {
+              options.logger?.info?.("[otel-plugin] trace export payload log failed to serialize");
+            }
+          }
         } else {
           options.logger?.error?.(
             `[otel-plugin] ${options.signal} export failed${suffix}: ${
@@ -128,6 +205,10 @@ export async function startOtelBootstrap(
     signal: "trace",
     url: traceUrl,
     logger,
+    tracePayloadDebug: {
+      enabled: config.tracePayloadDebugEnabled,
+      traceIds: config.tracePayloadDebugTraceIds,
+    },
   });
   const metricExporter = withExportLogging(new OTLPMetricExporter({
     url: metricUrl,

@@ -268,12 +268,15 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             },
           );
           markReplayWatermark(evt.sessionKey, snapshot);
+          const finalOutcome = getRun(evt, false)?.pendingFinalOutcome;
           endRun(evt, stringAttrs({
             "openclaw.state": evt.state,
+            "openclaw.outcome": finalOutcome,
             "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
           }));
           endRoot(evt, stringAttrs({
             "openclaw.state": evt.state,
+            "openclaw.outcome": finalOutcome,
             "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
           }));
           clearRun(evt);
@@ -317,13 +320,14 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           && typeof evt.ts === "number"
           && evt.ts > activeRun.mainStartTs
         ) {
+          const finalOutcome = activeRun.pendingFinalOutcome;
           endRun(
             {
               sessionKey: evt.sessionKey,
               sessionId: evt.sessionId,
               ts: evt.ts - 1,
             },
-            stringAttrs({ "openclaw.outcome": "superseded_by_next_message" }),
+            stringAttrs({ "openclaw.outcome": finalOutcome ?? "superseded_by_next_message" }),
           );
           endRoot(
             {
@@ -331,7 +335,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               sessionId: evt.sessionId,
               ts: evt.ts - 1,
             },
-            stringAttrs({ "openclaw.outcome": "superseded_by_next_message" }),
+            stringAttrs({ "openclaw.outcome": finalOutcome ?? "superseded_by_next_message" }),
           );
           clearRun(evt);
         }
@@ -597,9 +601,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           exception: evt.outcome === "error" ? evt.error ?? evt.reason : undefined,
         });
         syncRootFromRun(evt);
-        endRun(evt, { "openclaw.outcome": evt.outcome });
-        endRoot(evt, { "openclaw.outcome": evt.outcome });
-        clearRun(evt);
+        if (run) {
+          run.pendingFinalOutcome = evt.outcome;
+          run.lastTouchedAt = Date.now();
+        }
         break;
       }
       case "webhook.received": {

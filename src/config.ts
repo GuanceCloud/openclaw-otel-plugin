@@ -11,6 +11,8 @@ export type OtelPluginConfig = {
   sampleRate?: number;
   flushIntervalMs: number;
   rootSpanTtlMs: number;
+  tracePayloadDebugEnabled: boolean;
+  tracePayloadDebugTraceIds?: string[];
   resourceAttributes?: Record<string, string | number | boolean>;
 };
 
@@ -42,6 +44,16 @@ function asStringMap(
       .map(([key, item]) => [key, String(item).trim()]),
   );
   return Object.keys(mapped).length > 0 ? mapped : undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const mapped = value
+    .filter((item) => typeof item === "string" && item.trim())
+    .map((item) => String(item).trim());
+  return mapped.length > 0 ? mapped : undefined;
 }
 
 function asResourceAttributes(
@@ -133,6 +145,8 @@ export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {
     sampleRate: normalizeRate(raw.sampleRate),
     flushIntervalMs: normalizeMs(raw.flushIntervalMs, DEFAULT_FLUSH_INTERVAL_MS),
     rootSpanTtlMs: normalizeMs(raw.rootSpanTtlMs, DEFAULT_ROOT_SPAN_TTL_MS),
+    tracePayloadDebugEnabled: raw.tracePayloadDebugEnabled === true,
+    tracePayloadDebugTraceIds: asStringArray(raw.tracePayloadDebugTraceIds),
     resourceAttributes: resolveResourceAttributes(raw),
   };
 }

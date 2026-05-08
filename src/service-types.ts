@@ -75,6 +75,9 @@ export type ActiveRunSpan = {
   channelEgressEmitted?: boolean;
   modelSpanEmitted: boolean;
   thinkingSpanEmitted?: boolean;
+  transcriptAssistantTurnsEmitted?: number;
+  transcriptToolCallIds?: Set<string>;
+  pendingFinalOutcome?: string;
   usedSkillNames: Set<string>;
   usedToolNames: Set<string>;
   usedToolTargets: Set<string>;

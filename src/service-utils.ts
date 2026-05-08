@@ -46,6 +46,8 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
     channelEgressEmitted: false,
     modelSpanEmitted: false,
     thinkingSpanEmitted: false,
+    transcriptAssistantTurnsEmitted: 0,
+    transcriptToolCallIds: new Set<string>(),
     aggregate: createRunAggregate(),
     usedSkillNames: new Set<string>(),
     usedToolNames: new Set<string>(),

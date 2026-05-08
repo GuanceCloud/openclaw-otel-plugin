@@ -209,6 +209,104 @@ test("message.processed requests channel_egress lifecycle span", () => {
   assert.equal(lifecycleCalls[0].options.outcome, "completed");
 });
 
+test("message.processed keeps the active trace open for later transcript growth", () => {
+  let endRunCalls = 0;
+  let endRootCalls = 0;
+  let clearRunCalls = 0;
+  const run = {
+    ctx: { ctx: "run" },
+    modelCtx: { ctx: "model" },
+    lastTouchedAt: 0,
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageProcessedCounter: { add() {} },
+      diagnosticsMessageDurationMs: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return run;
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    syncRootFromRun() {},
+    endRun() {
+      endRunCalls += 1;
+    },
+    endRoot() {
+      endRootCalls += 1;
+    },
+    clearRun() {
+      clearRunCalls += 1;
+    },
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastAssistantText: "final answer",
+        lastRunAssistantTurns: [{ startedAt: 1, endedAt: 2 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return true;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+    markReplayWatermark() {},
+  });
+
+  handler({
+    type: "message.processed",
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 1000,
+    channel: "chat",
+    outcome: "completed",
+  });
+
+  assert.equal(endRunCalls, 0);
+  assert.equal(endRootCalls, 0);
+  assert.equal(clearRunCalls, 0);
+  assert.equal(run.pendingFinalOutcome, "completed");
+});
+
 test("message.processed prefers transcript replay and marks replay watermark", () => {
   let transcriptCalls = 0;
   let toolReplayCalls = 0;
@@ -599,6 +697,7 @@ test("message.queued rotates a completed active run before starting the next req
     modelSpanEmitted: true,
     aggregate: { modelCalls: 1 },
     usedToolNames: new Set(["web_search"]),
+    pendingFinalOutcome: "completed",
   };
   const newRun = {
     ctx: { ctx: "new-run" },

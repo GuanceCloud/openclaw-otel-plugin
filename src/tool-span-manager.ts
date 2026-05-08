@@ -641,9 +641,14 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       sessionId: evt.sessionId,
       ts: replayStartTs,
     }, true);
-    if (!run || run.modelSpanEmitted) {
-      return run?.modelSpanEmitted === true;
+    if (!run) {
+      return false;
     }
+    const emittedTurns = run.transcriptAssistantTurnsEmitted ?? 0;
+    if (emittedTurns >= turns.length) {
+      return emittedTurns > 0 || run.modelSpanEmitted === true;
+    }
+    const pendingTurns = turns.slice(emittedTurns);
     ensureRuntimeLifecycleSpans(
       {
         sessionKey: evt.sessionKey,
@@ -655,13 +660,14 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         createIfMissing: true,
         startTsHint: replayStartTs,
         processingStartTs: replayStartTs,
-        nextActionTs: turns[0]?.startedAt,
+        nextActionTs: pendingTurns[0]?.startedAt,
         snapshot,
       },
     );
 
-    for (const [index, turn] of turns.entries()) {
-      if (index === 0 && typeof run.orchestrationCursorTs === "number") {
+    for (const [offset, turn] of pendingTurns.entries()) {
+      const index = emittedTurns + offset;
+      if (offset === 0 && typeof run.orchestrationCursorTs === "number") {
         emitRuntimeOrchestrationSpan(
           evt,
           run.orchestrationCursorTs,
@@ -725,6 +731,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       });
     }
 
+    run.transcriptAssistantTurnsEmitted = turns.length;
     run.modelSpanEmitted = true;
     return true;
   };
@@ -845,10 +852,15 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       sessionId: evt.sessionId,
       ts: replayStartTs,
     }, true);
-    if (!run || run.usedToolNames.size > 0) {
+    if (!run) {
       return;
     }
+    const emittedToolCallIds = run.transcriptToolCallIds ?? new Set<string>();
+    run.transcriptToolCallIds = emittedToolCallIds;
     for (const toolCall of snapshot?.lastRunToolCalls ?? []) {
+      if (emittedToolCallIds.has(toolCall.callId)) {
+        continue;
+      }
       handleAgentEvent({
         sessionKey,
         ts: toolCall.startedAt ?? evt.ts ?? Date.now(),
@@ -876,6 +888,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           isError: toolCall.isError === true,
         },
       });
+      emittedToolCallIds.add(toolCall.callId);
     }
   };
 

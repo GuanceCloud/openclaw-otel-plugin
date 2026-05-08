@@ -882,6 +882,99 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(modelSpans[1].options.attributes.output_summary, "second reasoning");
 });
 
+test("transcript model replay only appends turns that were not emitted yet", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  let run;
+  let snapshotTurns = [
+    {
+      startedAt: 1000,
+      endedAt: 2000,
+      provider: "openai",
+      model: "gpt-5",
+      inputPreview: "first question",
+      outputPreview: "first answer",
+      outputKind: "text",
+    },
+  ];
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun(evt, createIfMissing = false) {
+      if (!run && createIfMissing) {
+        run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+        run.span = createFakeSpan("agent_run");
+        run.ctx = { ctx: "run" };
+      }
+      return run;
+    },
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      throw new Error("not expected");
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 1000,
+        lastProvider: "openai",
+        lastModel: "gpt-5",
+        lastRunAssistantTurns: snapshotTurns,
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  assert.equal(manager.emitTranscriptModelSpans({ sessionKey: "s1", ts: 3000 }), true);
+  snapshotTurns = [
+    ...snapshotTurns,
+    {
+      startedAt: 2300,
+      endedAt: 2600,
+      provider: "openai",
+      model: "gpt-5",
+      inputPreview: "{\"status\":\"ok\"}",
+      outputPreview: "second answer",
+      outputKind: "text",
+    },
+  ];
+  assert.equal(manager.emitTranscriptModelSpans({ sessionKey: "s1", ts: 4000 }), true);
+
+  const modelSpans = spans.filter((span) => span.name === "model_request");
+  assert.equal(modelSpans.length, 2);
+  assert.equal(run.transcriptAssistantTurnsEmitted, 2);
+  assert.equal(modelSpans[0].options.startTime.getTime(), 1000);
+  assert.equal(modelSpans[1].options.startTime.getTime(), 2300);
+});
+
 test("transcript model spans do not inherit session output preview without turn text", () => {
   const spans = [];
   const tracer = createFakeTracer(spans);

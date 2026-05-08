@@ -103,3 +103,24 @@ test("resolveOtelPluginConfig uses 30s as the default metrics export interval", 
 
   assert.equal(config.flushIntervalMs, 30000);
 });
+
+test("resolveOtelPluginConfig keeps trace payload debug off by default and accepts trace filters", () => {
+  const disabledConfig = resolveOtelPluginConfig({});
+  const enabledConfig = resolveOtelPluginConfig({
+    tracePayloadDebugEnabled: true,
+    tracePayloadDebugTraceIds: [
+      "41be47bf1ca76b47b61c29d60a264141",
+      " ",
+      1,
+      "f91670351eda5ece35abcba411ee1a75",
+    ],
+  });
+
+  assert.equal(disabledConfig.tracePayloadDebugEnabled, false);
+  assert.equal(disabledConfig.tracePayloadDebugTraceIds, undefined);
+  assert.equal(enabledConfig.tracePayloadDebugEnabled, true);
+  assert.deepEqual(enabledConfig.tracePayloadDebugTraceIds, [
+    "41be47bf1ca76b47b61c29d60a264141",
+    "f91670351eda5ece35abcba411ee1a75",
+  ]);
+});
