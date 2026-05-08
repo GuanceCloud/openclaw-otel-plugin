@@ -22,6 +22,8 @@ import {
   shouldSyncRootForSessionState,
 } from "./trace-runtime.js";
 
+const MAX_PROCESSING_BACKFILL_MS = 5 * 60 * 1000;
+
 type SessionEvent = {
   sessionKey?: string;
   sessionId?: string;
@@ -179,11 +181,47 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     });
   };
 
+  const resolveTranscriptRequestStartTs = (
+    snapshot: SessionSnapshot | undefined,
+    fallbackTs: number | undefined,
+  ) => {
+    const minAcceptedTs = typeof fallbackTs === "number"
+      ? fallbackTs - MAX_PROCESSING_BACKFILL_MS
+      : undefined;
+    const candidates = [
+      snapshot?.lastUserTs,
+      ...(snapshot?.lastRunToolCalls ?? []).map((toolCall) => toolCall.startedAt),
+      ...(snapshot?.lastRunAssistantTurns ?? []).flatMap((turn) => [turn.startedAt, turn.endedAt]),
+      fallbackTs,
+    ].filter((value): value is number => {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        return false;
+      }
+      if (typeof minAcceptedTs === "number" && value < minAcceptedTs) {
+        return false;
+      }
+      return true;
+    });
+    if (candidates.length === 0) {
+      return fallbackTs;
+    }
+    return Math.min(...candidates);
+  };
+
   return (evt: DiagnosticEventPayload) => {
     cleanupExpiredRoots();
 
     switch (evt.type) {
       case "session.state": {
+        const processingSnapshot = evt.state === "processing"
+          ? loadSessionSnapshot(evt.sessionKey)
+          : undefined;
+        const processingTraceTs = evt.state === "processing"
+          ? resolveTranscriptRequestStartTs(processingSnapshot, evt.ts)
+          : evt.ts;
+        const traceEvt = evt.state === "processing" && typeof processingTraceTs === "number"
+          ? { ...evt, ts: processingTraceTs }
+          : evt;
         const sessionStateAttrs = {
           "openclaw.prevState": evt.prevState,
           "openclaw.state": evt.state,
@@ -200,7 +238,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             buildDiagnosticsSessionMetricAttrs(evt.state, evt.reason),
           );
         }
-        const root = getRoot(evt, shouldCreateRootForSessionState(evt.state));
+        const root = getRoot(traceEvt, shouldCreateRootForSessionState(evt.state));
         if (root) {
           addEvent(root.span, "session.state", stringAttrs(sessionStateAttrs));
         }
@@ -213,25 +251,35 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           syncRootFromRun(evt);
         }
         if (evt.state === "processing") {
-          const snapshot = loadSessionSnapshot(evt.sessionKey);
+          const snapshot = processingSnapshot;
+          const lifecycleStartTs = typeof processingTraceTs === "number" ? processingTraceTs : evt.ts;
           ensureUserSpan({
             sessionKey: evt.sessionKey,
             sessionId: evt.sessionId,
-            ts: evt.ts,
+            ts: lifecycleStartTs ?? Date.now(),
           });
-          const run = getRun(evt, true);
+          const run = getRun({
+            sessionKey: evt.sessionKey,
+            sessionId: evt.sessionId,
+            ts: lifecycleStartTs,
+          }, true);
           if (run) {
-            run.mainStartTs = evt.ts;
-            run.orchestrationCursorTs = evt.ts;
+            if (typeof lifecycleStartTs === "number") {
+              run.mainStartTs = Math.min(run.mainStartTs, lifecycleStartTs);
+            }
+            if (typeof evt.ts === "number") {
+              run.orchestrationCursorTs = evt.ts;
+            }
             ensureRuntimeLifecycleSpans(
               {
                 sessionKey: evt.sessionKey,
                 sessionId: evt.sessionId,
-                ts: evt.ts,
+                ts: lifecycleStartTs,
                 channel: snapshot?.lastChannel,
               },
               {
                 createIfMissing: true,
+                startTsHint: lifecycleStartTs,
                 processingStartTs: evt.ts,
                 nextActionTs: evt.ts + MIN_VISIBLE_CHILD_MS,
                 snapshot,

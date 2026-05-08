@@ -288,11 +288,32 @@ function withCanonicalAliases(
   return next;
 }
 
+function stripOpenClawNamespace(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean | undefined> {
+  const next = { ...attrs };
+  for (const [key, value] of Object.entries({ ...next })) {
+    if (!key.startsWith("openclaw.") || value === undefined || value === "") {
+      continue;
+    }
+    const strippedKey = key.slice("openclaw.".length);
+    if (!strippedKey) {
+      delete next[key];
+      continue;
+    }
+    if (next[strippedKey] === undefined || next[strippedKey] === "") {
+      next[strippedKey] = value;
+    }
+    delete next[key];
+  }
+  return next;
+}
+
 export function stringAttrs(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean> {
   return Object.fromEntries(
-    Object.entries(withCanonicalAliases(attrs))
+    Object.entries(stripOpenClawNamespace(withCanonicalAliases(attrs)))
       .filter(([key, value]) => key !== "trace_id" && value !== undefined && value !== "")
       .map(([key, value]) => [
         key,

@@ -494,6 +494,198 @@ test("session.state processing requests lifecycle shell spans", () => {
   assert.equal(lifecycleCalls[0].options.processingStartTs, 1000);
 });
 
+test("session.state processing backfills trace start from transcript snapshot", () => {
+  const rootCalls = [];
+  const runCalls = [];
+  const userCalls = [];
+  const lifecycleCalls = [];
+  const run = {
+    ctx: { ctx: "run" },
+    modelCtx: { ctx: "model" },
+    mainStartTs: 360_000,
+    orchestrationCursorTs: 360_000,
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsSessionStateCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot(evt) {
+      rootCalls.push(evt.ts);
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun(evt) {
+      runCalls.push(evt.ts);
+      return run;
+    },
+    ensureUserSpan(evt) {
+      userCalls.push(evt.ts);
+      return run;
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 900,
+        lastRunAssistantTurns: [{ startedAt: 950, endedAt: 980 }],
+        lastRunToolCalls: [{ startedAt: 960 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans(evt, options) {
+      lifecycleCalls.push({ evt, options });
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "session.state",
+    sessionKey: "s1",
+    ts: 1000,
+    state: "processing",
+  });
+
+  assert.equal(rootCalls[0], 900);
+  assert.equal(userCalls[0], 900);
+  assert.equal(runCalls.at(-1), 900);
+  assert.equal(run.mainStartTs, 900);
+  assert.equal(run.orchestrationCursorTs, 1000);
+  assert.equal(lifecycleCalls[0].evt.ts, 900);
+  assert.equal(lifecycleCalls[0].options.startTsHint, 900);
+  assert.equal(lifecycleCalls[0].options.processingStartTs, 1000);
+});
+
+test("session.state processing ignores stale transcript snapshots from an older request", () => {
+  const rootCalls = [];
+  const runCalls = [];
+  const userCalls = [];
+  const lifecycleCalls = [];
+  const run = {
+    ctx: { ctx: "run" },
+    modelCtx: { ctx: "model" },
+    mainStartTs: 360_000,
+    orchestrationCursorTs: 360_000,
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsSessionStateCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot(evt) {
+      rootCalls.push(evt.ts);
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun(evt) {
+      runCalls.push(evt.ts);
+      return run;
+    },
+    ensureUserSpan(evt) {
+      userCalls.push(evt.ts);
+      return run;
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 100,
+        lastRunAssistantTurns: [{ startedAt: 150, endedAt: 200 }],
+        lastRunToolCalls: [{ startedAt: 160 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans(evt, options) {
+      lifecycleCalls.push({ evt, options });
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "session.state",
+    sessionKey: "s1",
+    ts: 360_000,
+    state: "processing",
+  });
+
+  assert.equal(rootCalls[0], 360_000);
+  assert.equal(userCalls[0], 360_000);
+  assert.equal(runCalls.at(-1), 360_000);
+  assert.equal(run.mainStartTs, 360_000);
+  assert.equal(lifecycleCalls[0].evt.ts, 360_000);
+  assert.equal(lifecycleCalls[0].options.startTsHint, 360_000);
+});
+
 test("session.state idle skips duplicate replay after the transcript has already been finalized", () => {
   let transcriptCalls = 0;
   let syntheticCalls = 0;

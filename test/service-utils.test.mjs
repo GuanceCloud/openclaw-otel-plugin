@@ -109,15 +109,15 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.skill_name, "monitor");
   assert.equal(attrs.skill_type, "call");
   assert.equal(attrs.skill_source, "runtime");
-  assert.equal(attrs["openclaw.skill.call_id"], "skill-call-1");
-  assert.equal(attrs["openclaw.skill.name"], "monitor");
-  assert.equal(attrs["openclaw.skill.kind"], "call");
-  assert.equal(attrs["openclaw.skill.source"], "runtime");
+  assert.equal(attrs["skill.call_id"], "skill-call-1");
+  assert.equal(attrs["skill.name"], "monitor");
+  assert.equal(attrs["skill.kind"], "call");
+  assert.equal(attrs["skill.source"], "runtime");
   assert.equal(attrs.final_status, "completed");
   assert.equal("openclaw.sessionId" in attrs, false);
   assert.equal("openclaw.session.cwd" in attrs, false);
   assert.equal("openclaw.tool.call_id" in attrs, false);
-  assert.equal("openclaw.skill.call_id" in attrs, true);
+  assert.equal("skill.call_id" in attrs, true);
 });
 
 test("stringAttrs parses multi-agent session keys with agent name in the second segment", () => {

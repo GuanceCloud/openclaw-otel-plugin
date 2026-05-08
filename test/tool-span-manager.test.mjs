@@ -440,9 +440,9 @@ test("dashboard edit tools create a skill call span and preserve skill attrs", (
   assert.ok(skillCallSpan);
   assert.ok(toolSpan);
   assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
-  assert.equal(skillSummarySpan.options.attributes["openclaw.skill.name"], "dashboard");
-  assert.equal(skillCallSpan.options.attributes["openclaw.skill.name"], "dashboard");
-  assert.equal(toolSpan.options.attributes["openclaw.skill.name"], "dashboard");
+  assert.equal(skillSummarySpan.options.attributes["skill.name"], "dashboard");
+  assert.equal(skillCallSpan.options.attributes["skill.name"], "dashboard");
+  assert.equal(toolSpan.options.attributes["skill.name"], "dashboard");
 });
 
 test("tool events use transcript tool call mappings when runtime args are absent", () => {
@@ -872,13 +872,13 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(spans.some((span) => span.name === "thinking"), false);
   assert.equal(modelSpans[0].options.startTime.getTime(), 1000);
   assert.equal(modelSpans[0].endTime.getTime(), 2000);
-  assert.equal(modelSpans[0].options.attributes["openclaw.input.preview"], "first question");
-  assert.equal(modelSpans[0].options.attributes["openclaw.output.preview"], "first answer");
+  assert.equal(modelSpans[0].options.attributes["input.preview"], "first question");
+  assert.equal(modelSpans[0].options.attributes["output.preview"], "first answer");
   assert.equal(modelSpans[0].options.attributes.output_summary, "first reasoning");
   assert.equal(modelSpans[1].options.startTime.getTime(), 2300);
   assert.equal(modelSpans[1].endTime.getTime(), 2600);
-  assert.equal(modelSpans[1].options.attributes["openclaw.input.preview"], "{\"status\":\"ok\"}");
-  assert.equal(modelSpans[1].options.attributes["openclaw.output.preview"], "second answer");
+  assert.equal(modelSpans[1].options.attributes["input.preview"], "{\"status\":\"ok\"}");
+  assert.equal(modelSpans[1].options.attributes["output.preview"], "second answer");
   assert.equal(modelSpans[1].options.attributes.output_summary, "second reasoning");
 });
 
@@ -1051,7 +1051,7 @@ test("transcript model spans do not inherit session output preview without turn 
 
   const modelSpan = spans.find((span) => span.name === "model_request");
   assert.ok(modelSpan);
-  assert.equal(modelSpan.options.attributes["openclaw.input.preview"], "search result payload");
-  assert.equal("openclaw.output.preview" in modelSpan.options.attributes, false);
+  assert.equal(modelSpan.options.attributes["input.preview"], "search result payload");
+  assert.equal("output.preview" in modelSpan.options.attributes, false);
   assert.equal("output_summary" in modelSpan.options.attributes, false);
 });
