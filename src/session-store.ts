@@ -305,8 +305,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         totalTokens: 0,
       };
       let traceCount = 0;
-      const invokedSkillNames = new Set<string>();
-      const toolCallSkillNamesById: Record<string, string> = {};
+      const currentRunInvokedSkillNames = new Set<string>();
+      let currentRunToolCallSkillNamesById: Record<string, string> = {};
       const currentRunToolCalls = new Map<string, TranscriptToolCall>();
       const currentRunAssistantTurns: TranscriptAssistantTurn[] = [];
       let currentRunCursorTs: number | undefined;
@@ -328,6 +328,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           lastUserText = userText ?? lastUserText;
           lastUserTs = resolveEnvelopeTimestamp(line.timestamp, message.timestamp) ?? lastUserTs;
           traceCount += 1;
+          currentRunInvokedSkillNames.clear();
+          currentRunToolCallSkillNamesById = {};
           currentRunToolCalls.clear();
           currentRunAssistantTurns.length = 0;
           currentRunCursorTs = lastUserTs;
@@ -378,8 +380,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
                   : undefined,
               );
               if (skillName) {
-                invokedSkillNames.add(skillName);
-                toolCallSkillNamesById[toolCallId] = skillName;
+                currentRunInvokedSkillNames.add(skillName);
+                currentRunToolCallSkillNamesById[toolCallId] = skillName;
               }
             }
           }
@@ -468,8 +470,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         sessionCwd,
         sessionSkills: (sessionSkillsBySessionKey.get(sessionKey) ?? []).map((skill) => skill.name),
         mentionedSkillNames: Array.from(mentionedSkillNames),
-        invokedSkillNames: Array.from(invokedSkillNames),
-        toolCallSkillNamesById,
+        invokedSkillNames: Array.from(currentRunInvokedSkillNames),
+        toolCallSkillNamesById: currentRunToolCallSkillNamesById,
         lastRunToolCalls: Array.from(currentRunToolCalls.values()),
         lastRunAssistantTurns: currentRunAssistantTurns,
         lastUserText,

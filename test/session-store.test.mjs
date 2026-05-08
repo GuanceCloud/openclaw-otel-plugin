@@ -99,6 +99,103 @@ test("session store reads sessions index from agents/main and extracts invoked s
   ]);
 });
 
+test("session store keeps invoked skills scoped to the latest run only", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  const workspaceSkillsDir = path.join(stateDir, "workspace", "skills");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.mkdirSync(path.join(workspaceSkillsDir, "dashboard"), { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "s1b.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s1b: {
+        sessionFile,
+        sessionId: "session-1b",
+        skillsSnapshot: {
+          resolvedSkills: [
+            { name: "dashboard", description: "生成观测云 Dashboard" },
+          ],
+        },
+      },
+    }),
+  );
+  fs.writeFileSync(
+    path.join(workspaceSkillsDir, "dashboard", "SKILL.md"),
+    "---\nname: dashboard\ndescription: 生成观测云 Dashboard\n---\n",
+  );
+
+  const lines = [
+    {
+      type: "message",
+      timestamp: "2026-05-08T09:00:00.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "做个 dashboard" }],
+      },
+    },
+    {
+      type: "message",
+      timestamp: "2026-05-08T09:00:05.000Z",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "call-dashboard",
+            name: "write",
+            arguments: {
+              path: "/home/liurui/dashboard/mysql.json",
+            },
+          },
+        ],
+      },
+    },
+    {
+      type: "message",
+      timestamp: "2026-05-08T09:01:00.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "古风美文美句10条" }],
+      },
+    },
+    {
+      type: "message",
+      timestamp: "2026-05-08T09:01:10.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "第一句，山中何事，松花酿酒。" }],
+      },
+    },
+  ];
+  fs.writeFileSync(
+    sessionFile,
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+  );
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const snapshot = store.loadSessionSnapshot("s1b");
+
+  assert.ok(snapshot);
+  assert.deepEqual(snapshot.invokedSkillNames, []);
+  assert.deepEqual(snapshot.toolCallSkillNamesById, {});
+  assert.deepEqual(snapshot.lastRunAssistantTurns, [
+    {
+      startedAt: Date.parse("2026-05-08T09:01:00.000Z"),
+      endedAt: Date.parse("2026-05-08T09:01:10.000Z"),
+      provider: undefined,
+      model: undefined,
+      inputPreview: "古风美文美句10条",
+      thinking: undefined,
+      text: "第一句，山中何事，松花酿酒。",
+      outputPreview: "第一句，山中何事，松花酿酒。",
+      outputKind: "text",
+    },
+  ]);
+});
+
 test("session store aggregates session token totals and trace count", () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
   const sessionsDir = path.join(stateDir, "agents", "main", "sessions");

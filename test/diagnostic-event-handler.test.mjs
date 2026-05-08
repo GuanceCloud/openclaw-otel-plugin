@@ -686,6 +686,103 @@ test("session.state processing ignores stale transcript snapshots from an older 
   assert.equal(lifecycleCalls[0].options.startTsHint, 360_000);
 });
 
+test("session.state processing never backfills earlier than the queued message start", () => {
+  const rootCalls = [];
+  const runCalls = [];
+  const userCalls = [];
+  const lifecycleCalls = [];
+  const run = {
+    ctx: { ctx: "run" },
+    modelCtx: { ctx: "model" },
+    mainStartTs: 1_778_235_063_227,
+    orchestrationCursorTs: 1_778_235_063_227,
+    messageQueuedTs: 1_778_235_063_227,
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsSessionStateCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot(evt) {
+      rootCalls.push(evt.ts);
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun(evt) {
+      runCalls.push(evt.ts);
+      return run;
+    },
+    ensureUserSpan(evt) {
+      userCalls.push(evt.ts);
+      return run;
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 1_778_234_484_027,
+        lastRunAssistantTurns: [{ startedAt: 1_778_234_786_024, endedAt: 1_778_234_795_229 }],
+        lastRunToolCalls: [{ startedAt: 1_778_234_788_249 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans(evt, options) {
+      lifecycleCalls.push({ evt, options });
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "session.state",
+    sessionKey: "s1",
+    ts: 1_778_235_063_316,
+    state: "processing",
+  });
+
+  assert.equal(rootCalls[0], 1_778_235_063_227);
+  assert.equal(userCalls[0], 1_778_235_063_227);
+  assert.equal(runCalls.at(-1), 1_778_235_063_227);
+  assert.equal(run.mainStartTs, 1_778_235_063_227);
+  assert.equal(lifecycleCalls[0].evt.ts, 1_778_235_063_227);
+  assert.equal(lifecycleCalls[0].options.startTsHint, 1_778_235_063_227);
+  assert.equal(lifecycleCalls[0].options.processingStartTs, 1_778_235_063_316);
+});
+
 test("session.state idle skips duplicate replay after the transcript has already been finalized", () => {
   let transcriptCalls = 0;
   let syntheticCalls = 0;

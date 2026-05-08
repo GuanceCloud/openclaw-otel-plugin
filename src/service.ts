@@ -20,7 +20,9 @@ import type {
 import {
   addEvent,
   buildSessionMetricAttrs,
+  buildGenAiAgentSessionMetricAttrs,
   buildModelMetricAttrs,
+  buildGenAiAgentRequestMetricAttrs,
   buildRequestMetricAttrs,
   clipPreview,
   computeSessionMetricDelta,
@@ -544,15 +546,46 @@ export function createOtelPluginService(
             });
             if (deltaTotals.inputTokens > 0) {
               instruments.sessionInputTokensCounter.add(deltaTotals.inputTokens, metricAttrs);
+              instruments.genAiAgentSessionTokenUsage?.add(
+                deltaTotals.inputTokens,
+                buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+                  modelProvider: tokenState?.modelProvider,
+                  modelName: tokenState?.modelName,
+                  tokenType: "input",
+                }),
+              );
             }
             if (deltaTotals.outputTokens > 0) {
               instruments.sessionOutputTokensCounter.add(deltaTotals.outputTokens, metricAttrs);
+              instruments.genAiAgentSessionTokenUsage?.add(
+                deltaTotals.outputTokens,
+                buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+                  modelProvider: tokenState?.modelProvider,
+                  modelName: tokenState?.modelName,
+                  tokenType: "output",
+                }),
+              );
             }
             if (deltaTotals.totalTokens > 0) {
               instruments.sessionTotalTokensCounter.add(deltaTotals.totalTokens, metricAttrs);
+              instruments.genAiAgentSessionTokenUsage?.add(
+                deltaTotals.totalTokens,
+                buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+                  modelProvider: tokenState?.modelProvider,
+                  modelName: tokenState?.modelName,
+                  tokenType: "total",
+                }),
+              );
             }
             if (deltaTotals.traceCount > 0) {
               instruments.sessionTraceCounter.add(deltaTotals.traceCount, metricAttrs);
+              instruments.genAiAgentSessionTraceCount?.add(
+                deltaTotals.traceCount,
+                buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+                  modelProvider: tokenState?.modelProvider,
+                  modelName: tokenState?.modelName,
+                }),
+              );
             }
             reportedSessionMetrics.set(seriesKey, currentTotals);
             if (tokenState) {
@@ -855,10 +888,16 @@ export function createOtelPluginService(
           current.span && addEvent(current.span, "run.finish", summaryAttrs);
         }
         const requestMetricAttrs = buildRequestMetricAttrs(snapshot, summaryAttrs);
+        const genAiRequestMetricAttrs = buildGenAiAgentRequestMetricAttrs(snapshot, summaryAttrs);
         instruments.requestCounter.add(1, requestMetricAttrs);
+        instruments.genAiAgentRequestCount?.add(1, genAiRequestMetricAttrs);
         instruments.requestDuration.record(
           Math.max(0, eventTimestamp(evt).getTime() - current.startedAt),
           requestMetricAttrs,
+        );
+        instruments.genAiAgentRequestDuration?.record(
+          Math.max(0, eventTimestamp(evt).getTime() - current.startedAt),
+          genAiRequestMetricAttrs,
         );
         finalizeRunSpans(current, eventTimestamp(evt));
       };

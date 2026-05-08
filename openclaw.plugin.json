@@ -25,10 +25,6 @@
       "logsPath": {
         "type": "string"
       },
-      "agentProvider": {
-        "type": "string",
-        "description": "Deprecated compatibility field. Prefer resourceAttributes.agent_provider."
-      },
       "globalTags": {
         "type": "object",
         "description": "Deprecated compatibility field. Prefer resourceAttributes.",

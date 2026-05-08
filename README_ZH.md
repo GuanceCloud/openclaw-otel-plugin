@@ -133,7 +133,7 @@ npm run build
           "flushIntervalMs": 30000,
           "rootSpanTtlMs": 600000,
           "resourceAttributes": {
-            "agent_provider": "openclaw",
+            "agent_runtime": "openclaw",
             "env": "prod",
             "app_name":"openclaw-agent",
 	          "app_id":"999999990000000000iuui"
@@ -160,17 +160,16 @@ npm run build
 | `sampleRate` | 未设置 | 可选采样率，取值范围 `[0, 1]` |
 | `flushIntervalMs` | `30000` | metrics 周期导出间隔 |
 | `rootSpanTtlMs` | `600000` | root/run span 长时间无活动后自动收尾 |
-| `resourceAttributes` | `{ "agent_provider": "openclaw" }` | 固定 OTEL resource attributes |
+| `resourceAttributes` | `{ "agent_runtime": "openclaw" }` | 固定 OTEL resource attributes |
 
 兼容字段仍然支持：
 
-- `agentProvider`：`resourceAttributes.agent_provider` 的兼容别名
 - `globalTags`：会被折叠合并进 `resourceAttributes`
 
 resource attributes 合并顺序：
 
 - 从 OpenClaw 状态目录解析出的运行时元数据（如果能识别）
-- 解析后的配置资源属性，其中包含默认 `agent_provider`、兼容字段，以及显式配置的 `resourceAttributes`
+- 解析后的配置资源属性，其中包含默认 `agent_runtime`、兼容字段，以及显式配置的 `resourceAttributes`
 
 运行时元数据可能补充这些字段：
 
@@ -199,7 +198,7 @@ resource attributes 合并顺序：
           },
           "serviceName": "openclaw-otel-plugin",
           "resourceAttributes": {
-            "agent_provider": "openclaw",
+            "agent_runtime": "openclaw",
             "env": "prod",
             "app_name":"openclaw-agent",
 	          "app_id":"999999990000000000iuui"
@@ -314,6 +313,5 @@ plugins.entries.openclaw-otel-plugin.config
 - `serviceName`
 - `flushIntervalMs`
 - `rootSpanTtlMs`
-- `agentProvider`
 - `globalTags`
 - `resourceAttributes`

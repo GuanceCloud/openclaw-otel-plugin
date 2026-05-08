@@ -3,21 +3,11 @@ import assert from "node:assert/strict";
 
 import { resolveOtelPluginConfig } from "../dist/src/config.js";
 
-test("resolveOtelPluginConfig keeps openclaw as the default agent_provider resource attribute", () => {
+test("resolveOtelPluginConfig keeps openclaw as the default agent runtime resource attribute", () => {
   const config = resolveOtelPluginConfig({});
 
   assert.deepEqual(config.resourceAttributes, {
-    agent_provider: "openclaw",
-  });
-});
-
-test("resolveOtelPluginConfig keeps agentProvider as a compatibility alias", () => {
-  const config = resolveOtelPluginConfig({
-    agentProvider: "custom-agent",
-  });
-
-  assert.deepEqual(config.resourceAttributes, {
-    agent_provider: "custom-agent",
+    agent_runtime: "openclaw",
   });
 });
 
@@ -31,30 +21,29 @@ test("resolveOtelPluginConfig folds globalTags into resourceAttributes", () => {
   });
 
   assert.deepEqual(config.resourceAttributes, {
-    agent_provider: "openclaw",
+    agent_runtime: "openclaw",
     team: "apm",
     enabled: true,
     priority: 3,
   });
 });
 
-test("resolveOtelPluginConfig lets resourceAttributes override compatibility fields", () => {
+test("resolveOtelPluginConfig lets resourceAttributes override default runtime fields", () => {
   const config = resolveOtelPluginConfig({
-    agentProvider: "legacy-provider",
     globalTags: {
       team: "apm",
       agent_name: "legacy-agent",
     },
     resourceAttributes: {
       team: "platform",
-      agent_provider: "resource-provider",
+      agent_runtime: "hermes",
       agent_name: "fixed-agent",
       agent_id: "agent-01",
     },
   });
 
   assert.deepEqual(config.resourceAttributes, {
-    agent_provider: "resource-provider",
+    agent_runtime: "hermes",
     team: "platform",
     agent_name: "fixed-agent",
     agent_id: "agent-01",

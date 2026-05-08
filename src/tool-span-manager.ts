@@ -9,6 +9,8 @@ import type {
 } from "./service-types.js";
 import {
   addEvent,
+  buildGenAiAgentSkillMetricAttrs,
+  buildGenAiClientToolMetricAttrs,
   buildSkillMetricAttrs,
   buildToolAttrs,
   buildToolMetricAttrs,
@@ -211,6 +213,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     run.skillSpans.set(normalizedSkillName, skillState);
     run.activeSkillName = normalizedSkillName;
     instruments.skillActivationCounter.add(1, buildSkillMetricAttrs(normalizedSkillName, source));
+    instruments.genAiAgentSkillActivationCount?.add(
+      1,
+      buildGenAiAgentSkillMetricAttrs(normalizedSkillName, source, evt.sessionId),
+    );
     const attrs = stringAttrs({
       "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
       "openclaw.skill.count": run.usedSkillNames.size,
@@ -552,10 +558,20 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       isError ? "error" : "completed",
       merged.resultStatus,
     );
+    const genAiToolMetricAttrs = buildGenAiClientToolMetricAttrs(
+      tool,
+      isError ? "error" : "completed",
+      merged.resultStatus,
+      evt.sessionId,
+    );
     instruments.toolCallCounter.add(1, toolMetricAttrs);
     instruments.toolDuration.record(
       Math.max(0, eventTimestamp(evt).getTime() - tool.startedAt),
       toolMetricAttrs,
+    );
+    instruments.genAiClientOperationDuration?.record(
+      Math.max(0, eventTimestamp(evt).getTime() - tool.startedAt),
+      genAiToolMetricAttrs,
     );
     if (isError) {
       instruments.toolErrorCounter.add(1, toolMetricAttrs);

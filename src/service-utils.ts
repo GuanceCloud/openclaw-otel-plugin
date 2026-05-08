@@ -312,8 +312,12 @@ function stripOpenClawNamespace(
 export function stringAttrs(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean> {
+  const withGlobalRuntime = {
+    agent_runtime: "openclaw",
+    ...attrs,
+  };
   return Object.fromEntries(
-    Object.entries(stripOpenClawNamespace(withCanonicalAliases(attrs)))
+    Object.entries(stripOpenClawNamespace(withCanonicalAliases(withGlobalRuntime)))
       .filter(([key, value]) => key !== "trace_id" && value !== undefined && value !== "")
       .map(([key, value]) => [
         key,
@@ -620,6 +624,32 @@ export function buildRequestMetricAttrs(
   });
 }
 
+export function buildGenAiAgentRequestMetricAttrs(
+  snapshot: SessionSnapshot | undefined,
+  summaryAttrs?: Record<string, string | number | boolean>,
+) {
+  return stringAttrs({
+    channel: snapshot?.lastChannel,
+    session_id: snapshot?.sessionId,
+    provider_name: snapshot?.lastProvider,
+    request_model: snapshot?.lastModel,
+    session_state:
+      typeof summaryAttrs?.["openclaw.final_state"] === "string"
+        ? summaryAttrs["openclaw.final_state"]
+        : typeof summaryAttrs?.["openclaw.state"] === "string"
+          ? summaryAttrs["openclaw.state"]
+          : undefined,
+    outcome:
+      typeof summaryAttrs?.["openclaw.outcome"] === "string"
+        ? summaryAttrs["openclaw.outcome"]
+        : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
+          ? summaryAttrs["openclaw.final_reason"]
+          : typeof summaryAttrs?.["openclaw.reason"] === "string"
+            ? summaryAttrs["openclaw.reason"]
+            : undefined,
+  });
+}
+
 export function buildToolMetricAttrs(
   tool: Pick<ActiveToolSpan, "name" | "skillName">,
   outcome?: string,
@@ -633,6 +663,22 @@ export function buildToolMetricAttrs(
   });
 }
 
+export function buildGenAiClientToolMetricAttrs(
+  tool: Pick<ActiveToolSpan, "name" | "skillName">,
+  outcome?: string,
+  resultStatus?: string,
+  sessionId?: string,
+) {
+  return stringAttrs({
+    operation_name: "execute_tool",
+    session_id: sessionId,
+    tool_name: tool.name,
+    skill_name: tool.skillName,
+    outcome,
+    tool_result_status: resultStatus,
+  });
+}
+
 export function buildSkillMetricAttrs(skillName: string, source: "runtime" | "transcript") {
   return stringAttrs({
     "openclaw.skill_name": skillName,
@@ -640,10 +686,36 @@ export function buildSkillMetricAttrs(skillName: string, source: "runtime" | "tr
   });
 }
 
+export function buildGenAiAgentSkillMetricAttrs(
+  skillName: string,
+  source: "runtime" | "transcript",
+  sessionId?: string,
+) {
+  return stringAttrs({
+    session_id: sessionId,
+    skill_name: skillName,
+    skill_source: source,
+  });
+}
+
 export function buildModelMetricAttrs(provider?: string, model?: string) {
   return stringAttrs({
     "openclaw.provider": provider,
     "openclaw.model": model,
+  });
+}
+
+export function buildGenAiClientModelMetricAttrs(
+  provider?: string,
+  model?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    operation_name: "chat",
+    provider_name: provider,
+    request_model: model,
+    response_model: model,
+    ...(extra ?? {}),
   });
 }
 
@@ -675,6 +747,24 @@ export function buildSessionMetricAttrs(
     session_key: sessionKey,
     model_provider: overrides?.modelProvider ?? snapshot?.lastProvider,
     model_name: overrides?.modelName ?? snapshot?.lastModel,
+  });
+}
+
+export function buildGenAiAgentSessionMetricAttrs(
+  snapshot: SessionSnapshot | undefined,
+  sessionKey: string,
+  overrides?: {
+    modelProvider?: string;
+    modelName?: string;
+    tokenType?: string;
+  },
+) {
+  return stringAttrs({
+    session_id: snapshot?.sessionId,
+    session_key: sessionKey,
+    provider_name: overrides?.modelProvider ?? snapshot?.lastProvider,
+    request_model: overrides?.modelName ?? snapshot?.lastModel,
+    token_type: overrides?.tokenType,
   });
 }
 
@@ -741,12 +831,31 @@ export function buildDiagnosticsWebhookMetricAttrs(channel?: string, webhook?: s
   });
 }
 
+export function buildGenAiRuntimeWebhookMetricAttrs(channel?: string, webhook?: string) {
+  return stringAttrs({
+    channel,
+    webhook_name: webhook,
+  });
+}
+
 export function buildDiagnosticsMessageMetricAttrs(
   channel?: string,
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
   return stringAttrs({
     "openclaw.channel": channel,
+    ...(extra ?? {}),
+  });
+}
+
+export function buildGenAiRuntimeMessageMetricAttrs(
+  channel?: string,
+  sessionId?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    channel,
+    session_id: sessionId,
     ...(extra ?? {}),
   });
 }
@@ -761,6 +870,18 @@ export function buildDiagnosticsQueueMetricAttrs(
   });
 }
 
+export function buildGenAiRuntimeQueueMetricAttrs(
+  lane?: string,
+  sessionId?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    queue_name: lane,
+    session_id: sessionId,
+    ...(extra ?? {}),
+  });
+}
+
 export function buildDiagnosticsSessionMetricAttrs(
   state?: string,
   reason?: string,
@@ -769,6 +890,20 @@ export function buildDiagnosticsSessionMetricAttrs(
   return stringAttrs({
     "openclaw.state": state,
     "openclaw.reason": reason,
+    ...(extra ?? {}),
+  });
+}
+
+export function buildGenAiRuntimeSessionMetricAttrs(
+  state?: string,
+  reason?: string,
+  sessionId?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    session_id: sessionId,
+    session_state: state,
+    outcome: reason,
     ...(extra ?? {}),
   });
 }

@@ -20,7 +20,7 @@ const DEFAULT_ENDPOINT = "http://127.0.0.1:9529/otel";
 const DEFAULT_TRACE_PATH = "v1/traces";
 const DEFAULT_METRICS_PATH = "v1/metrics";
 const DEFAULT_LOGS_PATH = "v1/logs";
-const DEFAULT_AGENT_PROVIDER = "openclaw";
+const DEFAULT_AGENT_RUNTIME = "openclaw";
 const DEFAULT_SERVICE_NAME = "openclaw-otel-plugin";
 const DEFAULT_FLUSH_INTERVAL_MS = 30000;
 const DEFAULT_ROOT_SPAN_TTL_MS = 10 * 60 * 1000;
@@ -110,12 +110,8 @@ function normalizeMs(value: unknown, fallback: number): number {
 function resolveResourceAttributes(
   raw: Record<string, unknown>,
 ): Record<string, string | number | boolean> {
-  const legacyAgentProvider = normalizeNonEmptyString(
-    typeof raw.agentProvider === "string" ? raw.agentProvider : undefined,
-    DEFAULT_AGENT_PROVIDER,
-  );
   return {
-    agent_provider: legacyAgentProvider,
+    agent_runtime: DEFAULT_AGENT_RUNTIME,
     ...(asResourceAttributes(raw.globalTags) ?? {}),
     ...(asResourceAttributes(raw.resourceAttributes) ?? {}),
   };

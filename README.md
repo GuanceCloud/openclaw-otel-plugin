@@ -133,7 +133,7 @@ Add the plugin to `~/.openclaw/openclaw.json`:
           "flushIntervalMs": 30000,
           "rootSpanTtlMs": 600000,
           "resourceAttributes": {
-            "agent_provider": "openclaw",
+            "agent_runtime": "openclaw",
             "env": "prod",
             "app_name":"openclaw-agent",
 	          "app_id":"999999990000000000iuui"
@@ -160,17 +160,16 @@ Add the plugin to `~/.openclaw/openclaw.json`:
 | `sampleRate` | unset | Optional root sampler ratio in `[0, 1]` |
 | `flushIntervalMs` | `30000` | Metrics export interval |
 | `rootSpanTtlMs` | `600000` | Closes stale root/run spans after inactivity |
-| `resourceAttributes` | `{ "agent_provider": "openclaw" }` | Fixed OTEL resource attributes |
+| `resourceAttributes` | `{ "agent_runtime": "openclaw" }` | Fixed OTEL resource attributes |
 
 Compatibility fields still accepted:
 
-- `agentProvider`: compatibility alias for `resourceAttributes.agent_provider`
 - `globalTags`: compatibility alias merged into `resourceAttributes`
 
 Resource attributes are resolved in this order:
 
 - runtime metadata discovered from OpenClaw state, when available
-- resolved config resource attributes, including the default `agent_provider`, compatibility fields, and explicit `resourceAttributes`
+- resolved config resource attributes, including the default `agent_runtime`, compatibility fields, and explicit `resourceAttributes`
 
 Runtime metadata may contribute:
 
@@ -199,7 +198,7 @@ Runtime metadata may contribute:
           },
           "serviceName": "openclaw-otel-plugin",
           "resourceAttributes": {
-            "agent_provider": "openclaw",
+            "agent_runtime": "openclaw",
             "env": "prod",
             "app_name":"openclaw-agent",
 	          "app_id":"999999990000000000iuui"
@@ -314,6 +313,5 @@ Do not place these fields directly beside `enabled`:
 - `serviceName`
 - `flushIntervalMs`
 - `rootSpanTtlMs`
-- `agentProvider`
 - `globalTags`
 - `resourceAttributes`
