@@ -979,6 +979,105 @@ test("model.usage emits model_request span and preserves model context", () => {
   assert.equal(run.modelCtx.span.name, "model_request");
 });
 
+test("model.usage uses snapshot sessionId for gen_ai client token metrics when event sessionId is missing", () => {
+  const tokenAdds = [];
+  const run = {
+    ctx: { ctx: "run" },
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsTokensCounter: { add() {} },
+      diagnosticsCostUsdCounter: { add() {} },
+      diagnosticsRunDurationMs: { record() {} },
+      diagnosticsContextTokens: { record() {} },
+      genAiClientTokenUsage: {
+        add(value, attrs) {
+          tokenAdds.push({ value, attrs });
+        },
+      },
+      genAiClientOperationDuration: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return run;
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return { sessionId: "sid-from-snapshot" };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      return {
+        span,
+        root: undefined,
+        effectiveDurationMs: durationMs ?? 0,
+        startTime: new Date((evt.ts ?? 0) - (durationMs ?? 0)),
+        endTime: new Date(evt.ts ?? 0),
+      };
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "model.usage",
+    sessionKey: "s1",
+    ts: 1000,
+    channel: "chat",
+    provider: "openai",
+    model: "gpt-5",
+    usage: { input: 12, output: 34, total: 46 },
+    durationMs: 400,
+  });
+
+  assert.equal(tokenAdds.length, 3);
+  assert.equal(tokenAdds[0].attrs.session_id, "sid-from-snapshot");
+  assert.equal(tokenAdds[1].attrs.session_id, "sid-from-snapshot");
+  assert.equal(tokenAdds[2].attrs.session_id, "sid-from-snapshot");
+  assert.equal(tokenAdds[0].attrs.token_type, "input");
+  assert.equal(tokenAdds[1].attrs.token_type, "output");
+  assert.equal(tokenAdds[2].attrs.token_type, "total");
+});
+
 test("message.queued rotates a completed active run before starting the next request", () => {
   const oldRun = {
     ctx: { ctx: "old-run" },

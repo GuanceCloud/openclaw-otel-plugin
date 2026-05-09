@@ -460,6 +460,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         break;
       }
       case "model.usage": {
+        const snapshot = loadSessionSnapshot(evt.sessionKey);
+        const resolvedSessionId = evt.sessionId ?? snapshot?.sessionId;
         const modelStartTs = typeof evt.ts === "number" && typeof evt.durationMs === "number"
           ? evt.ts - Math.max(evt.durationMs, 1)
           : evt.ts;
@@ -468,7 +470,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.provider": evt.provider,
           "openclaw.model": evt.model,
           "openclaw.sessionKey": evt.sessionKey,
-          "openclaw.sessionId": evt.sessionId,
+          "openclaw.sessionId": resolvedSessionId,
           "span.kind": "model",
           "openclaw.tokens.input": evt.usage.input ?? 0,
           "openclaw.tokens.output": evt.usage.output ?? 0,
@@ -496,7 +498,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const genAiModelMetricAttrs = buildGenAiClientModelMetricAttrs(
           evt.provider,
           evt.model,
-          { session_id: evt.sessionId },
+          { session_id: resolvedSessionId },
         );
         const enrichedModelUsageAttrs = enrichWithTranscript(evt.sessionKey, modelUsageAttrs);
         const tokenMetrics = [
@@ -515,13 +517,14 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                 "openclaw.token": tokenType,
               }),
             );
-            if (tokenType === "input" || tokenType === "output") {
+            if (tokenType === "input" || tokenType === "output" || tokenType === "total") {
+              const genAiTokenMetricAttrs = buildGenAiClientModelMetricAttrs(evt.provider, evt.model, {
+                session_id: resolvedSessionId,
+                token_type: tokenType,
+              });
               instruments.genAiClientTokenUsage?.add(
                 tokenValue,
-                buildGenAiClientModelMetricAttrs(evt.provider, evt.model, {
-                  session_id: evt.sessionId,
-                  token_type: tokenType,
-                }),
+                genAiTokenMetricAttrs,
               );
             }
           }

@@ -6,6 +6,20 @@
 - 不展开历史映射
 - `app_name`、`app_id` 保留原名，不并入 `gen_ai.*`
 
+## AI Agent 说明
+
+- 这里的 `AI Agent` 指能够基于上下文、模型、技能、工具和会话状态持续完成任务的执行主体
+- 在 OpenClaw 里，`agent` 不是单次模型调用，而是围绕一次用户消息组织上下文、决策、工具调用和结果返回的运行单元
+- 当前 trace 里，`AI Agent` 的主要观测边界是：
+  - `openclaw_request`：一条用户消息对应的一次完整请求
+  - `agent_run`：这次请求里的 agent 主执行窗口
+  - `model_request`：agent 在执行过程中发起的一次模型调用
+  - `skill:* / tool:*`：agent 在执行过程中使用的能力与外部操作
+- 因此：
+  - `model_request` 不等于 `agent`
+  - `agent_run` 才是最接近 `AI Agent execution` 的 span
+  - 多轮 `model_request`、`tool:*`、`skill:*` 共同构成一次 agent 执行
+
 ## 最终 Span 规范
 
 ### 保留的 Span
@@ -86,6 +100,40 @@
   - 输入预览
   - 输出预览
   - token 使用量
+
+## 状态字段说明
+
+- `status`
+  - 表示当前 span 自身的执行状态
+  - 用于判断某个具体 span 是否报错
+  - 例如 `tool:*`、`model_request`、`channel_egress` 是否执行失败
+
+- `gen_ai.final_status`
+  - 表示一条 `openclaw_request` / `agent_run` 最终的业务结果
+  - 用于判断一次 agent 请求最终是成功完成、超时、取消还是被后续消息顶替
+
+使用建议：
+
+- 看链路技术错误：优先看 `status`
+- 看一次 agent 请求最终结局：优先看 `gen_ai.final_status`
+
+### `gen_ai.final_status` 结果语义
+
+建议按以下语义使用：
+
+| 值 | 含义 |
+| --- | --- |
+| `completed` | 本轮 agent 请求正常完成，并已形成最终结果 |
+| `error` | 本轮 agent 请求最终失败，未形成有效结果 |
+| `timeout` | 本轮 agent 请求因超时结束 |
+| `cancelled` | 本轮 agent 请求被主动取消 |
+| `superseded` | 本轮 agent 请求被后续新消息顶替，不再继续执行 |
+
+补充说明：
+
+- `completed` 不要求所有子 span 都没有错误；只要 agent 最终成功产出结果即可
+- `error` 表示从业务结果看本轮失败，不等同于某个单独 `tool:*` 或 `model_request` 的 `status = error`
+- `superseded` 常见于同一会话里新消息到来，旧请求被提前收尾
 
 ## Resource 级字段
 
