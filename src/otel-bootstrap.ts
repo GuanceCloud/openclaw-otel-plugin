@@ -231,10 +231,10 @@ export async function startOtelBootstrap(
 
   const resource = resourceFromAttributes(compactResourceAttrs({
     [ATTR_SERVICE_NAME]: config.serviceName,
-    agent_version: runtimeMetadata?.openclawVersion,
-    runtime_environment: runtimeMetadata?.runtimeEnvironment,
-    agent_id: runtimeMetadata?.agentId,
-    agent_name: runtimeMetadata?.agentName,
+    "gen_ai.agent_version": runtimeMetadata?.openclawVersion,
+    "gen_ai.runtime_environment": runtimeMetadata?.runtimeEnvironment,
+    "gen_ai.agent_id": runtimeMetadata?.agentId,
+    "gen_ai.agent_name": runtimeMetadata?.agentName,
     ...(config.resourceAttributes ?? {}),
   }));
 

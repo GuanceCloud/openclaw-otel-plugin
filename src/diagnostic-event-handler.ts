@@ -20,6 +20,7 @@ import {
   redactSensitiveText,
   setError,
   stringAttrs,
+  traceAttrs,
 } from "./service-utils.js";
 import {
   shouldCloseForSessionState,
@@ -264,7 +265,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         }
         const root = getRoot(traceEvt, shouldCreateRootForSessionState(evt.state));
         if (root) {
-          addEvent(root.span, "session.state", stringAttrs(sessionStateAttrs));
+          addEvent(root.span, "session.state");
         }
         logDiagnosticEvent(evt, sessionStateAttrs, {
           body: `session.state ${evt.state}`,
@@ -443,7 +444,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         }
         const root = getRoot(evt, true);
         if (root) {
-          addEvent(root.span, "message.queued", stringAttrs(queuedAttrs));
+          addEvent(root.span, "message.queued");
         }
         logDiagnosticEvent(evt, queuedAttrs, {
           body: "message.queued",
@@ -575,7 +576,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           );
         }
         if (run?.modelSpan) {
-          run.modelSpan.setAttributes(stringAttrs(enrichedModelUsageAttrs));
+          run.modelSpan.setAttributes(traceAttrs({
+            ...enrichedModelUsageAttrs,
+            session_update_time: evt.ts,
+          }));
           run.modelSpan.setStatus({ code: SpanStatusCode.OK });
           endSpanSafely(run.modelSpan, eventTime(evt.ts));
           emitModelTurnDebugLog({

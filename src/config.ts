@@ -107,14 +107,62 @@ function normalizeMs(value: unknown, fallback: number): number {
   return Math.max(1000, Math.floor(value));
 }
 
+function flattenGenAiResourceKey(key: string): string {
+  if (!key.startsWith("gen_ai.")) {
+    return key;
+  }
+  const suffix = key.slice("gen_ai.".length);
+  return `gen_ai.${suffix.replaceAll(".", "_")}`;
+}
+
 function resolveResourceAttributes(
   raw: Record<string, unknown>,
 ): Record<string, string | number | boolean> {
-  return {
-    agent_runtime: DEFAULT_AGENT_RUNTIME,
+  const merged = {
+    "gen_ai.agent_runtime": DEFAULT_AGENT_RUNTIME,
     ...(asResourceAttributes(raw.globalTags) ?? {}),
     ...(asResourceAttributes(raw.resourceAttributes) ?? {}),
-  };
+  } as Record<string, string | number | boolean>;
+  for (const [key, value] of Object.entries({ ...merged })) {
+    if (!key.startsWith("gen_ai.") || value === undefined || value === "") {
+      continue;
+    }
+    const flattened = flattenGenAiResourceKey(key);
+    if (flattened === key) {
+      continue;
+    }
+    if (!(flattened in merged)) {
+      merged[flattened] = value;
+    }
+    delete merged[key];
+  }
+  if (
+    merged.agent_runtime !== undefined
+    && (
+      merged["gen_ai.agent_runtime"] === undefined
+      || merged["gen_ai.agent_runtime"] === DEFAULT_AGENT_RUNTIME
+    )
+  ) {
+    merged["gen_ai.agent_runtime"] = merged.agent_runtime;
+  }
+  if (merged["gen_ai.agent_id"] === undefined && merged.agent_id !== undefined) {
+    merged["gen_ai.agent_id"] = merged.agent_id;
+  }
+  if (merged["gen_ai.agent_name"] === undefined && merged.agent_name !== undefined) {
+    merged["gen_ai.agent_name"] = merged.agent_name;
+  }
+  if (merged["gen_ai.agent_version"] === undefined && merged.agent_version !== undefined) {
+    merged["gen_ai.agent_version"] = merged.agent_version;
+  }
+  if (merged["gen_ai.runtime_environment"] === undefined && merged.runtime_environment !== undefined) {
+    merged["gen_ai.runtime_environment"] = merged.runtime_environment;
+  }
+  delete merged.agent_runtime;
+  delete merged.agent_id;
+  delete merged.agent_name;
+  delete merged.agent_version;
+  delete merged.runtime_environment;
+  return merged;
 }
 
 export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {

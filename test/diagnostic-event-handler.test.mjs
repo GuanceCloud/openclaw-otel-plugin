@@ -971,6 +971,7 @@ test("model.usage emits model_request span and preserves model context", () => {
 
   assert.equal(childCalls[0].name, "model_request");
   assert.equal(childCalls[0].attrs["span.kind"], "model");
+  assert.equal(childCalls[0].attrs["openclaw.model"], "gpt-5");
   assert.equal(childCalls[0].attrs["llm.model"], "gpt-5");
   assert.equal(childCalls[0].span.status.code, "OK");
   assert.equal(childCalls[0].span.ended, true);

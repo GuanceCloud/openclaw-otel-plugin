@@ -73,11 +73,29 @@ export type ActiveRunSpan = {
   dispatchQueueEmitted?: boolean;
   sessionProcessingEmitted?: boolean;
   channelEgressEmitted?: boolean;
+  pendingChannelIngressWindow?: {
+    startTs: number;
+    endTs: number;
+    channel?: string;
+    source?: string;
+  };
+  pendingDispatchQueueWindow?: {
+    startTs: number;
+    endTs: number;
+    channel?: string;
+    source?: string;
+    queueWaitMs?: number;
+  };
+  pendingSessionProcessingWindow?: {
+    startTs: number;
+    endTs: number;
+  };
   modelSpanEmitted: boolean;
   thinkingSpanEmitted?: boolean;
   transcriptAssistantTurnsEmitted?: number;
   transcriptToolCallIds?: Set<string>;
   pendingFinalOutcome?: string;
+  finalAttrsApplied?: boolean;
   usedSkillNames: Set<string>;
   usedToolNames: Set<string>;
   usedToolTargets: Set<string>;
