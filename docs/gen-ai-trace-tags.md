@@ -6,6 +6,44 @@
 - 不展开历史映射
 - `app_name`、`app_id` 保留原名，不并入 `gen_ai.*`
 
+## 最终 Span 规范
+
+### 保留的 Span
+
+- `openclaw_request`
+- `channel_ingress`
+- `dispatch_queue`
+- `agent_run`
+- `session_processing`
+- `runtime_orchestration`
+- `model_request`
+- `skill:*`
+- `skill_call:*`
+- `tool:*`
+- `channel_egress`
+
+### 不单独拆出的流程节点
+
+- `Decision Router`
+- `Skill Result`
+- `Tool Result`
+- `Final Answer`
+- `Logging & Persist`
+
+说明：
+
+- 这些节点当前通过已有 span 的走向、属性或结果来表达，不额外创建独立 span
+- `Final Answer` 由最后一个 `model_request` 与 `channel_egress` 共同表示
+- `Decision Router` 由 `model_request` 之后进入 `skill/tool/finish` 的分支体现
+
+### 设计边界
+
+- 一条用户消息对应一条 trace
+- 只保留对排障稳定且有价值的 span
+- 能用属性表达的，不单独拆 span
+- 能从前后关系推断的，不单独拆 span
+- 如需继续细分，优先在 `runtime_orchestration` 内增加 phase，而不是新增更多顶层 span
+
 ## 核心 Span
 
 ### `openclaw_request`
