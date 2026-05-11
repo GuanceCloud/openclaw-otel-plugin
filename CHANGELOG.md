@@ -2,6 +2,30 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-05-11
+
+### GenAI Metrics And Tags
+
+- Promoted `gen_ai.client.*`, `gen_ai.agent.*`, and `gen_ai.runtime.*` as the current recommended metric namespaces.
+- Split session token aggregation into dedicated counters:
+  - `gen_ai.agent.session.token.input`
+  - `gen_ai.agent.session.token.output`
+  - `gen_ai.agent.session.token.total`
+- Normalized trace and metric correlation fields to canonical names such as `session_id`, `session_key`, `channel`, `provider_name`, and `request_model`.
+- Removed `gen_ai.*` trace tag alias dual-write and kept canonical query fields only.
+
+### Session And Tooling Semantics
+
+- Fixed session total token aggregation so transcript `totalTokens` snapshots are not double-counted as cumulative totals.
+- Backfilled `session_id`, `session_key`, and `channel` onto tool and skill spans when runtime events do not carry them directly.
+- Unified runtime lifecycle span session resolution so lifecycle spans follow the canonical session identity.
+
+### Packaging And Documentation
+
+- Added release packaging, install, and update scripts for the plugin delivery workflow.
+- Added `BUILDING.md` and repo-level `AGENTS.md`.
+- Updated README and README_ZH to focus on current `gen_ai.*` telemetry naming and plugin installation guidance.
+
 ## 2026-05-07
 
 ### Session Metrics
