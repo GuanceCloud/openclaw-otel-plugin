@@ -721,6 +721,7 @@ test("transcript tool calls can be replayed into tool spans", () => {
 
 test("synthetic model span creates a run when transcript metadata exists", () => {
   const spans = [];
+  const durationRecords = [];
   const tracer = createFakeTracer(spans);
   const trace = {
     setSpan(ctx, span) {
@@ -741,6 +742,11 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
       toolCallCounter: { add() {} },
       toolErrorCounter: { add() {} },
       toolDuration: { record() {} },
+      genAiClientOperationDuration: {
+        record(value, attrs) {
+          durationRecords.push({ value, attrs });
+        },
+      },
     },
     getRun(evt, createIfMissing = false) {
       getRunCalls.push(createIfMissing);
@@ -763,6 +769,7 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
         mtimeMs: 1,
         lastUserTs: 1000,
         lastAssistantTs: 4000,
+        sessionId: "sid-1",
         lastProvider: "openai",
         lastModel: "gpt-5",
         lastAssistantUsage: {
@@ -809,6 +816,12 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
   assert.equal(run.mainStartTs, 1000);
   assert.equal(run.modelStartTs, 1240);
   assert.equal(run.modelEndTs, 4000);
+  assert.equal(durationRecords.length, 1);
+  assert.equal(durationRecords[0].value, 2760);
+  assert.equal(durationRecords[0].attrs.operation_name, "chat");
+  assert.equal(durationRecords[0].attrs.provider_name, "openai");
+  assert.equal(durationRecords[0].attrs.request_model, "gpt-5");
+  assert.equal(durationRecords[0].attrs.session_id, "sid-1");
 });
 
 test("transcript replay backfills run start from transcript timestamps", () => {
@@ -891,6 +904,7 @@ test("transcript replay backfills run start from transcript timestamps", () => {
 
 test("transcript model spans are replayed per assistant turn", () => {
   const spans = [];
+  const durationRecords = [];
   const tracer = createFakeTracer(spans);
   const trace = {
     setSpan(ctx, span) {
@@ -910,6 +924,11 @@ test("transcript model spans are replayed per assistant turn", () => {
       toolCallCounter: { add() {} },
       toolErrorCounter: { add() {} },
       toolDuration: { record() {} },
+      genAiClientOperationDuration: {
+        record(value, attrs) {
+          durationRecords.push({ value, attrs });
+        },
+      },
     },
     getRun(evt, createIfMissing = false) {
       if (!run && createIfMissing) {
@@ -930,6 +949,7 @@ test("transcript model spans are replayed per assistant turn", () => {
         sessionFile: "session.jsonl",
         mtimeMs: 1,
         lastUserTs: 1000,
+        sessionId: "sid-1",
         lastChannel: "chat",
         lastProvider: "openai",
         lastModel: "gpt-5",
@@ -991,6 +1011,32 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(modelSpans[1].options.attributes.input_preview, "{\"status\":\"ok\"}");
   assert.equal(modelSpans[1].options.attributes.output_preview, "second answer");
   assert.equal(modelSpans[1].options.attributes.output_summary, "second reasoning");
+  assert.equal(durationRecords.length, 2);
+  assert.deepEqual(
+    durationRecords.map(({ value, attrs }) => ({
+      value,
+      operation_name: attrs.operation_name,
+      provider_name: attrs.provider_name,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
+      {
+        value: 1000,
+        operation_name: "chat",
+        provider_name: "openai",
+        request_model: "gpt-5",
+        session_id: "sid-1",
+      },
+      {
+        value: 300,
+        operation_name: "chat",
+        provider_name: "openai",
+        request_model: "gpt-5",
+        session_id: "sid-1",
+      },
+    ],
+  );
 });
 
 test("transcript model replay only appends turns that were not emitted yet", () => {

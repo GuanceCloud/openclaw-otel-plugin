@@ -10,6 +10,7 @@ import type {
 import {
   addEvent,
   buildGenAiAgentSkillMetricAttrs,
+  buildGenAiClientModelMetricAttrs,
   buildGenAiClientToolMetricAttrs,
   buildSkillMetricAttrs,
   buildToolAttrs,
@@ -757,6 +758,16 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       );
       span.setStatus({ code: SpanStatusCode.OK });
       endSpanSafely(span, new Date(endTs));
+      instruments.genAiClientOperationDuration?.record(
+        Math.max(endTs - startTs, 1),
+        buildGenAiClientModelMetricAttrs(
+          turn.provider ?? snapshot?.lastProvider,
+          turn.model ?? snapshot?.lastModel,
+          {
+            session_id: snapshot?.sessionId ?? evt.sessionId,
+          },
+        ),
+      );
       run.modelCtx = trace.setSpan(run.ctx, span);
       run.modelStartTs = startTs;
       run.modelEndTs = endTs;
@@ -865,6 +876,12 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       getActiveSkillCtx(run) ?? run.ctx,
     );
     span.setStatus({ code: SpanStatusCode.OK });
+    instruments.genAiClientOperationDuration?.record(
+      Math.max(modelEndTs - startTs, 1),
+      buildGenAiClientModelMetricAttrs(snapshot.lastProvider, snapshot.lastModel, {
+        session_id: snapshot.sessionId ?? evt.sessionId,
+      }),
+    );
     run.modelSpan = span;
     run.modelCtx = trace.setSpan(getActiveSkillCtx(run) ?? run.ctx, span);
     run.modelStartTs = startTs;
