@@ -90,6 +90,18 @@ npm run pack:release
 
 如果工作区里存在与当前任务无关的修改，不要顺手清理或回退，先避开它们。
 
+## Changelog Policy
+
+- 统一维护 [`CHANGELOG.md`](./CHANGELOG.md)
+- 如果改动会影响用户可见行为，提交前应同步更新 [`CHANGELOG.md`](./CHANGELOG.md)
+- 典型需要更新 CHANGELOG 的改动包括：
+  - 指标名、tag、trace/span 语义变化
+  - 配置项变化
+  - 安装、升级、构建、发布流程变化
+  - 新功能、行为修复、兼容性调整
+- 纯测试、纯注释、纯重构、无用户影响的内部脚本调整，可以不改 CHANGELOG
+- 如果本次提交没有更新 CHANGELOG，代理应能说明为什么这次改动不需要进入变更记录
+
 ## Change Checklist
 
 当改动涉及 telemetry、文档、发布流程时，提交前至少检查：
