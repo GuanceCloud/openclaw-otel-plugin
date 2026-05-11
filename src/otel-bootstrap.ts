@@ -231,10 +231,10 @@ export async function startOtelBootstrap(
 
   const resource = resourceFromAttributes(compactResourceAttrs({
     [ATTR_SERVICE_NAME]: config.serviceName,
-    "gen_ai.agent_version": runtimeMetadata?.openclawVersion,
-    "gen_ai.runtime_environment": runtimeMetadata?.runtimeEnvironment,
-    "gen_ai.agent_id": runtimeMetadata?.agentId,
-    "gen_ai.agent_name": runtimeMetadata?.agentName,
+    agent_version: runtimeMetadata?.openclawVersion,
+    runtime_environment: runtimeMetadata?.runtimeEnvironment,
+    agent_id: runtimeMetadata?.agentId,
+    agent_name: runtimeMetadata?.agentName,
     ...(config.resourceAttributes ?? {}),
   }));
 
@@ -292,6 +292,15 @@ export async function startOtelBootstrap(
     }),
     sessionTraceCounter: meter.createCounter("openclaw.session.traces", {
       description: "Session trace count emitted by periodic session scans with session_id tagging",
+    }),
+    genAiAgentSessionTokenInput: meter.createCounter("gen_ai.agent.session.token.input", {
+      description: "Session-scoped GenAI agent input token usage emitted by periodic session scans",
+    }),
+    genAiAgentSessionTokenOutput: meter.createCounter("gen_ai.agent.session.token.output", {
+      description: "Session-scoped GenAI agent output token usage emitted by periodic session scans",
+    }),
+    genAiAgentSessionTokenTotal: meter.createCounter("gen_ai.agent.session.token.total", {
+      description: "Session-scoped GenAI agent total token usage emitted by periodic session scans",
     }),
     genAiAgentSessionTokenUsage: meter.createCounter("gen_ai.agent.session.token.usage", {
       description: "Session-scoped GenAI agent token usage emitted by periodic session scans",

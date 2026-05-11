@@ -20,6 +20,8 @@
 
 - 所有 duration / wait / age 相关直方图仍使用 `ms`
 - 当前不展开历史兼容关系，不讨论旧指标映射
+- Resource 级属性也统一使用 canonical tag，例如 `agent_id`、`agent_name`、`agent_runtime`
+- 平台里如果还能看到 `gen_ai_agent_*`，通常来自历史指标点，不代表当前实现仍会继续上报
 
 ## Tag 设计
 
@@ -84,7 +86,10 @@
 | --- | --- | --- | --- | --- |
 | `gen_ai.agent.request.count` | Counter | - | `agent_runtime`, `channel`, `session_id`, `provider_name`, `request_model`, `session_state`, `outcome` | Agent request 总数。 |
 | `gen_ai.agent.request.duration` | Histogram | `ms` | `agent_runtime`, `channel`, `session_id`, `provider_name`, `request_model`, `session_state`, `outcome` | Agent request 总耗时。 |
-| `gen_ai.agent.session.token.usage` | Counter | 保持当前 | `agent_runtime`, `session_id`, `session_key`, `provider_name`, `request_model`, `token_type` | Session 级 token 聚合值，由 active session 周期扫描产生。 |
+| `gen_ai.agent.session.token.input` | Counter | 保持当前 | `agent_runtime`, `session_id`, `session_key`, `provider_name`, `request_model` | Session 级输入 token 聚合值，由 active session 周期扫描产生。 |
+| `gen_ai.agent.session.token.output` | Counter | 保持当前 | `agent_runtime`, `session_id`, `session_key`, `provider_name`, `request_model` | Session 级输出 token 聚合值，由 active session 周期扫描产生。 |
+| `gen_ai.agent.session.token.total` | Counter | 保持当前 | `agent_runtime`, `session_id`, `session_key`, `provider_name`, `request_model` | Session 级总 token 聚合值，由 active session 周期扫描产生。 |
+| `gen_ai.agent.session.token.usage` | Counter | 保持当前 | `agent_runtime`, `session_id`, `session_key`, `provider_name`, `request_model`, `token_type` | 兼容保留的 session 级 token 聚合指标，建议优先使用上面 3 个独立指标。 |
 | `gen_ai.agent.session.trace.count` | Counter | - | `agent_runtime`, `session_id`, `session_key`, `provider_name`, `request_model` | Session 级 trace 计数，由 active session 周期扫描产生。 |
 | `gen_ai.agent.skill.activation.count` | Counter | - | `agent_runtime`, `session_id`, `skill_name`, `skill_source` | Skill 激活次数。 |
 

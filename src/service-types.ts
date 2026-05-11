@@ -140,6 +140,9 @@ export type MetricInstruments = {
   sessionOutputTokensCounter: any;
   sessionTotalTokensCounter: any;
   sessionTraceCounter: any;
+  genAiAgentSessionTokenInput: any;
+  genAiAgentSessionTokenOutput: any;
+  genAiAgentSessionTokenTotal: any;
   genAiAgentSessionTokenUsage: any;
   genAiAgentSessionTraceCount: any;
   toolCallCounter: any;

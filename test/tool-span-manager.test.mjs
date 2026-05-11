@@ -440,9 +440,119 @@ test("dashboard edit tools create a skill call span and preserve skill attrs", (
   assert.ok(skillCallSpan);
   assert.ok(toolSpan);
   assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
-  assert.equal(skillSummarySpan.options.attributes["gen_ai.skill_name"], "dashboard");
-  assert.equal(skillCallSpan.options.attributes["gen_ai.skill_name"], "dashboard");
-  assert.equal(toolSpan.options.attributes["gen_ai.skill_name"], "dashboard");
+  assert.equal(skillSummarySpan.options.attributes.skill_name, "dashboard");
+  assert.equal(skillCallSpan.options.attributes.skill_name, "dashboard");
+  assert.equal(toolSpan.options.attributes.skill_name, "dashboard");
+});
+
+test("tool and skill spans backfill session attrs from the snapshot", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  const runSpan = createFakeSpan("run");
+  const run = createRunState({ active: true }, 1000, 1000);
+  run.span = runSpan;
+  run.ctx = { ctx: "run" };
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun() {
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        sessionId: "sess-1",
+        lastChannel: "cli",
+        mtimeMs: 1,
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "agent:runtime:scope:target",
+    ts: 2000,
+    stream: "tool",
+    data: {
+      name: "read",
+      toolCallId: "call-1",
+      phase: "start",
+      args: {
+        path: "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md",
+      },
+    },
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "agent:runtime:scope:target",
+    ts: 2200,
+    stream: "tool",
+    data: {
+      name: "read",
+      toolCallId: "call-1",
+      phase: "result",
+      result: { ok: true },
+    },
+  });
+
+  const skillSummarySpan = spans.find((span) => span.name === "skill:monitor");
+  const skillCallSpan = spans.find((span) => span.name === "skill_call:monitor");
+  const toolSpan = spans.find((span) => span.name === "tool:read");
+
+  assert.ok(skillSummarySpan);
+  assert.ok(skillCallSpan);
+  assert.ok(toolSpan);
+
+  assert.equal(skillSummarySpan.options.attributes.session_id, "sess-1");
+  assert.equal(skillSummarySpan.options.attributes.session_key, "agent:runtime:scope:target");
+  assert.equal(skillSummarySpan.options.attributes.channel, "cli");
+  assert.equal(skillSummarySpan.options.attributes["gen_ai.session_id"], undefined);
+  assert.equal(skillSummarySpan.options.attributes["gen_ai.agent_channel"], undefined);
+
+  assert.equal(skillCallSpan.attributes.session_id, "sess-1");
+  assert.equal(skillCallSpan.attributes.session_key, "agent:runtime:scope:target");
+  assert.equal(skillCallSpan.attributes.channel, "cli");
+  assert.equal(skillCallSpan.attributes["gen_ai.session_id"], undefined);
+  assert.equal(skillCallSpan.attributes["gen_ai.agent_channel"], undefined);
+
+  assert.equal(toolSpan.attributes.session_id, "sess-1");
+  assert.equal(toolSpan.attributes.session_key, "agent:runtime:scope:target");
+  assert.equal(toolSpan.attributes.channel, "cli");
+  assert.equal(toolSpan.attributes["gen_ai.session_id"], undefined);
+  assert.equal(toolSpan.attributes["gen_ai.agent_channel"], undefined);
 });
 
 test("tool events use transcript tool call mappings when runtime args are absent", () => {
@@ -688,9 +798,9 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
   assert.deepEqual(getRunCalls, [true]);
   assert.equal(modelSpan.options.kind, "client");
   assert.equal(modelSpan.options.attributes["span.kind"], "model");
-  assert.equal(modelSpan.options.attributes["gen_ai.usage_input_tokens"], 12);
-  assert.equal(modelSpan.options.attributes["gen_ai.usage_output_tokens"], 34);
-  assert.equal(modelSpan.options.attributes["gen_ai.usage_total_tokens"], 46);
+  assert.equal(modelSpan.options.attributes.usage_input_tokens, 12);
+  assert.equal(modelSpan.options.attributes.usage_output_tokens, 34);
+  assert.equal(modelSpan.options.attributes.usage_total_tokens, 46);
   assert.equal(modelSpan.options.attributes["llm.input_tokens"], undefined);
   assert.equal(modelSpan.parentCtx.ctx, "run");
   assert.equal(modelSpan.status.code, "OK");
@@ -873,14 +983,14 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(spans.some((span) => span.name === "thinking"), false);
   assert.equal(modelSpans[0].options.startTime.getTime(), 1000);
   assert.equal(modelSpans[0].endTime.getTime(), 2000);
-  assert.equal(modelSpans[0].options.attributes["gen_ai.input_preview"], "first question");
-  assert.equal(modelSpans[0].options.attributes["gen_ai.output_preview"], "first answer");
-  assert.equal(modelSpans[0].options.attributes["gen_ai.output_summary"], "first reasoning");
+  assert.equal(modelSpans[0].options.attributes.input_preview, "first question");
+  assert.equal(modelSpans[0].options.attributes.output_preview, "first answer");
+  assert.equal(modelSpans[0].options.attributes.output_summary, "first reasoning");
   assert.equal(modelSpans[1].options.startTime.getTime(), 2300);
   assert.equal(modelSpans[1].endTime.getTime(), 2600);
-  assert.equal(modelSpans[1].options.attributes["gen_ai.input_preview"], "{\"status\":\"ok\"}");
-  assert.equal(modelSpans[1].options.attributes["gen_ai.output_preview"], "second answer");
-  assert.equal(modelSpans[1].options.attributes["gen_ai.output_summary"], "second reasoning");
+  assert.equal(modelSpans[1].options.attributes.input_preview, "{\"status\":\"ok\"}");
+  assert.equal(modelSpans[1].options.attributes.output_preview, "second answer");
+  assert.equal(modelSpans[1].options.attributes.output_summary, "second reasoning");
 });
 
 test("transcript model replay only appends turns that were not emitted yet", () => {
@@ -1052,7 +1162,7 @@ test("transcript model spans do not inherit session output preview without turn 
 
   const modelSpan = spans.find((span) => span.name === "model_request");
   assert.ok(modelSpan);
-  assert.equal(modelSpan.options.attributes["gen_ai.input_preview"], "search result payload");
-  assert.equal("gen_ai.output_preview" in modelSpan.options.attributes, false);
-  assert.equal("gen_ai.output_summary" in modelSpan.options.attributes, false);
+  assert.equal(modelSpan.options.attributes.input_preview, "search result payload");
+  assert.equal("output_preview" in modelSpan.options.attributes, false);
+  assert.equal("output_summary" in modelSpan.options.attributes, false);
 });

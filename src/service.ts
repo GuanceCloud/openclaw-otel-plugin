@@ -192,12 +192,15 @@ export function createOtelPluginService(
             agent_name: nextAttrs.agent_name ?? dynamicAgentName,
           };
         }
+        const resolvedSessionId = snapshot.sessionId
+          ?? (typeof nextAttrs.session_id === "string" ? nextAttrs.session_id : undefined)
+          ?? (typeof nextAttrs["openclaw.sessionId"] === "string" ? nextAttrs["openclaw.sessionId"] : undefined);
         return {
           ...nextAttrs,
           agent_id: nextAttrs.agent_id ?? dynamicAgentId,
           agent_name: nextAttrs.agent_name ?? dynamicAgentName,
-          session_id: snapshot.sessionId,
-          "openclaw.sessionId": nextAttrs["openclaw.sessionId"] ?? snapshot.sessionId,
+          session_id: resolvedSessionId,
+          "openclaw.sessionId": resolvedSessionId,
           "openclaw.session.file": snapshot.sessionFile,
           "openclaw.session.createdAt": snapshot.createdAt,
           "openclaw.session.updatedAt": snapshot.updatedAt,
@@ -396,7 +399,7 @@ export function createOtelPluginService(
         }
         const root = getRoot(lifecycleEvt, options?.createIfMissing ?? false);
         const snapshot = options?.snapshot ?? loadSessionSnapshot(sessionKey);
-        const resolvedSessionId = evt.sessionId ?? snapshot?.sessionId;
+        const resolvedSessionId = snapshot?.sessionId ?? evt.sessionId;
         const ingressStartTs = typeof run.messageQueuedTs === "number"
           ? run.messageQueuedTs
           : root?.startedAt ?? run.startedAt ?? lifecycleEvt.ts;
@@ -645,8 +648,16 @@ export function createOtelPluginService(
               modelProvider: tokenState?.modelProvider,
               modelName: tokenState?.modelName,
             });
+            const genAiSessionMetricAttrs = buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+              modelProvider: tokenState?.modelProvider,
+              modelName: tokenState?.modelName,
+            });
             if (deltaTotals.inputTokens > 0) {
               instruments.sessionInputTokensCounter.add(deltaTotals.inputTokens, metricAttrs);
+              instruments.genAiAgentSessionTokenInput?.add(
+                deltaTotals.inputTokens,
+                genAiSessionMetricAttrs,
+              );
               instruments.genAiAgentSessionTokenUsage?.add(
                 deltaTotals.inputTokens,
                 buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
@@ -658,6 +669,10 @@ export function createOtelPluginService(
             }
             if (deltaTotals.outputTokens > 0) {
               instruments.sessionOutputTokensCounter.add(deltaTotals.outputTokens, metricAttrs);
+              instruments.genAiAgentSessionTokenOutput?.add(
+                deltaTotals.outputTokens,
+                genAiSessionMetricAttrs,
+              );
               instruments.genAiAgentSessionTokenUsage?.add(
                 deltaTotals.outputTokens,
                 buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
@@ -669,6 +684,10 @@ export function createOtelPluginService(
             }
             if (deltaTotals.totalTokens > 0) {
               instruments.sessionTotalTokensCounter.add(deltaTotals.totalTokens, metricAttrs);
+              instruments.genAiAgentSessionTokenTotal?.add(
+                deltaTotals.totalTokens,
+                genAiSessionMetricAttrs,
+              );
               instruments.genAiAgentSessionTokenUsage?.add(
                 deltaTotals.totalTokens,
                 buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {

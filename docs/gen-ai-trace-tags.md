@@ -108,16 +108,16 @@
   - 用于判断某个具体 span 是否报错
   - 例如 `tool:*`、`model_request`、`channel_egress` 是否执行失败
 
-- `gen_ai.final_status`
+- `final_status`
   - 表示一条 `openclaw_request` / `agent_run` 最终的业务结果
   - 用于判断一次 agent 请求最终是成功完成、超时、取消还是被后续消息顶替
 
 使用建议：
 
 - 看链路技术错误：优先看 `status`
-- 看一次 agent 请求最终结局：优先看 `gen_ai.final_status`
+- 看一次 agent 请求最终结局：优先看 `final_status`
 
-### `gen_ai.final_status` 结果语义
+### `final_status` 结果语义
 
 建议按以下语义使用：
 
@@ -139,89 +139,96 @@
 
 | 字段 | 描述 |
 | --- | --- |
-| `gen_ai.agent_id` | agent 标识 |
-| `gen_ai.agent_name` | agent 名称 |
-| `gen_ai.agent_runtime` | agent runtime 名称，当前为 `openclaw` |
-| `gen_ai.agent_version` | agent / runtime 版本 |
-| `gen_ai.runtime_environment` | 当前运行环境 |
+| `agent_id` | agent 标识 |
+| `agent_name` | agent 名称 |
+| `agent_runtime` | agent runtime 名称，当前为 `openclaw` |
+| `agent_version` | agent / runtime 版本 |
+| `runtime_environment` | 当前运行环境 |
 | `app_name` | 业务应用名称 |
 | `app_id` | 业务应用标识 |
 
 ## Span 通用字段
 
+说明：
+
+- trace 的 span / event / log tag 现在统一使用 canonical 字段
+- `gen_ai.*` 双写 alias 已移除；做 trace / metrics 关联时，直接使用下表字段
+- Resource 级字段也统一使用 canonical 字段
+
 | 字段 | 描述 |
 | --- | --- |
-| `gen_ai.agent_channel` | 当前消息所属通道，例如 `feishu` |
-| `gen_ai.session_id` | session id |
-| `gen_ai.session_key` | session key |
-| `gen_ai.session_namespace` | session namespace |
-| `gen_ai.session_agent` | session 归属 agent |
-| `gen_ai.session_channel` | session 归属 channel |
-| `gen_ai.session_scope` | session scope |
-| `gen_ai.session_channel_target` | session 渠道目标 |
-| `gen_ai.session_cwd` | session 当前工作目录 |
-| `gen_ai.session_create_at` | session 创建时间，当前推荐主字段 |
-| `gen_ai.session_created_at` | session 元数据中的原始 `createdAt` |
-| `gen_ai.session_updated_at` | session 最近更新时间 |
-| `gen_ai.session_chat_type` | 会话类型，例如 `direct` |
-| `gen_ai.session_file` | session 落盘文件路径 |
-| `gen_ai.origin_provider` | 消息来源提供方，例如 `feishu` |
-| `gen_ai.origin_surface` | 消息入口面，例如 `feishu` |
-| `gen_ai.state` | 当前状态 |
-| `gen_ai.prev_state` | 前一状态 |
-| `gen_ai.reason` | 状态变化或结束原因 |
-| `gen_ai.queue_depth` | 当前关联队列深度 |
-| `gen_ai.runtime_phase` | 当前 runtime 阶段 |
-| `gen_ai.final_status` | 最终状态 |
+| `channel` | 当前消息所属通道，例如 `feishu` |
+| `session_id` | session id，推荐用于和 metrics 侧字段对齐 |
+| `session_key` | session key，推荐主字段 |
+| `session_namespace` | session namespace |
+| `session_agent` | session 归属 agent |
+| `session_channel` | session 归属 channel |
+| `session_scope` | session scope |
+| `session_channel_target` | session 渠道目标 |
+| `session_cwd` | session 当前工作目录 |
+| `session_create_at` | session 创建时间，当前推荐主字段 |
+| `session_created_at` | session 元数据中的原始 `createdAt` |
+| `session_updated_at` | session 最近更新时间 |
+| `session_chat_type` | 会话类型，例如 `direct` |
+| `session_file` | session 落盘文件路径 |
+| `source_app` | 消息来源提供方，例如 `feishu` |
+| `entry_point` | 消息入口面，例如 `feishu` |
+| `state` | 当前状态 |
+| `prev_state` | 前一状态 |
+| `reason` | 状态变化或结束原因 |
+| `queue_depth` | 当前关联队列深度 |
+| `runtime_phase` | 当前 runtime 阶段 |
+| `final_status` | 最终状态，推荐用于和 metrics / 查询侧统一 |
+| `tools` | 本轮汇总的 tool 列表 |
+| `tool_count` | tool 数量 |
+| `skills` | 本轮汇总的 skill 列表 |
+| `skill_count` | skill 数量 |
+| `tool_targets` | 本轮汇总的多个 tool target |
+| `tool_commands` | 本轮汇总的多个 tool command |
+| `tool_result_statuses` | 本轮汇总的多个 tool result status |
+| `tool_arg_keys` | tool 参数 key 汇总 |
+| `tool_args_preview` | tool 参数预览 |
+| `tool_meta_preview` | tool 元数据预览 |
+| `tool_result_preview` | tool 结果预览 |
+| `tool_result_status` | tool 结果状态 |
 
 ## Model 相关字段
 
 | 字段 | 描述 |
 | --- | --- |
-| `gen_ai.provider_name` | 模型提供方 |
-| `gen_ai.request_model` | 请求模型名 |
-| `gen_ai.response_model` | 响应模型名 |
-| `gen_ai.input_preview` | 输入预览 |
-| `gen_ai.input_length` | 输入长度 |
-| `gen_ai.output_preview` | 输出预览 |
-| `gen_ai.output_length` | 输出长度 |
-| `gen_ai.output_summary` | 输出摘要 / 思考摘要 |
-| `gen_ai.output_text_length` | 最终文本长度 |
-| `gen_ai.output_kind` | 输出类型，例如 `text`、`tool_call` |
-| `gen_ai.usage_input_tokens` | 输入 token 数 |
-| `gen_ai.usage_output_tokens` | 输出 token 数 |
-| `gen_ai.usage_total_tokens` | 总 token 数 |
-| `gen_ai.usage_cache_read_input_tokens` | cache read token 数 |
-| `gen_ai.usage_cache_write_input_tokens` | cache write token 数 |
+| `provider_name` | 模型提供方 |
+| `request_model` | 请求模型名 |
+| `response_model` | 响应模型名 |
+| `input_preview` | 输入预览 |
+| `input_length` | 输入长度 |
+| `output_preview` | 输出预览 |
+| `output_length` | 输出长度 |
+| `output_summary` | 输出摘要 / 思考摘要 |
+| `output_text_length` | 最终文本长度 |
+| `output_kind` | 输出类型，例如 `text`、`tool_call` |
+| `usage_input_tokens` | 输入 token 数 |
+| `usage_output_tokens` | 输出 token 数 |
+| `usage_total_tokens` | 总 token 数 |
+| `usage_cache_read_input_tokens` | cache read token 数 |
+| `usage_cache_write_input_tokens` | cache write token 数 |
 
 ## Tool 相关字段
 
 | 字段 | 描述 |
 | --- | --- |
-| `gen_ai.tool_call_id` | tool call 标识 |
-| `gen_ai.tool_name` | tool 名称 |
-| `gen_ai.tool_target` | tool 操作目标 |
-| `gen_ai.tool_command` | tool 执行命令 |
-| `gen_ai.tool_outcome` | tool 执行结果 |
-| `gen_ai.tool_phase` | tool 当前阶段 |
-| `gen_ai.tool_loop_level` | tool loop 检测等级 |
-| `gen_ai.tool_targets` | 本轮汇总的多个 tool target |
-| `gen_ai.tool_commands` | 本轮汇总的多个 tool command |
-| `gen_ai.tool_result_statuses` | 本轮汇总的多个 tool result status |
-| `gen_ai.tool_arg_keys` | tool 参数 key 汇总 |
-| `gen_ai.tool_args_preview` | tool 参数预览 |
-| `gen_ai.tool_meta_preview` | tool 元数据预览 |
-| `gen_ai.tool_result_preview` | tool 结果预览 |
-| `gen_ai.tool_result_status` | tool 结果状态 |
-| `gen_ai.tool_count` | tool 数量 |
+| `tool_call_id` | tool call 标识 |
+| `tool_name` | tool 名称 |
+| `tool_target` | tool 操作目标 |
+| `tool_command` | tool 执行命令 |
+| `tool_outcome` | tool 执行结果 |
+| `tool_phase` | tool 当前阶段 |
+| `tool_loop_level` | tool loop 检测等级 |
 
 ## Skill 相关字段
 
 | 字段 | 描述 |
 | --- | --- |
-| `gen_ai.skill_call_id` | skill call 标识 |
-| `gen_ai.skill_name` | skill 名称 |
-| `gen_ai.skill_type` | skill 类型 |
-| `gen_ai.skill_source` | skill 来源 |
-| `gen_ai.skills` | 本轮汇总的 skill 列表 |
-| `gen_ai.skill_count` | skill 数量 |
+| `skill_call_id` | skill call 标识 |
+| `skill_name` | skill 名称 |
+| `skill_type` | skill 类型 |
+| `skill_source` | skill 来源 |

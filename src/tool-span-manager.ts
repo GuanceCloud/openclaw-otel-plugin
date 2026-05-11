@@ -142,6 +142,19 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     return run.skillSpans.get(run.activeSkillName)?.ctx;
   };
 
+  const buildSessionSpanAttrs = (
+    evt: SessionEvent & {
+      channel?: string;
+    },
+  ) => {
+    const snapshot = loadSessionSnapshot(evt.sessionKey);
+    return {
+      session_id: evt.sessionId ?? snapshot?.sessionId,
+      session_key: evt.sessionKey ?? snapshot?.sessionKey,
+      channel: evt.channel ?? snapshot?.lastChannel,
+    };
+  };
+
   const syncToolSummaryAttrs = (evt: SessionEvent, run: ActiveRunSpan) => {
     const attrs = traceAttrs({
       "openclaw.tools": Array.from(run.usedToolNames).join(", "),
@@ -177,6 +190,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         existing.source = "runtime";
       }
       existing.span.setAttributes(traceAttrs({
+        ...buildSessionSpanAttrs(evt),
         "span.kind": "skill",
         "openclaw.skill.name": normalizedSkillName,
         "openclaw.skill.source": existing.source,
@@ -196,6 +210,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         startTime: new Date(startTs),
         kind: SpanKind.INTERNAL,
         attributes: traceAttrs({
+          ...buildSessionSpanAttrs(evt),
           "span.kind": "skill",
           "openclaw.skill.name": normalizedSkillName,
           "openclaw.skill.source": source,
@@ -248,6 +263,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         existing.toolName = toolName.trim();
       }
       existing.span.setAttributes(traceAttrs({
+        ...buildSessionSpanAttrs(evt),
         "span.kind": "skill",
         "openclaw.skill.name": normalizedSkillName,
         "openclaw.skill.kind": "call",
@@ -268,6 +284,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         startTime: new Date(startTs),
         kind: SpanKind.INTERNAL,
         attributes: traceAttrs({
+          ...buildSessionSpanAttrs(evt),
           "span.kind": "skill",
           "openclaw.skill.name": normalizedSkillName,
           "openclaw.skill.kind": "call",
@@ -311,6 +328,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       return;
     }
     invocation.span.setAttributes(traceAttrs({
+      ...buildSessionSpanAttrs(evt),
       "span.kind": "skill",
       "openclaw.skill.name": invocation.name,
       "openclaw.skill.kind": "call",
@@ -387,6 +405,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (existing) {
       const merged = mergeToolIdentity(existing);
       existing.span.setAttributes(traceAttrs({
+        ...buildSessionSpanAttrs(evt),
         ...buildToolAttrs(normalizedToolName, normalizedToolCallId, {
           skillName: existing.skillName,
         }),
@@ -425,6 +444,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         startTime: new Date(startTs),
         kind: SpanKind.CLIENT,
         attributes: traceAttrs({
+          ...buildSessionSpanAttrs(evt),
           ...buildToolAttrs(normalizedToolName, normalizedToolCallId, {
             skillName,
           }),
@@ -473,6 +493,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     }
     if (preview) {
       tool.span.setAttributes(traceAttrs({
+        ...buildSessionSpanAttrs(evt),
         ...buildToolAttrs(tool.name, tool.toolCallId, {
           skillName: tool.skillName,
           partialResult,
@@ -537,6 +558,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     syncToolSummaryAttrs(evt, run);
     tool.hasError = isError;
     tool.span.setAttributes(traceAttrs({
+      ...buildSessionSpanAttrs(evt),
       ...buildToolAttrs(tool.name, tool.toolCallId, {
         skillName: tool.skillName,
         meta: payload?.meta,
@@ -922,6 +944,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
 
   const handleAgentEvent = (evt: any) => {
     const sessionKey = typeof evt?.sessionKey === "string" ? evt.sessionKey : undefined;
+    const sessionId = typeof evt?.sessionId === "string" ? evt.sessionId : undefined;
+    const channel = typeof evt?.channel === "string" ? evt.channel : undefined;
     if (!sessionKey) {
       return;
     }
@@ -955,7 +979,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     });
     const toolCallId = typeof evt.data.toolCallId === "string" ? evt.data.toolCallId : undefined;
     const skillName = resolveSkillName(
-      { sessionKey, ts: evt.ts ?? Date.now() },
+      { sessionKey, sessionId, ts: evt.ts ?? Date.now() },
       toolName,
       toolCallId,
       summary.target,
@@ -965,14 +989,20 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (summary.command) run.usedToolCommands.add(summary.command);
     if (summary.resultStatus) run.usedToolResultStatuses.add(summary.resultStatus);
     if (skillName) {
-      ensureSkillSpan({ sessionKey, ts: evt.ts ?? Date.now() }, skillName, "runtime");
+      ensureSkillSpan({ sessionKey, sessionId, channel, ts: evt.ts ?? Date.now() }, skillName, "runtime");
       if (toolCallId) {
-        ensureSkillInvocationSpan({ sessionKey, ts: evt.ts ?? Date.now() }, skillName, toolCallId, toolName);
+        ensureSkillInvocationSpan(
+          { sessionKey, sessionId, channel, ts: evt.ts ?? Date.now() },
+          skillName,
+          toolCallId,
+          toolName,
+        );
       }
     }
     syncToolSummaryAttrs({ sessionKey }, run);
     if (skillName) {
       run.skillSpans.get(skillName)?.span.setAttributes(traceAttrs({
+        ...buildSessionSpanAttrs({ sessionKey, sessionId, channel }),
         "span.kind": "skill",
         "openclaw.skill.name": skillName,
         "openclaw.skill.source": "runtime",
@@ -983,7 +1013,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (!toolCallId) {
       return;
     }
-    const toolEvt = { sessionKey, ts: evt.ts ?? Date.now() };
+    const toolEvt = { sessionKey, sessionId, channel, ts: evt.ts ?? Date.now() };
     if (evt.data.phase === "start") {
       ensureToolSpan(toolEvt, toolName, toolCallId, {
         ...buildToolAttrs(toolName, toolCallId, {

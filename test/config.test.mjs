@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 
 import { resolveOtelPluginConfig } from "../dist/src/config.js";
 
-test("resolveOtelPluginConfig keeps openclaw as the default GenAI agent runtime resource attribute", () => {
+test("resolveOtelPluginConfig keeps openclaw as the default agent runtime resource attribute", () => {
   const config = resolveOtelPluginConfig({});
 
   assert.deepEqual(config.resourceAttributes, {
-    "gen_ai.agent_runtime": "openclaw",
+    agent_runtime: "openclaw",
   });
 });
 
@@ -21,7 +21,7 @@ test("resolveOtelPluginConfig folds globalTags into resourceAttributes", () => {
   });
 
   assert.deepEqual(config.resourceAttributes, {
-    "gen_ai.agent_runtime": "openclaw",
+    agent_runtime: "openclaw",
     team: "apm",
     enabled: true,
     priority: 3,
@@ -43,10 +43,30 @@ test("resolveOtelPluginConfig lets resourceAttributes override default runtime f
   });
 
   assert.deepEqual(config.resourceAttributes, {
-    "gen_ai.agent_runtime": "hermes",
-    "gen_ai.agent_name": "fixed-agent",
-    "gen_ai.agent_id": "agent-01",
+    agent_runtime: "hermes",
+    agent_name: "fixed-agent",
+    agent_id: "agent-01",
     team: "platform",
+  });
+});
+
+test("resolveOtelPluginConfig accepts legacy gen_ai resource keys but normalizes them to canonical tags", () => {
+  const config = resolveOtelPluginConfig({
+    resourceAttributes: {
+      "gen_ai.agent_runtime": "hermes",
+      "gen_ai.agent_name": "legacy-agent",
+      "gen_ai.agent_id": "agent-02",
+      "gen_ai.agent_version": "2026.5.11",
+      "gen_ai.runtime_environment": "prod",
+    },
+  });
+
+  assert.deepEqual(config.resourceAttributes, {
+    agent_runtime: "hermes",
+    agent_name: "legacy-agent",
+    agent_id: "agent-02",
+    agent_version: "2026.5.11",
+    runtime_environment: "prod",
   });
 });
 

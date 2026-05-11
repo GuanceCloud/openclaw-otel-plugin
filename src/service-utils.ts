@@ -306,34 +306,21 @@ function withCanonicalAliases(
   promoteAlias(next, "session_cwd", "openclaw.session.cwd");
   promoteAlias(next, "source_app", "openclaw.session.origin.provider");
   promoteAlias(next, "entry_point", "openclaw.session.origin.surface");
-  mirrorAlias(next, "gen_ai.agent_id", "agent_id");
-  mirrorAlias(next, "gen_ai.agent_name", "agent_name");
-  mirrorAlias(next, "gen_ai.agent_runtime", "agent_runtime");
-  mirrorAlias(next, "gen_ai.agent_channel", "channel");
-  mirrorAlias(next, "gen_ai.session_id", "session_id");
-  mirrorAlias(next, "gen_ai.session_key", "session_key");
-  mirrorAlias(next, "gen_ai.session_namespace", "session_namespace");
-  mirrorAlias(next, "gen_ai.session_agent", "session_agent");
-  mirrorAlias(next, "gen_ai.session_channel", "session_channel");
-  mirrorAlias(next, "gen_ai.session_scope", "session_scope");
-  mirrorAlias(next, "gen_ai.session_channel_target", "session_channel_target");
-  mirrorAlias(next, "gen_ai.session_cwd", "session_cwd");
-  mirrorAlias(next, "gen_ai.origin_provider", "source_app");
-  mirrorAlias(next, "gen_ai.origin_surface", "entry_point");
-  mirrorAlias(next, "gen_ai.provider_name", "openclaw.provider", "llm.provider");
-  mirrorAlias(next, "gen_ai.request_model", "openclaw.model", "llm.model");
-  mirrorAlias(next, "gen_ai.response_model", "openclaw.model", "llm.model");
-  mirrorAlias(next, "gen_ai.input_preview", "openclaw.input.preview");
-  mirrorAlias(next, "gen_ai.input_length", "openclaw.input.length");
-  mirrorAlias(next, "gen_ai.output_preview", "openclaw.output.preview");
-  mirrorAlias(next, "gen_ai.output_length", "openclaw.output.length");
-  mirrorAlias(next, "gen_ai.output_summary", "output_summary");
-  mirrorAlias(next, "gen_ai.output_text_length", "output_text_length");
-  mirrorAlias(next, "gen_ai.usage_input_tokens", "openclaw.tokens.input", "llm.input_tokens");
-  mirrorAlias(next, "gen_ai.usage_output_tokens", "openclaw.tokens.output", "llm.output_tokens");
-  mirrorAlias(next, "gen_ai.usage_total_tokens", "openclaw.tokens.total", "llm.total_tokens");
-  mirrorAlias(next, "gen_ai.usage_cache_read_input_tokens", "openclaw.tokens.cache_read");
-  mirrorAlias(next, "gen_ai.usage_cache_write_input_tokens", "openclaw.tokens.cache_write");
+  promoteAlias(next, "provider_name", "openclaw.provider", "llm.provider");
+  promoteAlias(next, "request_model", "openclaw.model", "llm.model");
+  promoteAlias(next, "response_model", "openclaw.model", "llm.model");
+  if (next.response_model === undefined || next.response_model === "") {
+    next.response_model = next.request_model;
+  }
+  promoteAlias(next, "input_preview", "openclaw.input.preview");
+  promoteAlias(next, "input_length", "openclaw.input.length");
+  promoteAlias(next, "output_preview", "openclaw.output.preview");
+  promoteAlias(next, "output_length", "openclaw.output.length");
+  promoteAlias(next, "usage_input_tokens", "openclaw.tokens.input", "llm.input_tokens");
+  promoteAlias(next, "usage_output_tokens", "openclaw.tokens.output", "llm.output_tokens");
+  promoteAlias(next, "usage_total_tokens", "openclaw.tokens.total", "llm.total_tokens");
+  promoteAlias(next, "usage_cache_read_input_tokens", "openclaw.tokens.cache_read");
+  promoteAlias(next, "usage_cache_write_input_tokens", "openclaw.tokens.cache_write");
   delete next["llm.provider"];
   delete next["llm.model"];
   delete next["llm.input_tokens"];
@@ -350,45 +337,18 @@ function withCanonicalAliases(
   delete next["openclaw.tokens.total"];
   delete next["openclaw.tokens.cache_read"];
   delete next["openclaw.tokens.cache_write"];
-  delete next.output_summary;
-  delete next.output_text_length;
-  mirrorAlias(next, "gen_ai.output_kind", "openclaw.output.kind", "output.kind");
-  mirrorAlias(next, "gen_ai.tool_call_id", "openclaw.tool.call_id", "tool_call_id");
-  mirrorAlias(next, "gen_ai.tool_name", "openclaw.tool.name", "tool_name");
-  mirrorAlias(next, "gen_ai.tool_target", "openclaw.tool.target", "tool_target");
-  mirrorAlias(next, "gen_ai.tool_command", "openclaw.tool.command", "tool_command");
-  mirrorAlias(next, "gen_ai.tool_outcome", "openclaw.tool.outcome", "tool_outcome");
-  mirrorAlias(next, "gen_ai.tool_phase", "openclaw.tool.phase", "tool_phase");
-  mirrorAlias(next, "gen_ai.tool_loop_level", "openclaw.tool.loop.level", "tool_loop_level");
-  mirrorAlias(next, "gen_ai.skill_call_id", "openclaw.skill.call_id", "skill_call_id", "skill.call_id");
-  mirrorAlias(next, "gen_ai.skill_name", "openclaw.skill.name", "skill_name", "skill.name");
-  mirrorAlias(next, "gen_ai.skill_type", "openclaw.skill.kind", "skill_type", "skill.kind");
-  mirrorAlias(next, "gen_ai.skill_source", "openclaw.skill.source", "skill_source", "skill.source");
-  mirrorAlias(next, "gen_ai.final_status", "openclaw.outcome", "openclaw.final_state", "final_status");
-  mirrorAlias(next, "gen_ai.agent_version", "agent_version");
-  mirrorAlias(next, "gen_ai.runtime_environment", "runtime_environment");
-  mirrorAlias(next, "gen_ai.state", "openclaw.state", "state");
-  mirrorAlias(next, "gen_ai.prev_state", "openclaw.prevState", "prevState", "prev_state");
-  mirrorAlias(next, "gen_ai.reason", "openclaw.reason", "reason");
-  mirrorAlias(next, "gen_ai.queue_depth", "openclaw.queueDepth", "queueDepth", "queue_depth");
-  mirrorAlias(next, "gen_ai.runtime_phase", "openclaw.runtime.phase", "runtime.phase");
-  mirrorAlias(next, "gen_ai.tools", "tools");
-  mirrorAlias(next, "gen_ai.tool_count", "tool_count");
-  mirrorAlias(next, "gen_ai.skills", "skills");
-  mirrorAlias(next, "gen_ai.skill_count", "skill.count", "skill_count");
-  mirrorAlias(next, "gen_ai.tool_targets", "tool_targets");
-  mirrorAlias(next, "gen_ai.tool_commands", "tool_commands");
-  mirrorAlias(next, "gen_ai.tool_result_statuses", "tool_result_statuses");
-  mirrorAlias(next, "gen_ai.tool_arg_keys", "tool_arg_keys");
-  mirrorAlias(next, "gen_ai.tool_args_preview", "tool_args_preview");
-  mirrorAlias(next, "gen_ai.tool_meta_preview", "tool_meta_preview");
-  mirrorAlias(next, "gen_ai.tool_result_preview", "tool_result_preview");
-  mirrorAlias(next, "gen_ai.tool_result_status", "tool_result_status");
-  mirrorAlias(next, "gen_ai.session_create_at", "session_create_time", "gen_ai.session_create_time");
-  mirrorAlias(next, "gen_ai.session_created_at", "session.createdAt");
-  mirrorAlias(next, "gen_ai.session_updated_at", "session.updatedAt", "session_update_time");
-  mirrorAlias(next, "gen_ai.session_chat_type", "session.chatType");
-  mirrorAlias(next, "gen_ai.session_file", "session.file");
+  promoteAlias(next, "output_kind", "openclaw.output.kind", "output.kind");
+  promoteAlias(next, "state", "openclaw.state", "state");
+  promoteAlias(next, "prev_state", "openclaw.prevState", "prevState", "prev_state");
+  promoteAlias(next, "reason", "openclaw.reason", "reason");
+  promoteAlias(next, "queue_depth", "openclaw.queueDepth", "queueDepth", "queue_depth");
+  promoteAlias(next, "runtime_phase", "openclaw.runtime.phase", "runtime.phase");
+  promoteAlias(next, "skill_count", "skill.count", "skill_count");
+  promoteAlias(next, "session_create_at", "session_create_time", "gen_ai.session_create_time");
+  promoteAlias(next, "session_created_at", "session.createdAt");
+  promoteAlias(next, "session_updated_at", "session.updatedAt", "session_update_time");
+  promoteAlias(next, "session_chat_type", "session.chatType");
+  promoteAlias(next, "session_file", "session.file");
   mirrorAlias(next, "skill_call_id", "openclaw.skill.call_id");
   mirrorAlias(next, "skill_name", "openclaw.skill.name");
   mirrorAlias(next, "skill_type", "openclaw.skill.kind");
@@ -436,74 +396,75 @@ export function stringAttrs(
 }
 
 const LEGACY_TRACE_CONTEXT_KEYS = new Set([
-  "agent_id",
-  "agent_name",
-  "agent_runtime",
-  "channel",
-  "session_id",
-  "session_key",
-  "session_namespace",
-  "session_agent",
-  "session_channel",
-  "session_scope",
-  "session_channel_target",
-  "session_cwd",
-  "source_app",
-  "entry_point",
-  "tool_call_id",
-  "tool_name",
-  "tool_target",
-  "tool_command",
-  "tool_outcome",
-  "tool_phase",
-  "tool_loop_level",
-  "skill_call_id",
-  "skill_name",
-  "skill_type",
-  "skill_source",
   "skill.call_id",
   "skill.name",
   "skill.kind",
   "skill.source",
-  "final_status",
   "output.kind",
-  "agent_version",
-  "runtime_environment",
-  "state",
   "prevState",
-  "prev_state",
-  "reason",
   "queueDepth",
-  "queue_depth",
   "runtime.phase",
-  "tools",
-  "tool_count",
-  "skills",
   "skill.count",
-  "skill_count",
-  "tool_targets",
-  "tool_commands",
-  "tool_result_statuses",
-  "tool_arg_keys",
-  "tool_args_preview",
-  "tool_meta_preview",
-  "tool_result_preview",
-  "tool_result_status",
   "tool.call_id",
   "tool.name",
   "tool.target",
   "tool.command",
   "tool.phase",
   "tool.outcome",
-  "session_create_time",
   "session.createdAt",
-  "session.updatedAt",
   "session_update_time",
   "session.chatType",
   "session.file",
   "gen_ai.agent_id",
   "gen_ai.agent_name",
   "gen_ai.agent_runtime",
+  "gen_ai.agent_channel",
+  "gen_ai.session_id",
+  "gen_ai.session_key",
+  "gen_ai.session_namespace",
+  "gen_ai.session_agent",
+  "gen_ai.session_channel",
+  "gen_ai.session_scope",
+  "gen_ai.session_channel_target",
+  "gen_ai.session_cwd",
+  "gen_ai.origin_provider",
+  "gen_ai.origin_surface",
+  "gen_ai.tool_call_id",
+  "gen_ai.tool_name",
+  "gen_ai.tool_target",
+  "gen_ai.tool_command",
+  "gen_ai.tool_outcome",
+  "gen_ai.tool_phase",
+  "gen_ai.tool_loop_level",
+  "gen_ai.skill_call_id",
+  "gen_ai.skill_name",
+  "gen_ai.skill_type",
+  "gen_ai.skill_source",
+  "gen_ai.final_status",
+  "gen_ai.agent_version",
+  "gen_ai.runtime_environment",
+  "gen_ai.state",
+  "gen_ai.prev_state",
+  "gen_ai.reason",
+  "gen_ai.queue_depth",
+  "gen_ai.runtime_phase",
+  "gen_ai.tools",
+  "gen_ai.tool_count",
+  "gen_ai.skills",
+  "gen_ai.skill_count",
+  "gen_ai.tool_targets",
+  "gen_ai.tool_commands",
+  "gen_ai.tool_result_statuses",
+  "gen_ai.tool_arg_keys",
+  "gen_ai.tool_args_preview",
+  "gen_ai.tool_meta_preview",
+  "gen_ai.tool_result_preview",
+  "gen_ai.tool_result_status",
+  "gen_ai.session_create_at",
+  "gen_ai.session_created_at",
+  "gen_ai.session_updated_at",
+  "gen_ai.session_chat_type",
+  "gen_ai.session_file",
 ]);
 
 export function traceAttrs(
