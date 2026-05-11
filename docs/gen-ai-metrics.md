@@ -75,8 +75,8 @@
 
 | 指标名 | 类型 | 单位 | tags | 描述 |
 | --- | --- | --- | --- | --- |
-| `gen_ai.client.token.usage` | Counter | 保持当前 | `agent_runtime`, `operation_name`, `provider_name`, `request_model`, `response_model`, `session_id`, `token_type` | 模型 token 用量。通过 `token_type=input|output|total` 区分口径。 |
-| `gen_ai.client.operation.duration` | Histogram | `ms` | `agent_runtime`, `operation_name`, `session_id`, `outcome`；当 `operation_name=chat` 时还带 `provider_name`, `request_model`, `response_model`；当 `operation_name=execute_tool` 时还带 `tool_name`, `skill_name`, `tool_result_status` | Client 侧操作耗时。当前覆盖模型请求与工具执行两类操作。 |
+| `gen_ai.client.token.usage` | Counter | 保持当前 | `agent_runtime`, `operation_name`, `provider_name`, `request_model`, `response_model`, `token_type` | 模型 token 用量。通过 `token_type=input|output|total` 区分口径。 |
+| `gen_ai.client.operation.duration` | Histogram | `ms` | `agent_runtime`, `operation_name`, `outcome`；当 `operation_name=chat` 时还带 `provider_name`, `request_model`, `response_model`；当 `operation_name=execute_tool` 时还带 `tool_name`, `skill_name`, `tool_result_status` | Client 侧操作耗时。当前覆盖模型请求与工具执行两类操作。 |
 
 ### GenAI Agent
 
