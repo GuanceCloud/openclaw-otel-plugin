@@ -299,6 +299,89 @@ test("session store aggregates session token totals and trace count", () => {
   });
 });
 
+test("session store derives cumulative total tokens from input and output when transcript totalTokens is a context snapshot", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "s2-context-total.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s2c: {
+        sessionFile,
+        sessionId: "session-2c",
+      },
+    }),
+  );
+  const lines = [
+    {
+      type: "message",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "first" }],
+        timestamp: 1000,
+      },
+    },
+    {
+      type: "message",
+      message: {
+        role: "assistant",
+        timestamp: 1300,
+        usage: {
+          input: 11,
+          output: 7,
+          totalTokens: 1800,
+        },
+      },
+    },
+    {
+      type: "message",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "second" }],
+        timestamp: 2000,
+      },
+    },
+    {
+      type: "message",
+      message: {
+        role: "assistant",
+        timestamp: 2600,
+        usage: {
+          input: 13,
+          output: 5,
+          totalTokens: 2400,
+        },
+      },
+    },
+  ];
+  fs.writeFileSync(
+    sessionFile,
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+  );
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const snapshot = store.loadSessionSnapshot("s2c");
+
+  assert.ok(snapshot);
+  assert.deepEqual(snapshot.sessionUsageTotals, {
+    input: 24,
+    output: 12,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 36,
+  });
+  assert.deepEqual(snapshot.lastAssistantUsage, {
+    input: 13,
+    output: 5,
+    cacheRead: undefined,
+    cacheWrite: undefined,
+    totalTokens: 2400,
+  });
+});
+
 test("session store prefers line timestamps for assistant turns", () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
   const sessionsDir = path.join(stateDir, "agents", "main", "sessions");

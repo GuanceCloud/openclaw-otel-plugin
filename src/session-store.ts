@@ -407,6 +407,9 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
             const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
             const totalTokens = typeof usage.totalTokens === "number" ? usage.totalTokens : 0;
+            const additiveTotalTokens = input > 0 || output > 0
+              ? input + output
+              : totalTokens;
             lastAssistantUsage = {
               input: input || undefined,
               output: output || undefined,
@@ -418,7 +421,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             sessionUsageTotals.output += output;
             sessionUsageTotals.cacheRead += cacheRead;
             sessionUsageTotals.cacheWrite += cacheWrite;
-            sessionUsageTotals.totalTokens += totalTokens;
+            sessionUsageTotals.totalTokens += additiveTotalTokens;
           }
         }
         if (message.role === "toolResult") {
