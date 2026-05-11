@@ -2,6 +2,57 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-05-07
+
+### Session Metrics
+
+- Switched session token aggregation to runtime `model.usage` events so `openclaw.session.tokens.*` no longer depends on transcript `message.usage`.
+- Kept `openclaw.session.traces` on session transcript counting while preserving periodic export for active sessions.
+
+### Trace Model
+
+- Switched request scoping from session-level reuse to one trace per inbound user message.
+- Fixed repeated `message.queued` handling so a pending run is reused instead of starting a duplicate trace.
+- Added replay watermarks so the same transcript is only finalized once across `message.processed` and trailing `session.state idle` events.
+- Made the model span mandatory when transcript metadata already includes `provider` and `model`, even if runtime `model.usage` is missing.
+- Renamed model span resources to the fixed name `model_request` instead of embedding `provider/model` in the span name.
+- Switched transcript replay from one synthetic span per run to one `model_request` per assistant turn, so multi-tool sessions show `model -> tool -> model` loops correctly.
+- Moved per-turn transcript replay to `message.processed` first and kept `session.state idle` as a fallback-only close path.
+
+### Runtime Lifecycle
+
+- Added explicit runtime lifecycle spans for `channel_ingress`, `dispatch_queue`, `session_processing`, `runtime_orchestration`, and `channel_egress`.
+- Split queue wait from execution time so request spans can start near the real ingress timestamp while queued work is shown separately.
+- Removed standalone queue and heartbeat traces, keeping those diagnostics in metrics and logs instead.
+
+### Skill And Tool Coverage
+
+- Added transcript-backed skill inference for dashboard-style tool activity.
+- Added `skill_call` wrapping for tool invocations such as `edit` in addition to `write` and `exec`.
+- Preserved `openclaw.skill.*` attributes alongside normalized skill aliases so downstream filters can query skill names directly.
+
+### Tooling And Tests
+
+- Added regression coverage for request reuse, replay watermark deduplication, and transcript-first `message.processed` replay.
+- Updated README and README_ZH to reflect the current trace naming and lifecycle span behavior.
+
+## 2026-05-06
+
+### Session Metrics
+
+- Added session-scoped metrics with `session_id` tagging:
+  - `openclaw.session.tokens.input`
+  - `openclaw.session.tokens.output`
+  - `openclaw.session.tokens.total`
+  - `openclaw.session.traces`
+- Switched session metrics from run-end emission to a scanner that only tracks active sessions on the `30s` cadence.
+- Report session counters as scan-time deltas derived from transcript-backed cumulative totals, so repeated scans do not double count.
+
+### Metrics Export
+
+- Changed the default metrics export interval from `15s` to `30s`.
+- Updated README and README_ZH examples and config reference to reflect the new default export interval and session metric behavior.
+
 ## 2026-04-28
 
 ### Trace Model

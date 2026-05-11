@@ -11,6 +11,8 @@ export type OtelPluginConfig = {
   sampleRate?: number;
   flushIntervalMs: number;
   rootSpanTtlMs: number;
+  tracePayloadDebugEnabled: boolean;
+  tracePayloadDebugTraceIds?: string[];
   resourceAttributes?: Record<string, string | number | boolean>;
 };
 
@@ -18,9 +20,9 @@ const DEFAULT_ENDPOINT = "http://127.0.0.1:9529/otel";
 const DEFAULT_TRACE_PATH = "v1/traces";
 const DEFAULT_METRICS_PATH = "v1/metrics";
 const DEFAULT_LOGS_PATH = "v1/logs";
-const DEFAULT_AGENT_PROVIDER = "openclaw";
+const DEFAULT_AGENT_RUNTIME = "openclaw";
 const DEFAULT_SERVICE_NAME = "openclaw-otel-plugin";
-const DEFAULT_FLUSH_INTERVAL_MS = 15000;
+const DEFAULT_FLUSH_INTERVAL_MS = 30000;
 const DEFAULT_ROOT_SPAN_TTL_MS = 10 * 60 * 1000;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -42,6 +44,16 @@ function asStringMap(
       .map(([key, item]) => [key, String(item).trim()]),
   );
   return Object.keys(mapped).length > 0 ? mapped : undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const mapped = value
+    .filter((item) => typeof item === "string" && item.trim())
+    .map((item) => String(item).trim());
+  return mapped.length > 0 ? mapped : undefined;
 }
 
 function asResourceAttributes(
@@ -95,18 +107,47 @@ function normalizeMs(value: unknown, fallback: number): number {
   return Math.max(1000, Math.floor(value));
 }
 
+function normalizeResourceAttrValue(
+  value: string | number | boolean | undefined,
+): string | number | boolean | undefined {
+  return value === "" ? undefined : value;
+}
+
 function resolveResourceAttributes(
   raw: Record<string, unknown>,
 ): Record<string, string | number | boolean> {
-  const legacyAgentProvider = normalizeNonEmptyString(
-    typeof raw.agentProvider === "string" ? raw.agentProvider : undefined,
-    DEFAULT_AGENT_PROVIDER,
-  );
-  return {
-    agent_provider: legacyAgentProvider,
+  const merged = {
+    agent_runtime: DEFAULT_AGENT_RUNTIME,
     ...(asResourceAttributes(raw.globalTags) ?? {}),
     ...(asResourceAttributes(raw.resourceAttributes) ?? {}),
-  };
+  } as Record<string, string | number | boolean>;
+  const aliasGroups: Array<[string, string[]]> = [
+    ["agent_runtime", ["gen_ai.agent_runtime", "gen_ai_agent_runtime"]],
+    ["agent_id", ["gen_ai.agent_id", "gen_ai_agent_id"]],
+    ["agent_name", ["gen_ai.agent_name", "gen_ai_agent_name"]],
+    ["agent_version", ["gen_ai.agent_version", "gen_ai_agent_version"]],
+    ["runtime_environment", ["gen_ai.runtime_environment", "gen_ai_runtime_environment"]],
+  ];
+  for (const [canonicalKey, aliasKeys] of aliasGroups) {
+    const canonicalValue = normalizeResourceAttrValue(merged[canonicalKey]);
+    if (canonicalValue !== undefined) {
+      merged[canonicalKey] = canonicalValue;
+    }
+    const shouldPreferAlias = canonicalKey === "agent_runtime" && canonicalValue === DEFAULT_AGENT_RUNTIME;
+    if (canonicalValue === undefined || shouldPreferAlias) {
+      for (const aliasKey of aliasKeys) {
+        const aliasValue = normalizeResourceAttrValue(merged[aliasKey]);
+        if (aliasValue !== undefined) {
+          merged[canonicalKey] = aliasValue;
+          break;
+        }
+      }
+    }
+    for (const aliasKey of aliasKeys) {
+      delete merged[aliasKey];
+    }
+  }
+  return merged;
 }
 
 export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {
@@ -133,6 +174,8 @@ export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {
     sampleRate: normalizeRate(raw.sampleRate),
     flushIntervalMs: normalizeMs(raw.flushIntervalMs, DEFAULT_FLUSH_INTERVAL_MS),
     rootSpanTtlMs: normalizeMs(raw.rootSpanTtlMs, DEFAULT_ROOT_SPAN_TTL_MS),
+    tracePayloadDebugEnabled: raw.tracePayloadDebugEnabled === true,
+    tracePayloadDebugTraceIds: asStringArray(raw.tracePayloadDebugTraceIds),
     resourceAttributes: resolveResourceAttributes(raw),
   };
 }

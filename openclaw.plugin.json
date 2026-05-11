@@ -1,5 +1,8 @@
 {
   "id": "openclaw-otel-plugin",
+  "activation": {
+    "onStartup": true
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -21,10 +24,6 @@
       },
       "logsPath": {
         "type": "string"
-      },
-      "agentProvider": {
-        "type": "string",
-        "description": "Deprecated compatibility field. Prefer resourceAttributes.agent_provider."
       },
       "globalTags": {
         "type": "object",
@@ -58,6 +57,17 @@
       "rootSpanTtlMs": {
         "type": "number",
         "minimum": 1000
+      },
+      "tracePayloadDebugEnabled": {
+        "type": "boolean",
+        "description": "Log the exact trace export payload summary before handing it to the OTLP trace exporter."
+      },
+      "tracePayloadDebugTraceIds": {
+        "type": "array",
+        "description": "Optional trace_id allowlist for trace export payload debug logs.",
+        "items": {
+          "type": "string"
+        }
       },
       "resourceAttributes": {
         "type": "object",

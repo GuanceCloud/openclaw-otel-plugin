@@ -5,17 +5,21 @@ import type {
   SessionSnapshot,
   SessionSnapshotStore,
   SkillCatalogEntry,
+  TranscriptAssistantTurn,
   TranscriptToolCall,
 } from "./service-types.js";
 import {
+  clipValuePreview,
   buildSkillCatalogEntry,
   extractContentText,
   extractFrontmatter,
   extractMentionedSkillNames,
   extractToolTarget,
   inferSkillNameFromToolIdentity,
+  normalizeUserInputPreview,
   parseSessionKey,
   readJsonLines,
+  summarizeToolCallOutput,
   uniqStrings,
 } from "./service-utils.js";
 
@@ -97,6 +101,38 @@ export function resolveConfiguredAgents(stateDir: string): ConfiguredAgent[] {
   } catch {
     return [];
   }
+}
+
+function resolveEnvelopeTimestamp(
+  lineTimestamp: unknown,
+  messageTimestamp: unknown,
+): number | undefined {
+  return parseMessageTimestamp(lineTimestamp) ?? parseMessageTimestamp(messageTimestamp);
+}
+
+function resolveSessionTrajectoryFile(sessionFile: string): string | undefined {
+  if (!sessionFile.endsWith(".jsonl")) {
+    return undefined;
+  }
+  return sessionFile.replace(/\.jsonl$/, ".trajectory.jsonl");
+}
+
+function readSessionCreatedAt(sessionFile: string): number | undefined {
+  const trajectoryFile = resolveSessionTrajectoryFile(sessionFile);
+  if (!trajectoryFile || !fs.existsSync(trajectoryFile)) {
+    return undefined;
+  }
+  try {
+    for (const line of readJsonLines(trajectoryFile)) {
+      if (line?.type !== "session.started") {
+        continue;
+      }
+      return parseMessageTimestamp(line.ts);
+    }
+  } catch {
+    // Ignore trajectory read failures; session traces can still be emitted.
+  }
+  return undefined;
 }
 
 export function createSessionSnapshotStore(stateDir: string): SessionSnapshotStore {
@@ -253,15 +289,28 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       }
       const lines = readJsonLines(sessionFile);
       let lastUserText: string | undefined;
+      let lastUserTs: number | undefined;
       let lastAssistantText: string | undefined;
+      let lastAssistantTs: number | undefined;
       let lastAssistantThinking: string | undefined;
       let lastProvider: string | undefined;
       let lastModel: string | undefined;
       let sessionCwd: string | undefined;
       let lastAssistantUsage: SessionSnapshot["lastAssistantUsage"];
-      const invokedSkillNames = new Set<string>();
-      const toolCallSkillNamesById: Record<string, string> = {};
+      const sessionUsageTotals: SessionSnapshot["sessionUsageTotals"] = {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+      };
+      let traceCount = 0;
+      const currentRunInvokedSkillNames = new Set<string>();
+      let currentRunToolCallSkillNamesById: Record<string, string> = {};
       const currentRunToolCalls = new Map<string, TranscriptToolCall>();
+      const currentRunAssistantTurns: TranscriptAssistantTurn[] = [];
+      let currentRunCursorTs: number | undefined;
+      let currentRunInputPreview: string | undefined;
       for (const line of lines) {
         if (line.type === "session" && typeof line.cwd === "string" && !sessionCwd) {
           sessionCwd = line.cwd;
@@ -275,15 +324,27 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         }
         const message = envelope as Record<string, unknown>;
         if (message.role === "user") {
-          lastUserText = extractContentText(message.content, "text") ?? lastUserText;
+          const userText = extractContentText(message.content, "text");
+          lastUserText = userText ?? lastUserText;
+          lastUserTs = resolveEnvelopeTimestamp(line.timestamp, message.timestamp) ?? lastUserTs;
+          traceCount += 1;
+          currentRunInvokedSkillNames.clear();
+          currentRunToolCallSkillNamesById = {};
           currentRunToolCalls.clear();
+          currentRunAssistantTurns.length = 0;
+          currentRunCursorTs = lastUserTs;
+          currentRunInputPreview = normalizeUserInputPreview(userText);
         }
         if (message.role === "assistant") {
-          lastAssistantText = extractContentText(message.content, "text") ?? lastAssistantText;
-          lastAssistantThinking = extractContentText(message.content, "thinking") ?? lastAssistantThinking;
+          const assistantText = extractContentText(message.content, "text");
+          const assistantThinking = extractContentText(message.content, "thinking");
+          const turnToolCallNames: string[] = [];
+          lastAssistantText = assistantText ?? lastAssistantText;
+          lastAssistantThinking = assistantThinking ?? lastAssistantThinking;
           lastProvider = typeof message.provider === "string" ? message.provider : lastProvider;
           lastModel = typeof message.model === "string" ? message.model : lastModel;
-          const startedAt = parseMessageTimestamp(message.timestamp) ?? parseMessageTimestamp(line.timestamp);
+          const startedAt = resolveEnvelopeTimestamp(line.timestamp, message.timestamp);
+          lastAssistantTs = startedAt ?? lastAssistantTs;
           if (Array.isArray(message.content)) {
             for (const item of message.content) {
               if (!item || typeof item !== "object") {
@@ -299,6 +360,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
               if (!toolCallId || !toolName) {
                 continue;
               }
+              turnToolCallNames.push(toolName);
               const existing = currentRunToolCalls.get(toolCallId);
               currentRunToolCalls.set(toolCallId, {
                 callId: toolCallId,
@@ -318,21 +380,48 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
                   : undefined,
               );
               if (skillName) {
-                invokedSkillNames.add(skillName);
-                toolCallSkillNamesById[toolCallId] = skillName;
+                currentRunInvokedSkillNames.add(skillName);
+                currentRunToolCallSkillNamesById[toolCallId] = skillName;
               }
             }
           }
+          const outputPreview = assistantText
+            ? clipValuePreview(assistantText)
+            : summarizeToolCallOutput(turnToolCallNames);
+          currentRunAssistantTurns.push({
+            startedAt: currentRunCursorTs ?? startedAt,
+            endedAt: startedAt,
+            provider: typeof message.provider === "string" ? message.provider : undefined,
+            model: typeof message.model === "string" ? message.model : undefined,
+            inputPreview: currentRunInputPreview,
+            thinking: assistantThinking,
+            text: assistantText,
+            outputPreview,
+            outputKind: assistantText ? "text" : turnToolCallNames.length > 0 ? "tool_call" : undefined,
+          });
+          currentRunCursorTs = startedAt ?? currentRunCursorTs;
           if (message.usage && typeof message.usage === "object") {
             const usage = message.usage as Record<string, unknown>;
+            const input = typeof usage.input === "number" ? usage.input : 0;
+            const output = typeof usage.output === "number" ? usage.output : 0;
+            const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
+            const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
+            const totalTokens = typeof usage.totalTokens === "number" ? usage.totalTokens : 0;
+            const additiveTotalTokens = input > 0 || output > 0
+              ? input + output
+              : totalTokens;
             lastAssistantUsage = {
-              input: typeof usage.input === "number" ? usage.input : undefined,
-              output: typeof usage.output === "number" ? usage.output : undefined,
-              cacheRead: typeof usage.cacheRead === "number" ? usage.cacheRead : undefined,
-              cacheWrite: typeof usage.cacheWrite === "number" ? usage.cacheWrite : undefined,
-              totalTokens:
-                typeof usage.totalTokens === "number" ? usage.totalTokens : undefined,
+              input: input || undefined,
+              output: output || undefined,
+              cacheRead: cacheRead || undefined,
+              cacheWrite: cacheWrite || undefined,
+              totalTokens: totalTokens || undefined,
             };
+            sessionUsageTotals.input += input;
+            sessionUsageTotals.output += output;
+            sessionUsageTotals.cacheRead += cacheRead;
+            sessionUsageTotals.cacheWrite += cacheWrite;
+            sessionUsageTotals.totalTokens += additiveTotalTokens;
           }
         }
         if (message.role === "toolResult") {
@@ -350,8 +439,10 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             meta: message.details,
             isError: message.isError === true,
             startedAt: existing?.startedAt,
-            endedAt: parseMessageTimestamp(message.timestamp) ?? parseMessageTimestamp(line.timestamp),
+            endedAt: resolveEnvelopeTimestamp(line.timestamp, message.timestamp),
           });
+          currentRunCursorTs = resolveEnvelopeTimestamp(line.timestamp, message.timestamp) ?? currentRunCursorTs;
+          currentRunInputPreview = clipValuePreview(message.details ?? extractContentText(message.content, "text"));
         }
       }
 
@@ -373,6 +464,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         sessionFile,
         sessionKey,
         sessionId: sessionMetaBySessionKey.get(sessionKey)?.sessionId,
+        createdAt: readSessionCreatedAt(sessionFile),
         updatedAt: sessionMetaBySessionKey.get(sessionKey)?.updatedAt,
         chatType: sessionMetaBySessionKey.get(sessionKey)?.chatType,
         lastChannel: sessionMetaBySessionKey.get(sessionKey)?.lastChannel,
@@ -381,15 +473,20 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         sessionCwd,
         sessionSkills: (sessionSkillsBySessionKey.get(sessionKey) ?? []).map((skill) => skill.name),
         mentionedSkillNames: Array.from(mentionedSkillNames),
-        invokedSkillNames: Array.from(invokedSkillNames),
-        toolCallSkillNamesById,
+        invokedSkillNames: Array.from(currentRunInvokedSkillNames),
+        toolCallSkillNamesById: currentRunToolCallSkillNamesById,
         lastRunToolCalls: Array.from(currentRunToolCalls.values()),
+        lastRunAssistantTurns: currentRunAssistantTurns,
         lastUserText,
+        lastUserTs,
         lastAssistantText: liveAssistantText ?? lastAssistantText,
+        lastAssistantTs,
         lastAssistantThinking,
         lastProvider: lastProvider ?? sessionModelBySessionKey.get(sessionKey)?.provider,
         lastModel: lastModel ?? sessionModelBySessionKey.get(sessionKey)?.model,
         lastAssistantUsage,
+        sessionUsageTotals,
+        traceCount,
         mtimeMs: stats.mtimeMs,
       };
       transcriptSnapshotBySession.set(sessionKey, snapshot);

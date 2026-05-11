@@ -87,6 +87,9 @@ test("skill file reads create a dedicated skill call span", () => {
       return new Date(evt.ts ?? 1000);
     },
     setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
   });
 
   const tool = manager.ensureToolSpan(
@@ -167,6 +170,9 @@ test("tool events from skill file reads create skill spans through the event han
       return new Date(evt.ts ?? 1000);
     },
     setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
   });
 
   manager.handleAgentEvent({
@@ -254,6 +260,9 @@ test("exec commands inside a skill directory create the matching skill span", ()
       return new Date(evt.ts ?? 1000);
     },
     setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
   });
 
   manager.handleAgentEvent({
@@ -278,6 +287,272 @@ test("exec commands inside a skill directory create the matching skill span", ()
   assert.ok(skillCallSpan);
   assert.ok(toolSpan);
   assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
+});
+
+test("dashboard workspace paths infer the dashboard skill span", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  const runSpan = createFakeSpan("run");
+  const run = createRunState({ active: true }, 1000, 1000);
+  run.span = runSpan;
+  run.ctx = { ctx: "run" };
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun() {
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    loadSessionSnapshot() {
+      return undefined;
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "s1",
+    ts: 2000,
+    stream: "tool",
+    data: {
+      name: "write",
+      toolCallId: "call-dashboard",
+      phase: "start",
+      args: {
+        path: "/home/liurui/dashboard/guance/mysql_dashboard_complete.json",
+      },
+    },
+  });
+
+  const skillSummarySpan = spans.find((span) => span.name === "skill:dashboard");
+  const skillCallSpan = spans.find((span) => span.name === "skill_call:dashboard");
+  const toolSpan = spans.find((span) => span.name === "tool:write");
+
+  assert.ok(skillSummarySpan);
+  assert.ok(skillCallSpan);
+  assert.ok(toolSpan);
+  assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
+});
+
+test("dashboard edit tools create a skill call span and preserve skill attrs", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  const runSpan = createFakeSpan("run");
+  const run = createRunState({ active: true }, 1000, 1000);
+  run.span = runSpan;
+  run.ctx = { ctx: "run" };
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun() {
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    loadSessionSnapshot() {
+      return undefined;
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "s1",
+    ts: 2000,
+    stream: "tool",
+    data: {
+      name: "edit",
+      toolCallId: "call-dashboard-edit",
+      phase: "start",
+      args: {
+        path: "/home/liurui/dashboard/guance/gen_dba_pro.py",
+        edits: [{ oldText: "a", newText: "b" }],
+      },
+    },
+  });
+
+  const skillSummarySpan = spans.find((span) => span.name === "skill:dashboard");
+  const skillCallSpan = spans.find((span) => span.name === "skill_call:dashboard");
+  const toolSpan = spans.find((span) => span.name === "tool:edit");
+
+  assert.ok(skillSummarySpan);
+  assert.ok(skillCallSpan);
+  assert.ok(toolSpan);
+  assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
+  assert.equal(skillSummarySpan.options.attributes.skill_name, "dashboard");
+  assert.equal(skillCallSpan.options.attributes.skill_name, "dashboard");
+  assert.equal(toolSpan.options.attributes.skill_name, "dashboard");
+});
+
+test("tool and skill spans backfill session attrs from the snapshot", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  const runSpan = createFakeSpan("run");
+  const run = createRunState({ active: true }, 1000, 1000);
+  run.span = runSpan;
+  run.ctx = { ctx: "run" };
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun() {
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        sessionId: "sess-1",
+        lastChannel: "cli",
+        mtimeMs: 1,
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "agent:runtime:scope:target",
+    ts: 2000,
+    stream: "tool",
+    data: {
+      name: "read",
+      toolCallId: "call-1",
+      phase: "start",
+      args: {
+        path: "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md",
+      },
+    },
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "agent:runtime:scope:target",
+    ts: 2200,
+    stream: "tool",
+    data: {
+      name: "read",
+      toolCallId: "call-1",
+      phase: "result",
+      result: { ok: true },
+    },
+  });
+
+  const skillSummarySpan = spans.find((span) => span.name === "skill:monitor");
+  const skillCallSpan = spans.find((span) => span.name === "skill_call:monitor");
+  const toolSpan = spans.find((span) => span.name === "tool:read");
+
+  assert.ok(skillSummarySpan);
+  assert.ok(skillCallSpan);
+  assert.ok(toolSpan);
+
+  assert.equal(skillSummarySpan.options.attributes.session_id, "sess-1");
+  assert.equal(skillSummarySpan.options.attributes.session_key, "agent:runtime:scope:target");
+  assert.equal(skillSummarySpan.options.attributes.channel, "cli");
+  assert.equal(skillSummarySpan.options.attributes["gen_ai.session_id"], undefined);
+  assert.equal(skillSummarySpan.options.attributes["gen_ai.agent_channel"], undefined);
+
+  assert.equal(skillCallSpan.attributes.session_id, "sess-1");
+  assert.equal(skillCallSpan.attributes.session_key, "agent:runtime:scope:target");
+  assert.equal(skillCallSpan.attributes.channel, "cli");
+  assert.equal(skillCallSpan.attributes["gen_ai.session_id"], undefined);
+  assert.equal(skillCallSpan.attributes["gen_ai.agent_channel"], undefined);
+
+  assert.equal(toolSpan.attributes.session_id, "sess-1");
+  assert.equal(toolSpan.attributes.session_key, "agent:runtime:scope:target");
+  assert.equal(toolSpan.attributes.channel, "cli");
+  assert.equal(toolSpan.attributes["gen_ai.session_id"], undefined);
+  assert.equal(toolSpan.attributes["gen_ai.agent_channel"], undefined);
 });
 
 test("tool events use transcript tool call mappings when runtime args are absent", () => {
@@ -334,6 +609,9 @@ test("tool events use transcript tool call mappings when runtime args are absent
       return new Date(evt.ts ?? 1000);
     },
     setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
   });
 
   manager.handleAgentEvent({
@@ -426,6 +704,9 @@ test("transcript tool calls can be replayed into tool spans", () => {
       return new Date(evt.ts ?? 1000);
     },
     setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
   });
 
   manager.emitTranscriptToolSpans({ sessionKey: "s1", ts: 2400 });
@@ -433,5 +714,455 @@ test("transcript tool calls can be replayed into tool spans", () => {
   const toolSpan = spans.find((span) => span.name === "tool:exec");
   assert.ok(toolSpan);
   assert.equal(toolSpan.ended, true);
+  assert.equal(toolSpan.options.startTime.getTime(), 2000);
+  assert.equal(toolSpan.endTime.getTime(), 2300);
   assert.equal(run.usedToolNames.has("exec"), true);
+});
+
+test("synthetic model span creates a run when transcript metadata exists", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  let run;
+  const getRunCalls = [];
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun(evt, createIfMissing = false) {
+      getRunCalls.push(createIfMissing);
+      if (!run && createIfMissing) {
+        run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+        run.span = createFakeSpan("agent_run");
+        run.ctx = { ctx: "run" };
+      }
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      throw new Error("not expected");
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 1000,
+        lastAssistantTs: 4000,
+        lastProvider: "openai",
+        lastModel: "gpt-5",
+        lastAssistantUsage: {
+          input: 12,
+          output: 34,
+          totalTokens: 46,
+        },
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.emitSyntheticModelSpan({
+    sessionKey: "s1",
+    ts: 5000,
+    durationMs: 900,
+  });
+
+  const modelSpan = spans.find((span) => span.name === "model_request");
+  assert.ok(modelSpan);
+  assert.deepEqual(getRunCalls, [true]);
+  assert.equal(modelSpan.options.kind, "client");
+  assert.equal(modelSpan.options.attributes["span.kind"], "model");
+  assert.equal(modelSpan.options.attributes.usage_input_tokens, 12);
+  assert.equal(modelSpan.options.attributes.usage_output_tokens, 34);
+  assert.equal(modelSpan.options.attributes.usage_total_tokens, 46);
+  assert.equal(modelSpan.options.attributes["llm.input_tokens"], undefined);
+  assert.equal(modelSpan.parentCtx.ctx, "run");
+  assert.equal(modelSpan.status.code, "OK");
+  assert.equal(run.modelSpanEmitted, true);
+  assert.equal(run.modelSpan, modelSpan);
+  assert.equal(run.mainStartTs, 1000);
+  assert.equal(run.modelStartTs, 1240);
+  assert.equal(run.modelEndTs, 4000);
+});
+
+test("transcript replay backfills run start from transcript timestamps", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  let run;
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun(evt, createIfMissing = false) {
+      if (!run && createIfMissing) {
+        run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+        run.span = createFakeSpan("agent_run");
+        run.ctx = { ctx: "run" };
+      }
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      throw new Error("not expected");
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 1000,
+        lastRunToolCalls: [
+          {
+            callId: "call-1",
+            name: "exec",
+            args: { command: "cat /tmp/demo.txt" },
+            result: { status: "completed" },
+            meta: { status: "completed" },
+            startedAt: 2000,
+            endedAt: 2300,
+          },
+        ],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.emitTranscriptToolSpans({ sessionKey: "s1", ts: 10000 });
+
+  const toolSpan = spans.find((span) => span.name === "tool:exec");
+  assert.ok(toolSpan);
+  assert.equal(run.mainStartTs, 1000);
+  assert.equal(toolSpan.options.startTime.getTime(), 2000);
+  assert.equal(toolSpan.endTime.getTime(), 2300);
+});
+
+test("transcript model spans are replayed per assistant turn", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  let run;
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun(evt, createIfMissing = false) {
+      if (!run && createIfMissing) {
+        run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+        run.span = createFakeSpan("agent_run");
+        run.ctx = { ctx: "run" };
+      }
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      throw new Error("not expected");
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 1000,
+        lastChannel: "chat",
+        lastProvider: "openai",
+        lastModel: "gpt-5",
+        lastRunAssistantTurns: [
+          {
+            startedAt: 1000,
+            endedAt: 2000,
+            provider: "openai",
+            model: "gpt-5",
+            inputPreview: "first question",
+            thinking: "first reasoning",
+            text: "first answer",
+            outputPreview: "first answer",
+            outputKind: "text",
+          },
+          {
+            startedAt: 2300,
+            endedAt: 2600,
+            provider: "openai",
+            model: "gpt-5",
+            inputPreview: "{\"status\":\"ok\"}",
+            thinking: "second reasoning",
+            text: "second answer",
+            outputPreview: "second answer",
+            outputKind: "text",
+          },
+        ],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  const emitted = manager.emitTranscriptModelSpans({ sessionKey: "s1", ts: 3000 });
+
+  assert.equal(emitted, true);
+  assert.equal(run.mainStartTs, 1000);
+  const modelSpans = spans.filter((span) => span.name === "model_request");
+  assert.equal(modelSpans.length, 2);
+  assert.equal(spans.some((span) => span.name === "thinking"), false);
+  assert.equal(modelSpans[0].options.startTime.getTime(), 1000);
+  assert.equal(modelSpans[0].endTime.getTime(), 2000);
+  assert.equal(modelSpans[0].options.attributes.input_preview, "first question");
+  assert.equal(modelSpans[0].options.attributes.output_preview, "first answer");
+  assert.equal(modelSpans[0].options.attributes.output_summary, "first reasoning");
+  assert.equal(modelSpans[1].options.startTime.getTime(), 2300);
+  assert.equal(modelSpans[1].endTime.getTime(), 2600);
+  assert.equal(modelSpans[1].options.attributes.input_preview, "{\"status\":\"ok\"}");
+  assert.equal(modelSpans[1].options.attributes.output_preview, "second answer");
+  assert.equal(modelSpans[1].options.attributes.output_summary, "second reasoning");
+});
+
+test("transcript model replay only appends turns that were not emitted yet", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  let run;
+  let snapshotTurns = [
+    {
+      startedAt: 1000,
+      endedAt: 2000,
+      provider: "openai",
+      model: "gpt-5",
+      inputPreview: "first question",
+      outputPreview: "first answer",
+      outputKind: "text",
+    },
+  ];
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun(evt, createIfMissing = false) {
+      if (!run && createIfMissing) {
+        run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+        run.span = createFakeSpan("agent_run");
+        run.ctx = { ctx: "run" };
+      }
+      return run;
+    },
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      throw new Error("not expected");
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 1000,
+        lastProvider: "openai",
+        lastModel: "gpt-5",
+        lastRunAssistantTurns: snapshotTurns,
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  assert.equal(manager.emitTranscriptModelSpans({ sessionKey: "s1", ts: 3000 }), true);
+  snapshotTurns = [
+    ...snapshotTurns,
+    {
+      startedAt: 2300,
+      endedAt: 2600,
+      provider: "openai",
+      model: "gpt-5",
+      inputPreview: "{\"status\":\"ok\"}",
+      outputPreview: "second answer",
+      outputKind: "text",
+    },
+  ];
+  assert.equal(manager.emitTranscriptModelSpans({ sessionKey: "s1", ts: 4000 }), true);
+
+  const modelSpans = spans.filter((span) => span.name === "model_request");
+  assert.equal(modelSpans.length, 2);
+  assert.equal(run.transcriptAssistantTurnsEmitted, 2);
+  assert.equal(modelSpans[0].options.startTime.getTime(), 1000);
+  assert.equal(modelSpans[1].options.startTime.getTime(), 2300);
+});
+
+test("transcript model spans do not inherit session output preview without turn text", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  let run;
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun(evt, createIfMissing = false) {
+      if (!run && createIfMissing) {
+        run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+        run.span = createFakeSpan("agent_run");
+        run.ctx = { ctx: "run" };
+      }
+      return run;
+    },
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      throw new Error("not expected");
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 1000,
+        lastAssistantText: "final answer",
+        lastAssistantThinking: "final reasoning",
+        lastProvider: "openai",
+        lastModel: "gpt-5",
+        lastRunAssistantTurns: [
+          {
+            startedAt: 1000,
+            endedAt: 2000,
+            provider: "openai",
+            model: "gpt-5",
+            inputPreview: "search result payload",
+            outputPreview: undefined,
+            outputKind: undefined,
+          },
+        ],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.emitTranscriptModelSpans({ sessionKey: "s1", ts: 3000 });
+
+  const modelSpan = spans.find((span) => span.name === "model_request");
+  assert.ok(modelSpan);
+  assert.equal(modelSpan.options.attributes.input_preview, "search result payload");
+  assert.equal("output_preview" in modelSpan.options.attributes, false);
+  assert.equal("output_summary" in modelSpan.options.attributes, false);
 });

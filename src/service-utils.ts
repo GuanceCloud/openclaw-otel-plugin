@@ -13,6 +13,7 @@ const REASONING_PREVIEW_LIMIT = 360;
 
 export const MIN_VISIBLE_CHILD_MS = 120;
 export const MIN_VISIBLE_MODEL_MS = 800;
+export const MAX_OPENCLAW_THINKING_MS = 1500;
 
 export function redactSensitiveText(text: string): string {
   return text;
@@ -38,8 +39,16 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
     startedAt,
     lastTouchedAt: startedAt,
     mainStartTs,
+    orchestrationCursorTs: mainStartTs,
+    channelIngressEmitted: false,
+    dispatchQueueEmitted: false,
+    sessionProcessingEmitted: false,
+    channelEgressEmitted: false,
     modelSpanEmitted: false,
     thinkingSpanEmitted: false,
+    transcriptAssistantTurnsEmitted: 0,
+    transcriptToolCallIds: new Set<string>(),
+    finalAttrsApplied: false,
     aggregate: createRunAggregate(),
     usedSkillNames: new Set<string>(),
     usedToolNames: new Set<string>(),
@@ -52,12 +61,48 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
   };
 }
 
+export function resolveIngressLifecycleWindows(
+  ingressStartTs: number,
+  processingStartTs?: number,
+): {
+  ingressEndTs: number;
+  queueStartTs?: number;
+  queueEndTs?: number;
+} {
+  const ingressEndTs = typeof processingStartTs === "number"
+    ? Math.max(Math.min(ingressStartTs + MIN_VISIBLE_CHILD_MS, processingStartTs), ingressStartTs + 1)
+    : ingressStartTs + MIN_VISIBLE_CHILD_MS;
+  if (typeof processingStartTs !== "number" || processingStartTs <= ingressEndTs) {
+    return { ingressEndTs };
+  }
+  return {
+    ingressEndTs,
+    queueStartTs: ingressEndTs,
+    queueEndTs: processingStartTs,
+  };
+}
+
 export function eventTime(ts: number): Date {
   return new Date(ts);
 }
 
 export function endTimeFromStart(startTs: number, durationMs: number): Date {
   return new Date(startTs + Math.max(durationMs, 1));
+}
+
+export function resolveOpenClawThinkingDurationMs(
+  modelWindowMs: number,
+  requestedDurationMs?: number,
+): number {
+  const boundedModelWindowMs = Math.max(modelWindowMs, MIN_VISIBLE_CHILD_MS);
+  const maxDurationMs = Math.min(
+    MAX_OPENCLAW_THINKING_MS,
+    Math.max(MIN_VISIBLE_CHILD_MS, Math.floor(boundedModelWindowMs / 4)),
+  );
+  const preferredDurationMs = typeof requestedDurationMs === "number"
+    ? requestedDurationMs
+    : maxDurationMs;
+  return Math.max(MIN_VISIBLE_CHILD_MS, Math.min(preferredDurationMs, maxDurationMs));
 }
 
 export function resolveSpanWindow(
@@ -152,6 +197,32 @@ function promoteAlias(
   }
 }
 
+function mirrorAlias(
+  target: Record<string, string | number | boolean | undefined>,
+  aliasKey: string,
+  ...sourceKeys: string[]
+) {
+  let value = target[aliasKey];
+  if (value === undefined || value === "") {
+    for (const sourceKey of sourceKeys) {
+      const sourceValue = target[sourceKey];
+      if (sourceValue !== undefined && sourceValue !== "") {
+        value = sourceValue;
+        target[aliasKey] = sourceValue;
+        break;
+      }
+    }
+  }
+  if (value === undefined || value === "") {
+    return;
+  }
+  for (const sourceKey of sourceKeys) {
+    if (target[sourceKey] === undefined || target[sourceKey] === "") {
+      target[sourceKey] = value;
+    }
+  }
+}
+
 function promotePrefixedKeys(
   target: Record<string, string | number | boolean | undefined>,
   prefix: string,
@@ -173,13 +244,43 @@ function promotePrefixedKeys(
   }
 }
 
-function withCanonicalAliases(
+function flattenGenAiKey(key: string): string {
+  if (!key.startsWith("gen_ai.")) {
+    return key;
+  }
+  const suffix = key.slice("gen_ai.".length);
+  return `gen_ai.${suffix.replaceAll(".", "_")}`;
+}
+
+function normalizeGenAiKeys(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean | undefined> {
   const next = { ...attrs };
+  for (const [key, value] of Object.entries({ ...next })) {
+    if (!key.startsWith("gen_ai.") || value === undefined || value === "") {
+      continue;
+    }
+    const flattened = flattenGenAiKey(key);
+    if (flattened === key) {
+      continue;
+    }
+    if (!(flattened in next)) {
+      next[flattened] = value;
+    }
+    delete next[key];
+  }
+  return next;
+}
+
+function withCanonicalAliases(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean | undefined> {
+  const next = normalizeGenAiKeys(attrs);
   promotePrefixedKeys(next, "openclaw.tool.", "tool_");
   promoteAlias(next, "session_id", "openclaw.sessionId");
   promoteAlias(next, "session_key", "openclaw.sessionKey");
+  delete next["openclaw.sessionId"];
+  delete next["openclaw.sessionKey"];
   const sessionKeyParts = parseSessionKey(
     typeof next.session_key === "string" ? next.session_key : undefined,
   );
@@ -205,29 +306,173 @@ function withCanonicalAliases(
   promoteAlias(next, "session_cwd", "openclaw.session.cwd");
   promoteAlias(next, "source_app", "openclaw.session.origin.provider");
   promoteAlias(next, "entry_point", "openclaw.session.origin.surface");
-  promoteAlias(next, "model_provider", "openclaw.provider");
-  promoteAlias(next, "model_name", "openclaw.model");
-  promoteAlias(next, "input_tokens", "openclaw.tokens.input");
-  promoteAlias(next, "output_tokens", "openclaw.tokens.output");
-  promoteAlias(next, "total_tokens", "openclaw.tokens.total");
-  promoteAlias(next, "skill_call_id", "openclaw.skill.call_id");
-  promoteAlias(next, "skill_name", "openclaw.skill.name");
-  promoteAlias(next, "skill_type", "openclaw.skill.kind");
-  promoteAlias(next, "skill_source", "openclaw.skill.source");
+  promoteAlias(next, "provider_name", "openclaw.provider", "llm.provider");
+  promoteAlias(next, "request_model", "openclaw.model", "llm.model");
+  promoteAlias(next, "response_model", "openclaw.model", "llm.model");
+  if (next.response_model === undefined || next.response_model === "") {
+    next.response_model = next.request_model;
+  }
+  promoteAlias(next, "input_preview", "openclaw.input.preview");
+  promoteAlias(next, "input_length", "openclaw.input.length");
+  promoteAlias(next, "output_preview", "openclaw.output.preview");
+  promoteAlias(next, "output_length", "openclaw.output.length");
+  promoteAlias(next, "usage_input_tokens", "openclaw.tokens.input", "llm.input_tokens");
+  promoteAlias(next, "usage_output_tokens", "openclaw.tokens.output", "llm.output_tokens");
+  promoteAlias(next, "usage_total_tokens", "openclaw.tokens.total", "llm.total_tokens");
+  promoteAlias(next, "usage_cache_read_input_tokens", "openclaw.tokens.cache_read");
+  promoteAlias(next, "usage_cache_write_input_tokens", "openclaw.tokens.cache_write");
+  delete next["llm.provider"];
+  delete next["llm.model"];
+  delete next["llm.input_tokens"];
+  delete next["llm.output_tokens"];
+  delete next["llm.total_tokens"];
+  delete next["openclaw.provider"];
+  delete next["openclaw.model"];
+  delete next["openclaw.input.preview"];
+  delete next["openclaw.input.length"];
+  delete next["openclaw.output.preview"];
+  delete next["openclaw.output.length"];
+  delete next["openclaw.tokens.input"];
+  delete next["openclaw.tokens.output"];
+  delete next["openclaw.tokens.total"];
+  delete next["openclaw.tokens.cache_read"];
+  delete next["openclaw.tokens.cache_write"];
+  promoteAlias(next, "output_kind", "openclaw.output.kind", "output.kind");
+  promoteAlias(next, "state", "openclaw.state", "state");
+  promoteAlias(next, "prev_state", "openclaw.prevState", "prevState", "prev_state");
+  promoteAlias(next, "reason", "openclaw.reason", "reason");
+  promoteAlias(next, "queue_depth", "openclaw.queueDepth", "queueDepth", "queue_depth");
+  promoteAlias(next, "runtime_phase", "openclaw.runtime.phase", "runtime.phase");
+  promoteAlias(next, "skill_count", "skill.count", "skill_count");
+  promoteAlias(next, "session_create_at", "session_create_time", "gen_ai.session_create_time");
+  promoteAlias(next, "session_created_at", "session.createdAt");
+  promoteAlias(next, "session_updated_at", "session.updatedAt", "session_update_time");
+  promoteAlias(next, "session_chat_type", "session.chatType");
+  promoteAlias(next, "session_file", "session.file");
+  mirrorAlias(next, "skill_call_id", "openclaw.skill.call_id");
+  mirrorAlias(next, "skill_name", "openclaw.skill.name");
+  mirrorAlias(next, "skill_type", "openclaw.skill.kind");
+  mirrorAlias(next, "skill_source", "openclaw.skill.source");
   promoteAlias(next, "final_status", "openclaw.outcome", "openclaw.final_state");
+  return next;
+}
+
+function stripOpenClawNamespace(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean | undefined> {
+  const next = { ...attrs };
+  for (const [key, value] of Object.entries({ ...next })) {
+    if (!key.startsWith("openclaw.") || value === undefined || value === "") {
+      continue;
+    }
+    const strippedKey = key.slice("openclaw.".length);
+    if (!strippedKey) {
+      delete next[key];
+      continue;
+    }
+    if (next[strippedKey] === undefined || next[strippedKey] === "") {
+      next[strippedKey] = value;
+    }
+    delete next[key];
+  }
   return next;
 }
 
 export function stringAttrs(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean> {
+  const withGlobalRuntime = {
+    agent_runtime: "openclaw",
+    ...attrs,
+  };
   return Object.fromEntries(
-    Object.entries(withCanonicalAliases(attrs))
+    Object.entries(stripOpenClawNamespace(withCanonicalAliases(withGlobalRuntime)))
       .filter(([key, value]) => key !== "trace_id" && value !== undefined && value !== "")
       .map(([key, value]) => [
         key,
         typeof value === "string" ? stripAnsiEscapeCodes(value) : value,
       ]),
+  ) as Record<string, string | number | boolean>;
+}
+
+const LEGACY_TRACE_CONTEXT_KEYS = new Set([
+  "skill.call_id",
+  "skill.name",
+  "skill.kind",
+  "skill.source",
+  "output.kind",
+  "prevState",
+  "queueDepth",
+  "runtime.phase",
+  "skill.count",
+  "tool.call_id",
+  "tool.name",
+  "tool.target",
+  "tool.command",
+  "tool.phase",
+  "tool.outcome",
+  "session.createdAt",
+  "session_update_time",
+  "session.chatType",
+  "session.file",
+  "gen_ai.agent_id",
+  "gen_ai.agent_name",
+  "gen_ai.agent_runtime",
+  "gen_ai.agent_channel",
+  "gen_ai.session_id",
+  "gen_ai.session_key",
+  "gen_ai.session_namespace",
+  "gen_ai.session_agent",
+  "gen_ai.session_channel",
+  "gen_ai.session_scope",
+  "gen_ai.session_channel_target",
+  "gen_ai.session_cwd",
+  "gen_ai.origin_provider",
+  "gen_ai.origin_surface",
+  "gen_ai.tool_call_id",
+  "gen_ai.tool_name",
+  "gen_ai.tool_target",
+  "gen_ai.tool_command",
+  "gen_ai.tool_outcome",
+  "gen_ai.tool_phase",
+  "gen_ai.tool_loop_level",
+  "gen_ai.skill_call_id",
+  "gen_ai.skill_name",
+  "gen_ai.skill_type",
+  "gen_ai.skill_source",
+  "gen_ai.final_status",
+  "gen_ai.agent_version",
+  "gen_ai.runtime_environment",
+  "gen_ai.state",
+  "gen_ai.prev_state",
+  "gen_ai.reason",
+  "gen_ai.queue_depth",
+  "gen_ai.runtime_phase",
+  "gen_ai.tools",
+  "gen_ai.tool_count",
+  "gen_ai.skills",
+  "gen_ai.skill_count",
+  "gen_ai.tool_targets",
+  "gen_ai.tool_commands",
+  "gen_ai.tool_result_statuses",
+  "gen_ai.tool_arg_keys",
+  "gen_ai.tool_args_preview",
+  "gen_ai.tool_meta_preview",
+  "gen_ai.tool_result_preview",
+  "gen_ai.tool_result_status",
+  "gen_ai.session_create_at",
+  "gen_ai.session_created_at",
+  "gen_ai.session_updated_at",
+  "gen_ai.session_chat_type",
+  "gen_ai.session_file",
+]);
+
+export function traceAttrs(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean> {
+  const normalized = stringAttrs(attrs);
+  return Object.fromEntries(
+    Object.entries(normalized).filter(([key]) => !LEGACY_TRACE_CONTEXT_KEYS.has(key)),
   ) as Record<string, string | number | boolean>;
 }
 
@@ -240,7 +485,7 @@ export function addEvent(span: any, name: string, attrs?: Record<string, string 
   span.addEvent(
     name,
     attrs
-      ? stringAttrs(attrs as Record<string, string | number | boolean | undefined>)
+      ? traceAttrs(attrs as Record<string, string | number | boolean | undefined>)
       : attrs,
   );
 }
@@ -272,6 +517,19 @@ export function clipPreview(text: string | undefined): string | undefined {
     ? `${normalized.slice(0, PREVIEW_LIMIT - 3)}...`
     : normalized;
   return redactSensitiveText(clipped);
+}
+
+export function summarizeToolCallOutput(toolNames: string[]): string | undefined {
+  const normalized = toolNames
+    .map((name) => name.trim())
+    .filter(Boolean);
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  if (normalized.length === 1) {
+    return clipPreview(`toolCall:${normalized[0]}`);
+  }
+  return clipPreview(`toolCall:${normalized.join(",")}`);
 }
 
 export function normalizeUserInputPreview(text: string | undefined): string | undefined {
@@ -409,6 +667,9 @@ export function extractToolTarget(toolName: string, args: unknown, meta: unknown
   if (normalizedToolName === "write" && typeof argsRecord?.path === "string") {
     return argsRecord.path;
   }
+  if (normalizedToolName === "edit" && typeof argsRecord?.path === "string") {
+    return argsRecord.path;
+  }
   if (normalizedToolName === "grep" && typeof argsRecord?.pattern === "string") {
     return argsRecord.pattern;
   }
@@ -513,6 +774,32 @@ export function buildRequestMetricAttrs(
   });
 }
 
+export function buildGenAiAgentRequestMetricAttrs(
+  snapshot: SessionSnapshot | undefined,
+  summaryAttrs?: Record<string, string | number | boolean>,
+) {
+  return stringAttrs({
+    channel: snapshot?.lastChannel,
+    session_id: snapshot?.sessionId,
+    provider_name: snapshot?.lastProvider,
+    request_model: snapshot?.lastModel,
+    session_state:
+      typeof summaryAttrs?.["openclaw.final_state"] === "string"
+        ? summaryAttrs["openclaw.final_state"]
+        : typeof summaryAttrs?.["openclaw.state"] === "string"
+          ? summaryAttrs["openclaw.state"]
+          : undefined,
+    outcome:
+      typeof summaryAttrs?.["openclaw.outcome"] === "string"
+        ? summaryAttrs["openclaw.outcome"]
+        : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
+          ? summaryAttrs["openclaw.final_reason"]
+          : typeof summaryAttrs?.["openclaw.reason"] === "string"
+            ? summaryAttrs["openclaw.reason"]
+            : undefined,
+  });
+}
+
 export function buildToolMetricAttrs(
   tool: Pick<ActiveToolSpan, "name" | "skillName">,
   outcome?: string,
@@ -526,10 +813,38 @@ export function buildToolMetricAttrs(
   });
 }
 
+export function buildGenAiClientToolMetricAttrs(
+  tool: Pick<ActiveToolSpan, "name" | "skillName">,
+  outcome?: string,
+  resultStatus?: string,
+  sessionId?: string,
+) {
+  return stringAttrs({
+    operation_name: "execute_tool",
+    session_id: sessionId,
+    tool_name: tool.name,
+    skill_name: tool.skillName,
+    outcome,
+    tool_result_status: resultStatus,
+  });
+}
+
 export function buildSkillMetricAttrs(skillName: string, source: "runtime" | "transcript") {
   return stringAttrs({
     "openclaw.skill_name": skillName,
     "openclaw.skill_source": source,
+  });
+}
+
+export function buildGenAiAgentSkillMetricAttrs(
+  skillName: string,
+  source: "runtime" | "transcript",
+  sessionId?: string,
+) {
+  return stringAttrs({
+    session_id: sessionId,
+    skill_name: skillName,
+    skill_source: source,
   });
 }
 
@@ -538,6 +853,111 @@ export function buildModelMetricAttrs(provider?: string, model?: string) {
     "openclaw.provider": provider,
     "openclaw.model": model,
   });
+}
+
+export function buildGenAiClientModelMetricAttrs(
+  provider?: string,
+  model?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    operation_name: "chat",
+    provider_name: provider,
+    request_model: model,
+    response_model: model,
+    ...(extra ?? {}),
+  });
+}
+
+export function resolveSessionMetricTotals(snapshot: SessionSnapshot | undefined): {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  traceCount: number;
+} {
+  const usageTotals = snapshot?.sessionUsageTotals;
+  return {
+    inputTokens: usageTotals?.input ?? 0,
+    outputTokens: usageTotals?.output ?? 0,
+    totalTokens: usageTotals?.totalTokens ?? 0,
+    traceCount: snapshot?.traceCount ?? 0,
+  };
+}
+
+export function buildSessionMetricAttrs(
+  snapshot: SessionSnapshot | undefined,
+  sessionKey: string,
+  overrides?: {
+    modelProvider?: string;
+    modelName?: string;
+  },
+) {
+  return stringAttrs({
+    session_id: snapshot?.sessionId,
+    session_key: sessionKey,
+    model_provider: overrides?.modelProvider ?? snapshot?.lastProvider,
+    model_name: overrides?.modelName ?? snapshot?.lastModel,
+  });
+}
+
+export function buildGenAiAgentSessionMetricAttrs(
+  snapshot: SessionSnapshot | undefined,
+  sessionKey: string,
+  overrides?: {
+    modelProvider?: string;
+    modelName?: string;
+    tokenType?: string;
+  },
+) {
+  return stringAttrs({
+    session_id: snapshot?.sessionId,
+    session_key: sessionKey,
+    provider_name: overrides?.modelProvider ?? snapshot?.lastProvider,
+    request_model: overrides?.modelName ?? snapshot?.lastModel,
+    token_type: overrides?.tokenType,
+  });
+}
+
+export function computeSessionMetricDelta(
+  current: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    traceCount: number;
+  },
+  previous?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    traceCount: number;
+  },
+): {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  traceCount: number;
+} {
+  if (!previous) {
+    return current;
+  }
+  return {
+    inputTokens:
+      current.inputTokens >= previous.inputTokens
+        ? current.inputTokens - previous.inputTokens
+        : current.inputTokens,
+    outputTokens:
+      current.outputTokens >= previous.outputTokens
+        ? current.outputTokens - previous.outputTokens
+        : current.outputTokens,
+    totalTokens:
+      current.totalTokens >= previous.totalTokens
+        ? current.totalTokens - previous.totalTokens
+        : current.totalTokens,
+    traceCount:
+      current.traceCount >= previous.traceCount
+        ? current.traceCount - previous.traceCount
+        : current.traceCount,
+  };
 }
 
 export function buildDiagnosticsModelMetricAttrs(
@@ -561,12 +981,31 @@ export function buildDiagnosticsWebhookMetricAttrs(channel?: string, webhook?: s
   });
 }
 
+export function buildGenAiRuntimeWebhookMetricAttrs(channel?: string, webhook?: string) {
+  return stringAttrs({
+    channel,
+    webhook_name: webhook,
+  });
+}
+
 export function buildDiagnosticsMessageMetricAttrs(
   channel?: string,
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
   return stringAttrs({
     "openclaw.channel": channel,
+    ...(extra ?? {}),
+  });
+}
+
+export function buildGenAiRuntimeMessageMetricAttrs(
+  channel?: string,
+  sessionId?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    channel,
+    session_id: sessionId,
     ...(extra ?? {}),
   });
 }
@@ -581,6 +1020,18 @@ export function buildDiagnosticsQueueMetricAttrs(
   });
 }
 
+export function buildGenAiRuntimeQueueMetricAttrs(
+  lane?: string,
+  sessionId?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    queue_name: lane,
+    session_id: sessionId,
+    ...(extra ?? {}),
+  });
+}
+
 export function buildDiagnosticsSessionMetricAttrs(
   state?: string,
   reason?: string,
@@ -589,6 +1040,20 @@ export function buildDiagnosticsSessionMetricAttrs(
   return stringAttrs({
     "openclaw.state": state,
     "openclaw.reason": reason,
+    ...(extra ?? {}),
+  });
+}
+
+export function buildGenAiRuntimeSessionMetricAttrs(
+  state?: string,
+  reason?: string,
+  sessionId?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    session_id: sessionId,
+    session_state: state,
+    outcome: reason,
     ...(extra ?? {}),
   });
 }
@@ -639,6 +1104,20 @@ function inferSkillNameFromSkillPath(text: string | undefined): string | undefin
   return match[1]?.trim();
 }
 
+function inferSkillNameFromContextText(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const normalized = text.trim().replace(/\\/g, "/").toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (/(^|[\/_\-\s])dashboard([\/_\-\s.]|$)/.test(normalized)) {
+    return "dashboard";
+  }
+  return undefined;
+}
+
 export function inferSkillNameFromToolIdentity(
   toolName: string | undefined,
   target?: string,
@@ -648,6 +1127,8 @@ export function inferSkillNameFromToolIdentity(
     inferSkillNameFromTool(toolName)
     ?? inferSkillNameFromSkillPath(target)
     ?? inferSkillNameFromSkillPath(command)
+    ?? inferSkillNameFromContextText(target)
+    ?? inferSkillNameFromContextText(command)
   );
 }
 

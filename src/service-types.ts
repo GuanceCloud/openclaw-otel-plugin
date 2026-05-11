@@ -1,4 +1,6 @@
 export type ActiveRootSpan = {
+  requestKey?: string;
+  sessionIdentity?: string;
   span: any;
   ctx: any;
   startedAt: number;
@@ -49,14 +51,51 @@ export type RunAggregate = {
   lastModel?: string;
 };
 
+export type SessionUsageTotals = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+};
+
 export type ActiveRunSpan = {
+  requestKey?: string;
+  sessionIdentity?: string;
   span: any;
   ctx: any;
   startedAt: number;
   lastTouchedAt: number;
   mainStartTs: number;
+  messageQueuedTs?: number;
+  orchestrationCursorTs?: number;
+  channelIngressEmitted?: boolean;
+  dispatchQueueEmitted?: boolean;
+  sessionProcessingEmitted?: boolean;
+  channelEgressEmitted?: boolean;
+  pendingChannelIngressWindow?: {
+    startTs: number;
+    endTs: number;
+    channel?: string;
+    source?: string;
+  };
+  pendingDispatchQueueWindow?: {
+    startTs: number;
+    endTs: number;
+    channel?: string;
+    source?: string;
+    queueWaitMs?: number;
+  };
+  pendingSessionProcessingWindow?: {
+    startTs: number;
+    endTs: number;
+  };
   modelSpanEmitted: boolean;
   thinkingSpanEmitted?: boolean;
+  transcriptAssistantTurnsEmitted?: number;
+  transcriptToolCallIds?: Set<string>;
+  pendingFinalOutcome?: string;
+  finalAttrsApplied?: boolean;
   usedSkillNames: Set<string>;
   usedToolNames: Set<string>;
   usedToolTargets: Set<string>;
@@ -72,6 +111,7 @@ export type ActiveRunSpan = {
   modelSpan?: any;
   modelCtx?: any;
   modelStartTs?: number;
+  modelEndTs?: number;
   aggregate: RunAggregate;
 };
 
@@ -94,28 +134,55 @@ export type RuntimeMetadata = {
 export type MetricInstruments = {
   requestCounter: any;
   requestDuration: any;
+  genAiAgentRequestCount: any;
+  genAiAgentRequestDuration: any;
+  sessionInputTokensCounter: any;
+  sessionOutputTokensCounter: any;
+  sessionTotalTokensCounter: any;
+  sessionTraceCounter: any;
+  genAiAgentSessionTokenInput: any;
+  genAiAgentSessionTokenOutput: any;
+  genAiAgentSessionTokenTotal: any;
+  genAiAgentSessionTokenUsage: any;
+  genAiAgentSessionTraceCount: any;
   toolCallCounter: any;
   toolErrorCounter: any;
   toolDuration: any;
+  genAiClientOperationDuration: any;
   skillActivationCounter: any;
+  genAiAgentSkillActivationCount: any;
   modelCallCounter: any;
   diagnosticsTokensCounter: any;
+  genAiClientTokenUsage: any;
   diagnosticsCostUsdCounter: any;
   diagnosticsRunDurationMs: any;
   diagnosticsContextTokens: any;
   diagnosticsWebhookReceivedCounter: any;
   diagnosticsWebhookErrorCounter: any;
   diagnosticsWebhookDurationMs: any;
+  genAiRuntimeWebhookReceivedCount: any;
+  genAiRuntimeWebhookErrorCount: any;
+  genAiRuntimeWebhookDuration: any;
   diagnosticsMessageQueuedCounter: any;
   diagnosticsMessageProcessedCounter: any;
   diagnosticsMessageDurationMs: any;
+  genAiRuntimeMessageQueuedCount: any;
+  genAiRuntimeMessageProcessedCount: any;
+  genAiRuntimeMessageDuration: any;
   diagnosticsQueueLaneEnqueueCounter: any;
   diagnosticsQueueLaneDequeueCounter: any;
   diagnosticsQueueDepth: any;
   diagnosticsQueueWaitMs: any;
+  genAiRuntimeQueueEnqueueCount: any;
+  genAiRuntimeQueueDequeueCount: any;
+  genAiRuntimeQueueDepth: any;
+  genAiRuntimeQueueWait: any;
   diagnosticsSessionStateCounter: any;
+  genAiRuntimeSessionStateCount: any;
   diagnosticsSessionStuckCounter: any;
   diagnosticsSessionStuckAgeMs: any;
+  genAiRuntimeSessionStuckCount: any;
+  genAiRuntimeSessionStuckAge: any;
   diagnosticsRunAttemptCounter: any;
 };
 
@@ -130,10 +197,23 @@ export type TranscriptToolCall = {
   endedAt?: number;
 };
 
+export type TranscriptAssistantTurn = {
+  startedAt?: number;
+  endedAt?: number;
+  provider?: string;
+  model?: string;
+  inputPreview?: string;
+  thinking?: string;
+  text?: string;
+  outputPreview?: string;
+  outputKind?: string;
+};
+
 export type SessionSnapshot = {
   sessionFile: string;
   sessionKey?: string;
   sessionId?: string;
+  createdAt?: number;
   updatedAt?: number;
   chatType?: string;
   lastChannel?: string;
@@ -145,8 +225,11 @@ export type SessionSnapshot = {
   invokedSkillNames?: string[];
   toolCallSkillNamesById?: Record<string, string>;
   lastRunToolCalls?: TranscriptToolCall[];
+  lastRunAssistantTurns?: TranscriptAssistantTurn[];
   lastUserText?: string;
+  lastUserTs?: number;
   lastAssistantText?: string;
+  lastAssistantTs?: number;
   lastAssistantThinking?: string;
   lastProvider?: string;
   lastModel?: string;
@@ -157,6 +240,8 @@ export type SessionSnapshot = {
     cacheWrite?: number;
     totalTokens?: number;
   };
+  sessionUsageTotals?: SessionUsageTotals;
+  traceCount?: number;
   mtimeMs: number;
 };
 

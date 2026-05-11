@@ -70,6 +70,9 @@ test("transcript skill spans use invoked skills instead of mentioned skills", ()
       return new Date(evt.ts ?? 1000);
     },
     setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
   });
 
   manager.ensureTranscriptSkillSpans({ sessionKey: "s1", ts: 2000 });
