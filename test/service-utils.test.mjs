@@ -6,6 +6,8 @@ import {
   buildGenAiAgentSkillMetricAttrs,
   buildGenAiAgentSessionMetricAttrs,
   buildGenAiClientModelMetricAttrs,
+  buildGenAiClientSkillMetricAttrs,
+  buildGenAiClientToolMetricAttrs,
   buildGenAiRuntimeMessageMetricAttrs,
   buildGenAiRuntimeQueueMetricAttrs,
   buildGenAiRuntimeSessionMetricAttrs,
@@ -382,11 +384,39 @@ test("buildGenAiClientModelMetricAttrs uses GenAI semantic-style keys", () => {
     token_type: "input",
   });
 
-  assert.equal(attrs.operation_name, "chat");
+  assert.equal(attrs.operation_name, "model");
   assert.equal(attrs.provider_name, "volcengine-plan");
   assert.equal(attrs.request_model, "ark-code-latest");
   assert.equal(attrs.response_model, "ark-code-latest");
   assert.equal(attrs.token_type, "input");
+});
+
+test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
+  const attrs = buildGenAiClientToolMetricAttrs(
+    { name: "exec", skillName: "dashboard" },
+    "completed",
+    "success",
+    "session-1",
+  );
+
+  assert.equal(attrs.operation_name, "tool");
+  assert.equal(attrs.tool_name, "exec");
+  assert.equal(attrs.skill_name, "dashboard");
+  assert.equal(attrs.tool_result_status, "success");
+  assert.equal(attrs.session_id, "session-1");
+});
+
+test("buildGenAiClientSkillMetricAttrs uses skill operation naming", () => {
+  const attrs = buildGenAiClientSkillMetricAttrs(
+    "dashboard",
+    "completed",
+    "session-1",
+  );
+
+  assert.equal(attrs.operation_name, "skill");
+  assert.equal(attrs.skill_name, "dashboard");
+  assert.equal(attrs.skill_source, "runtime");
+  assert.equal(attrs.session_id, "session-1");
 });
 
 test("GenAI agent metric builders preserve session and request semantics", () => {

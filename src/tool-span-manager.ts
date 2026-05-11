@@ -11,6 +11,7 @@ import {
   addEvent,
   buildGenAiAgentSkillMetricAttrs,
   buildGenAiClientModelMetricAttrs,
+  buildGenAiClientSkillMetricAttrs,
   buildGenAiClientToolMetricAttrs,
   buildSkillMetricAttrs,
   buildToolAttrs,
@@ -343,6 +344,15 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     } else {
       invocation.span.setStatus({ code: SpanStatusCode.OK });
     }
+    instruments.genAiClientOperationDuration?.record(
+      Math.max((endTime?.getTime() ?? Date.now()) - invocation.startedAt, 1),
+      buildGenAiClientSkillMetricAttrs(
+        invocation.name,
+        isError ? "error" : "completed",
+        evt.sessionId,
+        invocation.source,
+      ),
+    );
     endSpanSafely(invocation.span, endTime);
     run.skillInvocationSpans.delete(normalizedToolCallId);
   };

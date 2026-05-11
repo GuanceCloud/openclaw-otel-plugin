@@ -555,6 +555,123 @@ test("tool and skill spans backfill session attrs from the snapshot", () => {
   assert.equal(toolSpan.attributes["gen_ai.agent_channel"], undefined);
 });
 
+test("tool completion records separate tool and skill client duration metrics", () => {
+  const spans = [];
+  const durationRecords = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const run = createRunState({ ctx: "root" }, 1000, 1000);
+  run.span = createFakeSpan("agent_run");
+  run.ctx = { ctx: "run" };
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      genAiAgentSkillActivationCount: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+      genAiClientOperationDuration: {
+        record(value, attrs) {
+          durationRecords.push({ value, attrs });
+        },
+      },
+    },
+    getRun() {
+      return run;
+    },
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        sessionId: "sid-1",
+        toolCallSkillNamesById: {
+          "call-1": "dashboard",
+        },
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 1000,
+    stream: "tool",
+    data: {
+      name: "exec",
+      toolCallId: "call-1",
+      phase: "start",
+    },
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 1500,
+    stream: "tool",
+    data: {
+      name: "exec",
+      toolCallId: "call-1",
+      phase: "result",
+      result: { status: "completed" },
+      meta: { status: "completed" },
+    },
+  });
+
+  const simplified = durationRecords.map(({ value, attrs }) => ({
+    value,
+    operation_name: attrs.operation_name,
+    tool_name: attrs.tool_name,
+    skill_name: attrs.skill_name,
+    outcome: attrs.outcome,
+  }));
+  assert.deepEqual(simplified, [
+    {
+      value: 380,
+      operation_name: "tool",
+      tool_name: "exec",
+      skill_name: "dashboard",
+      outcome: "completed",
+    },
+    {
+      value: 380,
+      operation_name: "skill",
+      tool_name: undefined,
+      skill_name: "dashboard",
+      outcome: "completed",
+    },
+  ]);
+});
+
 test("tool events use transcript tool call mappings when runtime args are absent", () => {
   const spans = [];
   const tracer = createFakeTracer(spans);
@@ -818,7 +935,7 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
   assert.equal(run.modelEndTs, 4000);
   assert.equal(durationRecords.length, 1);
   assert.equal(durationRecords[0].value, 2760);
-  assert.equal(durationRecords[0].attrs.operation_name, "chat");
+  assert.equal(durationRecords[0].attrs.operation_name, "model");
   assert.equal(durationRecords[0].attrs.provider_name, "openai");
   assert.equal(durationRecords[0].attrs.request_model, "gpt-5");
   assert.equal(durationRecords[0].attrs.session_id, "sid-1");
@@ -1023,14 +1140,14 @@ test("transcript model spans are replayed per assistant turn", () => {
     [
       {
         value: 1000,
-        operation_name: "chat",
+        operation_name: "model",
         provider_name: "openai",
         request_model: "gpt-5",
         session_id: "sid-1",
       },
       {
         value: 300,
-        operation_name: "chat",
+        operation_name: "model",
         provider_name: "openai",
         request_model: "gpt-5",
         session_id: "sid-1",

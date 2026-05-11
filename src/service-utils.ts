@@ -820,12 +820,27 @@ export function buildGenAiClientToolMetricAttrs(
   sessionId?: string,
 ) {
   return stringAttrs({
-    operation_name: "execute_tool",
+    operation_name: "tool",
     session_id: sessionId,
     tool_name: tool.name,
     skill_name: tool.skillName,
     outcome,
     tool_result_status: resultStatus,
+  });
+}
+
+export function buildGenAiClientSkillMetricAttrs(
+  skillName: string,
+  outcome?: string,
+  sessionId?: string,
+  source: "runtime" | "transcript" = "runtime",
+) {
+  return stringAttrs({
+    operation_name: "skill",
+    session_id: sessionId,
+    skill_name: skillName,
+    skill_source: source,
+    outcome,
   });
 }
 
@@ -861,7 +876,7 @@ export function buildGenAiClientModelMetricAttrs(
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
   return stringAttrs({
-    operation_name: "chat",
+    operation_name: "model",
     provider_name: provider,
     request_model: model,
     response_model: model,

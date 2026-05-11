@@ -53,7 +53,7 @@
 | tag | 含义 |
 | --- | --- |
 | `agent_runtime` | Agent/runtime 来源标识，当前内置为 `openclaw`，后续可扩展为 `hermes` 等 |
-| `operation_name` | 操作类型，当前主要为 `chat`、`execute_tool` |
+| `operation_name` | 操作类型，当前主要为 `model`、`tool`、`skill` |
 | `provider_name` | 模型提供方 |
 | `request_model` | 请求模型名 |
 | `response_model` | 响应模型名 |
@@ -77,8 +77,8 @@
 
 | 指标名 | 类型 | 单位 | tags | 描述 |
 | --- | --- | --- | --- | --- |
-| `gen_ai.client.token.usage` | Counter | 保持当前 | `agent_runtime`, `operation_name`, `provider_name`, `request_model`, `response_model`, `token_type` | 模型 token 用量。通过 `token_type=input|output|total` 区分口径。 |
-| `gen_ai.client.operation.duration` | Histogram | `ms` | `agent_runtime`, `operation_name`, `outcome`；当 `operation_name=chat` 时还带 `provider_name`, `request_model`, `response_model`；当 `operation_name=execute_tool` 时还带 `tool_name`, `skill_name`, `tool_result_status` | Client 侧操作耗时。当前覆盖模型请求与工具执行两类操作。 |
+| `gen_ai.client.token.usage` | Counter | 保持当前 | `agent_runtime`, `operation_name`, `provider_name`, `request_model`, `response_model`, `token_type` | 模型 token 用量。当前 `operation_name=model`，通过 `token_type=input|output|total` 区分口径。 |
+| `gen_ai.client.operation.duration` | Histogram | `ms` | `agent_runtime`, `operation_name`, `outcome`；当 `operation_name=model` 时还带 `provider_name`, `request_model`, `response_model`；当 `operation_name=tool` 时还带 `tool_name`, `skill_name`, `tool_result_status`；当 `operation_name=skill` 时还带 `skill_name`, `skill_source` | Client 侧操作耗时。当前覆盖模型请求、工具执行和 skill 调用三类操作。 |
 
 ### GenAI Agent
 
