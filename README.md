@@ -3,7 +3,7 @@
 [中文说明](./README_ZH.md)
 [Changelog](./CHANGELOG.md)
 
-`openclaw-otel-plugin` exports OpenClaw runtime and diagnostics data to any OTLP HTTP/protobuf receiver. It turns session activity into traces, adds plugin-level metrics, mirrors built-in OpenClaw diagnostics metrics, and can optionally mirror diagnostics events to OTEL logs.
+`openclaw-otel-plugin` exports OpenClaw runtime and diagnostics data to any OTLP HTTP/protobuf receiver. It turns session activity into traces, emits the current recommended `gen_ai.*` metrics, and can optionally mirror diagnostics events to OTEL logs.
 
 ## What It Exports
 
@@ -16,7 +16,7 @@
 - Skill summary spans such as `skill:<name>`
 - Skill call spans such as `skill_call:<name>`
 - Tool spans such as `tool:<name>`
-- Diagnostic spans such as `openclaw.session.stuck`, `openclaw.webhook.received`, `openclaw.webhook.processed`, `openclaw.webhook.error`, and `tool.loop`
+- Diagnostic spans for webhook, session health, and tool-loop related events
 
 Trace notes:
 
@@ -26,40 +26,29 @@ Trace notes:
 
 ### Metrics
 
-Plugin-added metrics:
+Recommended metric namespaces:
 
-- `openclaw.requests`
-- `openclaw.request.duration`
-- `openclaw.session.tokens.input`
-- `openclaw.session.tokens.output`
-- `openclaw.session.tokens.total`
-- `openclaw.session.traces`
-- `openclaw.tool.calls`
-- `openclaw.tool.errors`
-- `openclaw.tool.duration`
-- `openclaw.skill.activations`
-- `openclaw.model.calls`
+- `gen_ai.client.*`
+- `gen_ai.agent.*`
+- `gen_ai.runtime.*`
 
-Mirrored diagnostics metrics:
+Common metrics include:
 
-- `openclaw.tokens`
-- `openclaw.cost.usd`
-- `openclaw.run.duration_ms`
-- `openclaw.context.tokens`
-- `openclaw.webhook.received`
-- `openclaw.webhook.error`
-- `openclaw.webhook.duration_ms`
-- `openclaw.message.queued`
-- `openclaw.message.processed`
-- `openclaw.message.duration_ms`
-- `openclaw.queue.lane.enqueue`
-- `openclaw.queue.lane.dequeue`
-- `openclaw.queue.depth`
-- `openclaw.queue.wait_ms`
-- `openclaw.session.state`
-- `openclaw.session.stuck`
-- `openclaw.session.stuck_age_ms`
-- `openclaw.run.attempt`
+- `gen_ai.client.token.usage`
+- `gen_ai.client.operation.duration`
+- `gen_ai.agent.request.count`
+- `gen_ai.agent.request.duration`
+- `gen_ai.agent.session.token.input`
+- `gen_ai.agent.session.token.output`
+- `gen_ai.agent.session.token.total`
+- `gen_ai.agent.session.trace.count`
+- `gen_ai.agent.skill.activation.count`
+- `gen_ai.runtime.message.*`
+- `gen_ai.runtime.queue.*`
+- `gen_ai.runtime.session.*`
+- `gen_ai.runtime.webhook.*`
+
+See [docs/gen-ai-metrics.md](./docs/gen-ai-metrics.md) for the full metric catalog.
 
 ### Logs
 
@@ -93,12 +82,48 @@ Compatibility notes:
 
 ## Install
 
+The recommended path is to install a prebuilt release package so the target machine does not need a local Node.js build toolchain.
+
+For build, packaging, source install, and release workflow, see [BUILDING.md](./BUILDING.md).
+
+### Option 1: Install From GitHub Release
+
 ```bash
-cd ~/.openclaw/extensions
-git clone https://github.com/GuanceDemo/openclaw-otel-plugin.git
+git clone https://github.com/GuanceCloud/openclaw-otel-plugin.git
 cd openclaw-otel-plugin
-npm install
-npm run build
+bash scripts/install.sh latest
+```
+
+Install a specific version:
+
+```bash
+bash scripts/install.sh v0.1.0
+```
+
+### Option 2: Install From A Local Release Artifact
+
+```bash
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.1.0.tar.gz
+```
+
+## Update
+
+Updates reuse the same installer and replace the plugin directory in place. By default the script downloads the latest release:
+
+```bash
+bash scripts/update.sh
+```
+
+Update to a specific version:
+
+```bash
+bash scripts/update.sh v0.1.0
+```
+
+Install files without restarting the gateway immediately:
+
+```bash
+bash scripts/update.sh latest --no-restart
 ```
 
 ## Configure
@@ -217,22 +242,6 @@ Notes:
 - `logsEnabled` must be `true` if you want diagnostics logs
 - `headers.X-Token` should be a Dataway client token
 
-## Development
-
-```bash
-npm run build
-npm test
-openclaw gateway restart
-```
-
-For local development with rebuild + restart:
-
-```bash
-npm run dev
-```
-
-`npm run dev` watches `index.ts`, `src/`, and `openclaw.plugin.json`, then runs build and gateway restart automatically.
-
 ## Verification
 
 Check gateway logs:
@@ -269,13 +278,13 @@ Then send a test message in OpenClaw and query by:
 - Root and run spans are intentionally separate. The root span models the inbound request envelope, while `agent_run` models the agent execution lifecycle.
 - When fine-grained runtime events are missing, the plugin can replay transcript state to backfill `thinking`, model, and tool spans.
 - The plugin periodically scans active sessions on the `flushIntervalMs` cadence (default `30s`); session metrics are emitted as scan-time deltas and carry `session_id` as a metric tag.
-- `openclaw.session.tokens.*` and `openclaw.session.traces` represent session-level cumulative totals instead of being tied to individual run completion.
-- `openclaw.session.tokens.*` is accumulated from runtime `model.usage` events first, so it does not depend on transcript `message.usage` being persisted.
+- `gen_ai.agent.session.token.*` and `gen_ai.agent.session.trace.count` represent session-level cumulative totals instead of being tied to individual run completion.
+- `gen_ai.agent.session.token.*` is accumulated from runtime `model.usage` events first, so it does not depend on transcript `message.usage` being persisted.
 - Skill attribution prefers runtime tool identity, then falls back to session skill snapshots, transcript content, and local skill catalogs under `~/.openclaw/workspace/skills`
 - Transcript-derived skill spans prefer actually invoked skills over merely mentioned skills
 - If no skill identity can be inferred, the plugin will keep tool spans without fabricating a generic skill span.
 - Tool loop diagnostics are attached to the active tool span when possible; critical loops mark the tool span as error
-- Canonical aliases such as `session_id`, `session_key`, `tool_name`, `tool_call_id`, `model_provider`, and `model_name` are emitted for easier querying
+- Canonical query fields such as `session_id`, `session_key`, `tool_name`, `tool_call_id`, `provider_name`, and `request_model` are emitted for easier querying
 
 ## Common Issues
 

@@ -3,7 +3,7 @@
 [English](./README.md)
 [变更记录](./CHANGELOG.md)
 
-`openclaw-otel-plugin` 用于把 OpenClaw 的运行时事件和诊断事件导出到任意兼容 `OTLP HTTP/protobuf` 的接收端。它会把会话过程整理成 trace，补充插件侧 metrics，镜像 OpenClaw 内建 diagnostics metrics，并可选地把 diagnostics 事件同步为 OTEL logs。
+`openclaw-otel-plugin` 用于把 OpenClaw 的运行时事件和诊断事件导出到任意兼容 `OTLP HTTP/protobuf` 的接收端。它会把会话过程整理成 trace，上报当前推荐的 `gen_ai.*` 指标，并可选地把 diagnostics 事件同步为 OTEL logs。
 
 ## 导出内容
 
@@ -16,7 +16,7 @@
 - Skill 汇总 span，例如 `skill:<name>`
 - Skill 调用 span，例如 `skill_call:<name>`
 - Tool span，例如 `tool:<name>`
-- 诊断 span，例如 `openclaw.session.stuck`、`openclaw.webhook.received`、`openclaw.webhook.processed`、`openclaw.webhook.error`、`tool.loop`
+- 诊断类 span，例如 webhook、session 健康和 tool loop 相关事件
 
 Trace 说明：
 
@@ -26,40 +26,29 @@ Trace 说明：
 
 ### Metrics
 
-插件补充指标：
+当前推荐使用的指标命名空间：
 
-- `openclaw.requests`
-- `openclaw.request.duration`
-- `openclaw.session.tokens.input`
-- `openclaw.session.tokens.output`
-- `openclaw.session.tokens.total`
-- `openclaw.session.traces`
-- `openclaw.tool.calls`
-- `openclaw.tool.errors`
-- `openclaw.tool.duration`
-- `openclaw.skill.activations`
-- `openclaw.model.calls`
+- `gen_ai.client.*`
+- `gen_ai.agent.*`
+- `gen_ai.runtime.*`
 
-镜像 diagnostics 指标：
+常用指标包括：
 
-- `openclaw.tokens`
-- `openclaw.cost.usd`
-- `openclaw.run.duration_ms`
-- `openclaw.context.tokens`
-- `openclaw.webhook.received`
-- `openclaw.webhook.error`
-- `openclaw.webhook.duration_ms`
-- `openclaw.message.queued`
-- `openclaw.message.processed`
-- `openclaw.message.duration_ms`
-- `openclaw.queue.lane.enqueue`
-- `openclaw.queue.lane.dequeue`
-- `openclaw.queue.depth`
-- `openclaw.queue.wait_ms`
-- `openclaw.session.state`
-- `openclaw.session.stuck`
-- `openclaw.session.stuck_age_ms`
-- `openclaw.run.attempt`
+- `gen_ai.client.token.usage`
+- `gen_ai.client.operation.duration`
+- `gen_ai.agent.request.count`
+- `gen_ai.agent.request.duration`
+- `gen_ai.agent.session.token.input`
+- `gen_ai.agent.session.token.output`
+- `gen_ai.agent.session.token.total`
+- `gen_ai.agent.session.trace.count`
+- `gen_ai.agent.skill.activation.count`
+- `gen_ai.runtime.message.*`
+- `gen_ai.runtime.queue.*`
+- `gen_ai.runtime.session.*`
+- `gen_ai.runtime.webhook.*`
+
+完整指标清单见 [docs/gen-ai-metrics.md](./docs/gen-ai-metrics.md)。
 
 ### Logs
 
@@ -93,12 +82,48 @@ Trace 说明：
 
 ## 安装
 
+推荐直接安装 release 包，不要求目标机器具备 Node.js 构建环境。
+
+构建、打包、源码安装和发布流程见 [BUILDING.md](./BUILDING.md)。
+
+### 方式一：安装 GitHub Release
+
 ```bash
-cd ~/.openclaw/extensions
-git clone https://github.com/GuanceDemo/openclaw-otel-plugin.git
+git clone https://github.com/GuanceCloud/openclaw-otel-plugin.git
 cd openclaw-otel-plugin
-npm install
-npm run build
+bash scripts/install.sh latest
+```
+
+也可以安装指定版本：
+
+```bash
+bash scripts/install.sh v0.1.0
+```
+
+### 方式二：安装本地打包产物
+
+```bash
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.1.0.tar.gz
+```
+
+## 升级
+
+升级逻辑和安装一致，默认拉取最新 release 并覆盖安装目录：
+
+```bash
+bash scripts/update.sh
+```
+
+指定版本升级：
+
+```bash
+bash scripts/update.sh v0.1.0
+```
+
+如果只想安装文件、不立即重启 gateway：
+
+```bash
+bash scripts/update.sh latest --no-restart
 ```
 
 ## 配置
@@ -217,22 +242,6 @@ resource attributes 合并顺序：
 - 要导出 diagnostics logs 时必须设置 `logsEnabled=true`
 - `headers.X-Token` 应使用 Dataway `client_token`
 
-## 开发
-
-```bash
-npm run build
-npm test
-openclaw gateway restart
-```
-
-本地开发可直接使用：
-
-```bash
-npm run dev
-```
-
-`npm run dev` 会监听 `index.ts`、`src/` 和 `openclaw.plugin.json`，检测变更后自动重新 build 并重启 gateway。
-
 ## 验证
 
 查看网关日志：
@@ -269,13 +278,13 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 - root 和 run 是两层有意分开的会话级 span：前者表示请求入口，后者表示 `agent_run` 执行生命周期
 - 当运行时缺少细粒度事件时，插件会回放 transcript 状态来补 `thinking`、model 和 tool spans
 - 插件会在启动后开始对激活中的 session 做周期扫描，按 `flushIntervalMs` 周期继续扫描，默认周期是 `30s`；session 指标按扫描结果增量上报，并带上 `session_id` tag
-- `openclaw.session.tokens.*` 和 `openclaw.session.traces` 统计的是 session 级累计值，不再绑定单次 run 结束时机
-- `openclaw.session.tokens.*` 的累计值优先来自运行时 `model.usage` 事件，不依赖 transcript 中的 `message.usage` 是否落盘
+- `gen_ai.agent.session.token.*` 和 `gen_ai.agent.session.trace.count` 统计的是 session 级累计值，不再绑定单次 run 结束时机
+- `gen_ai.agent.session.token.*` 的累计值优先来自运行时 `model.usage` 事件，不依赖 transcript 中的 `message.usage` 是否落盘
 - Skill 归因优先使用运行时 tool 身份，其次回退到会话技能快照、transcript 内容和 `~/.openclaw/workspace/skills` 下的本地技能目录
 - transcript 推导 skill 时，优先使用“实际调用过的 skill”，而不是只在文本里提到过的 skill
 - 如果无法推导出 skill 身份，插件会保留 tool spans，但不会凭空制造一个通用 skill span
 - `tool.loop` 事件如果能命中活跃 tool span，会直接回写到该 tool span；`critical` 级别会把 tool span 标记为 error
-- 导出时会补一组便于查询的别名字段，例如 `session_id`、`session_key`、`tool_name`、`tool_call_id`、`model_provider`、`model_name`
+- 导出时统一使用 canonical 查询字段，例如 `session_id`、`session_key`、`tool_name`、`tool_call_id`、`provider_name`、`request_model`
 
 ## 常见问题
 
