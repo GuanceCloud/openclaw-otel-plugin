@@ -34,6 +34,7 @@
 - `provider_name`
 - `request_model`
 - `response_model`
+- `model_name`
 - `token_type`
 - `channel`
 - `session_id`
@@ -57,6 +58,7 @@
 | `provider_name` | 模型提供方 |
 | `request_model` | 请求模型名 |
 | `response_model` | 响应模型名 |
+| `model_name` | 归因模型名，当前主要用于 `operation_name=tool` |
 | `token_type` | token 类型，当前主要为 `input` / `output` / `total` |
 | `channel` | 消息来源通道，例如 `feishu` |
 | `session_id` | OpenClaw session ID |
@@ -78,7 +80,7 @@
 | 指标名 | 类型 | 单位 | tags | 描述 |
 | --- | --- | --- | --- | --- |
 | `gen_ai.client.token.usage` | Counter | 保持当前 | `agent_runtime`, `operation_name`, `provider_name`, `request_model`, `response_model`, `token_type` | 模型 token 用量。当前 `operation_name=model`，通过 `token_type=input|output|total` 区分口径。 |
-| `gen_ai.client.operation.duration` | Histogram | `ms` | `agent_runtime`, `operation_name`, `outcome`；当 `operation_name=model` 时还带 `provider_name`, `request_model`, `response_model`；当 `operation_name=tool` 时还带 `tool_name`, `skill_name`, `tool_result_status`；当 `operation_name=skill` 时还带 `skill_name`, `skill_source` | Client 侧操作耗时。当前覆盖模型请求、工具执行和 skill 调用三类操作。 |
+| `gen_ai.client.operation.duration` | Histogram | `ms` | `agent_runtime`, `operation_name`, `outcome`；当 `operation_name=model` 时还带 `provider_name`, `request_model`, `response_model`；当 `operation_name=tool` 时还带 `tool_name`, `skill_name`, `model_name`, `tool_result_status`；当 `operation_name=skill` 时还带 `skill_name`, `skill_source` | Client 侧操作耗时。当前覆盖模型请求、工具执行和 skill 调用三类操作。 |
 
 ### GenAI Agent
 

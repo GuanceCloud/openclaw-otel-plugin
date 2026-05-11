@@ -14,6 +14,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 - Normalized trace and metric correlation fields to canonical names such as `session_id`, `session_key`, `channel`, `provider_name`, and `request_model`.
 - Removed `gen_ai.*` trace tag alias dual-write and kept canonical query fields only.
 - Changed `gen_ai.client.operation.duration.operation_name` semantics to `model` / `tool` / `skill`, so tool and skill durations can be queried separately.
+- Added `model_name` attribution to `operation_name=tool` so tool metrics can be correlated with the upstream model choice.
 
 ### Session And Tooling Semantics
 

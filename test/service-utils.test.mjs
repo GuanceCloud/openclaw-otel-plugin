@@ -397,11 +397,13 @@ test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
     "completed",
     "success",
     "session-1",
+    "gpt-5",
   );
 
   assert.equal(attrs.operation_name, "tool");
   assert.equal(attrs.tool_name, "exec");
   assert.equal(attrs.skill_name, "dashboard");
+  assert.equal(attrs.model_name, "gpt-5");
   assert.equal(attrs.tool_result_status, "success");
   assert.equal(attrs.session_id, "session-1");
 });

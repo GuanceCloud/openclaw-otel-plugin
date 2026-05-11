@@ -592,11 +592,13 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       isError ? "error" : "completed",
       merged.resultStatus,
     );
+    const snapshot = loadSessionSnapshot(evt.sessionKey);
     const genAiToolMetricAttrs = buildGenAiClientToolMetricAttrs(
       tool,
       isError ? "error" : "completed",
       merged.resultStatus,
       evt.sessionId,
+      run.aggregate.lastModel ?? snapshot?.lastModel,
     );
     instruments.toolCallCounter.add(1, toolMetricAttrs);
     instruments.toolDuration.record(

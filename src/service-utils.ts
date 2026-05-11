@@ -818,12 +818,14 @@ export function buildGenAiClientToolMetricAttrs(
   outcome?: string,
   resultStatus?: string,
   sessionId?: string,
+  modelName?: string,
 ) {
   return stringAttrs({
     operation_name: "tool",
     session_id: sessionId,
     tool_name: tool.name,
     skill_name: tool.skillName,
+    model_name: modelName,
     outcome,
     tool_result_status: resultStatus,
   });
