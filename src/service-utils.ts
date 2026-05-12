@@ -886,6 +886,19 @@ export function buildGenAiClientModelMetricAttrs(
   });
 }
 
+export function buildGenAiAgentTokenMetricAttrs(
+  provider?: string,
+  model?: string,
+  extra?: Record<string, string | number | boolean | undefined>,
+) {
+  return stringAttrs({
+    provider_name: provider,
+    request_model: model,
+    response_model: model,
+    ...(extra ?? {}),
+  });
+}
+
 export function resolveSessionMetricTotals(snapshot: SessionSnapshot | undefined): {
   inputTokens: number;
   outputTokens: number;

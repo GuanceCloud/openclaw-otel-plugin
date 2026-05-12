@@ -34,10 +34,12 @@ Recommended metric namespaces:
 
 Common metrics include:
 
-- `gen_ai.client.token.usage`
-- `gen_ai.client.operation.duration`
+- `gen_ai.client.operation.duration` (OTEL-native metric name)
+- `gen_ai.agent.token.usage`
 - `gen_ai.agent.request.count`
 - `gen_ai.agent.request.duration`
+- `gen_ai.agent.operation.count`
+- `gen_ai.agent.operation.duration`
 - `gen_ai.agent.session.token.input`
 - `gen_ai.agent.session.token.output`
 - `gen_ai.agent.session.token.total`
@@ -47,6 +49,11 @@ Common metrics include:
 - `gen_ai.runtime.queue.*`
 - `gen_ai.runtime.session.*`
 - `gen_ai.runtime.webhook.*`
+
+Metric boundary notes:
+
+- `gen_ai.client.*` is reserved for OTEL-native client semantics; the plugin no longer writes custom token or operation metrics there.
+- OpenClaw custom model token and model/tool/skill operation metrics are reported under `gen_ai.agent.token.usage` and `gen_ai.agent.operation.*`.
 
 See [docs/gen-ai-metrics.md](./docs/gen-ai-metrics.md) for the full metric catalog.
 

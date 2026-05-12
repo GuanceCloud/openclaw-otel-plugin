@@ -2,6 +2,15 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-05-12
+
+### OTEL Metric Alignment
+
+- Kept `gen_ai.client.token.usage` and `gen_ai.client.operation.duration` as OTEL-native metric names in documentation only; the plugin no longer writes custom token or operation data into the `gen_ai.client.*` namespace.
+- Added `gen_ai.agent.token.usage` as the plugin-owned model token usage histogram for runtime `model.usage` events and transcript / synthetic fallback replay.
+- Removed legacy `openclaw.*` metric dual-write emission, keeping current reporting on the `gen_ai.client.*`, `gen_ai.agent.*`, and `gen_ai.runtime.*` namespaces.
+- Added `gen_ai.agent.operation.count` and `gen_ai.agent.operation.duration` for model/tool/skill operation reporting, and removed the temporary dual-write to `gen_ai.client.operation.duration`.
+
 ## 2026-05-11
 
 ### GenAI Metrics And Tags

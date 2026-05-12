@@ -979,8 +979,10 @@ test("model.usage emits model_request span and preserves model context", () => {
   assert.equal(run.modelCtx.span.name, "model_request");
 });
 
-test("model.usage uses snapshot sessionId for gen_ai client token metrics when event sessionId is missing", () => {
-  const tokenAdds = [];
+test("model.usage uses snapshot sessionId for gen_ai agent token metrics when event sessionId is missing", () => {
+  const tokenRecords = [];
+  const agentOperationCounts = [];
+  const agentOperationDurations = [];
   const run = {
     ctx: { ctx: "run" },
   };
@@ -996,12 +998,21 @@ test("model.usage uses snapshot sessionId for gen_ai client token metrics when e
       diagnosticsCostUsdCounter: { add() {} },
       diagnosticsRunDurationMs: { record() {} },
       diagnosticsContextTokens: { record() {} },
-      genAiClientTokenUsage: {
-        add(value, attrs) {
-          tokenAdds.push({ value, attrs });
+      genAiAgentTokenUsage: {
+        record(value, attrs) {
+          tokenRecords.push({ value, attrs });
         },
       },
-      genAiClientOperationDuration: { record() {} },
+      genAiAgentOperationCount: {
+        add(value, attrs) {
+          agentOperationCounts.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationDuration: {
+        record(value, attrs) {
+          agentOperationDurations.push({ value, attrs });
+        },
+      },
     },
     SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
     SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
@@ -1069,13 +1080,21 @@ test("model.usage uses snapshot sessionId for gen_ai client token metrics when e
     durationMs: 400,
   });
 
-  assert.equal(tokenAdds.length, 3);
-  assert.equal(tokenAdds[0].attrs.session_id, "sid-from-snapshot");
-  assert.equal(tokenAdds[1].attrs.session_id, "sid-from-snapshot");
-  assert.equal(tokenAdds[2].attrs.session_id, "sid-from-snapshot");
-  assert.equal(tokenAdds[0].attrs.token_type, "input");
-  assert.equal(tokenAdds[1].attrs.token_type, "output");
-  assert.equal(tokenAdds[2].attrs.token_type, "total");
+  assert.equal(tokenRecords.length, 3);
+  assert.equal(tokenRecords[0].attrs.session_id, "sid-from-snapshot");
+  assert.equal(tokenRecords[1].attrs.session_id, "sid-from-snapshot");
+  assert.equal(tokenRecords[2].attrs.session_id, "sid-from-snapshot");
+  assert.equal(tokenRecords[0].attrs.token_type, "input");
+  assert.equal(tokenRecords[1].attrs.token_type, "output");
+  assert.equal(tokenRecords[2].attrs.token_type, "total");
+  assert.equal(agentOperationCounts.length, 1);
+  assert.equal(agentOperationCounts[0].value, 1);
+  assert.equal(agentOperationCounts[0].attrs.operation_name, "model");
+  assert.equal(agentOperationCounts[0].attrs.session_id, "sid-from-snapshot");
+  assert.equal(agentOperationDurations.length, 1);
+  assert.equal(agentOperationDurations[0].value, 400);
+  assert.equal(agentOperationDurations[0].attrs.operation_name, "model");
+  assert.equal(agentOperationDurations[0].attrs.session_id, "sid-from-snapshot");
 });
 
 test("message.queued rotates a completed active run before starting the next request", () => {
@@ -1282,13 +1301,13 @@ test("queue lane diagnostics only emit metrics and logs without standalone spans
       },
     },
     instruments: {
-      diagnosticsQueueLaneDequeueCounter: {
+      genAiRuntimeQueueDequeueCount: {
         add() {
           dequeueMetricCalls += 1;
         },
       },
-      diagnosticsQueueDepth: { record() {} },
-      diagnosticsQueueWaitMs: {
+      genAiRuntimeQueueDepth: { record() {} },
+      genAiRuntimeQueueWait: {
         record() {
           queueWaitMetricCalls += 1;
         },

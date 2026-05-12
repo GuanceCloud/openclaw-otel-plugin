@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildGenAiAgentTokenMetricAttrs,
   buildGenAiAgentRequestMetricAttrs,
   buildGenAiAgentSkillMetricAttrs,
   buildGenAiAgentSessionMetricAttrs,
@@ -389,6 +390,20 @@ test("buildGenAiClientModelMetricAttrs uses GenAI semantic-style keys", () => {
   assert.equal(attrs.request_model, "ark-code-latest");
   assert.equal(attrs.response_model, "ark-code-latest");
   assert.equal(attrs.token_type, "input");
+});
+
+test("buildGenAiAgentTokenMetricAttrs uses canonical agent token keys", () => {
+  const attrs = buildGenAiAgentTokenMetricAttrs("volcengine-plan", "ark-code-latest", {
+    session_id: "session-1",
+    token_type: "input",
+  });
+
+  assert.equal(attrs.provider_name, "volcengine-plan");
+  assert.equal(attrs.request_model, "ark-code-latest");
+  assert.equal(attrs.response_model, "ark-code-latest");
+  assert.equal(attrs.session_id, "session-1");
+  assert.equal(attrs.token_type, "input");
+  assert.equal(attrs.operation_name, undefined);
 });
 
 test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {

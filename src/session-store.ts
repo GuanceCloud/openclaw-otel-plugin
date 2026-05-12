@@ -388,11 +388,33 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           const outputPreview = assistantText
             ? clipValuePreview(assistantText)
             : summarizeToolCallOutput(turnToolCallNames);
+          const turnUsage = message.usage && typeof message.usage === "object"
+            ? {
+              input: typeof (message.usage as Record<string, unknown>).input === "number"
+                ? (message.usage as Record<string, number>).input
+                : undefined,
+              output: typeof (message.usage as Record<string, unknown>).output === "number"
+                ? (message.usage as Record<string, number>).output
+                : undefined,
+              cacheRead: typeof (message.usage as Record<string, unknown>).cacheRead === "number"
+                ? (message.usage as Record<string, number>).cacheRead
+                : undefined,
+              cacheWrite: typeof (message.usage as Record<string, unknown>).cacheWrite === "number"
+                ? (message.usage as Record<string, number>).cacheWrite
+                : undefined,
+              totalTokens: typeof (message.usage as Record<string, unknown>).totalTokens === "number"
+                ? (message.usage as Record<string, number>).totalTokens
+                : undefined,
+            }
+            : undefined;
           currentRunAssistantTurns.push({
             startedAt: currentRunCursorTs ?? startedAt,
             endedAt: startedAt,
             provider: typeof message.provider === "string" ? message.provider : undefined,
             model: typeof message.model === "string" ? message.model : undefined,
+            ...(turnUsage && Object.values(turnUsage).some((value) => typeof value === "number")
+              ? { usage: turnUsage }
+              : {}),
             inputPreview: currentRunInputPreview,
             thinking: assistantThinking,
             text: assistantText,

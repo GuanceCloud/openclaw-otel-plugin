@@ -19,11 +19,8 @@ import type {
 } from "./service-types.js";
 import {
   addEvent,
-  buildSessionMetricAttrs,
   buildGenAiAgentSessionMetricAttrs,
-  buildModelMetricAttrs,
   buildGenAiAgentRequestMetricAttrs,
-  buildRequestMetricAttrs,
   clipPreview,
   computeSessionMetricDelta,
   createRunState,
@@ -644,16 +641,11 @@ export function createOtelPluginService(
             );
             const previousTotals = reportedSessionMetrics.get(seriesKey);
             const deltaTotals = computeSessionMetricDelta(currentTotals, previousTotals);
-            const metricAttrs = buildSessionMetricAttrs(snapshot, sessionKey, {
-              modelProvider: tokenState?.modelProvider,
-              modelName: tokenState?.modelName,
-            });
             const genAiSessionMetricAttrs = buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
               modelProvider: tokenState?.modelProvider,
               modelName: tokenState?.modelName,
             });
             if (deltaTotals.inputTokens > 0) {
-              instruments.sessionInputTokensCounter.add(deltaTotals.inputTokens, metricAttrs);
               instruments.genAiAgentSessionTokenInput?.add(
                 deltaTotals.inputTokens,
                 genAiSessionMetricAttrs,
@@ -668,7 +660,6 @@ export function createOtelPluginService(
               );
             }
             if (deltaTotals.outputTokens > 0) {
-              instruments.sessionOutputTokensCounter.add(deltaTotals.outputTokens, metricAttrs);
               instruments.genAiAgentSessionTokenOutput?.add(
                 deltaTotals.outputTokens,
                 genAiSessionMetricAttrs,
@@ -683,7 +674,6 @@ export function createOtelPluginService(
               );
             }
             if (deltaTotals.totalTokens > 0) {
-              instruments.sessionTotalTokensCounter.add(deltaTotals.totalTokens, metricAttrs);
               instruments.genAiAgentSessionTokenTotal?.add(
                 deltaTotals.totalTokens,
                 genAiSessionMetricAttrs,
@@ -698,7 +688,6 @@ export function createOtelPluginService(
               );
             }
             if (deltaTotals.traceCount > 0) {
-              instruments.sessionTraceCounter.add(deltaTotals.traceCount, metricAttrs);
               instruments.genAiAgentSessionTraceCount?.add(
                 deltaTotals.traceCount,
                 buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
@@ -1021,14 +1010,8 @@ export function createOtelPluginService(
         if (attrs) {
           current.span && addEvent(current.span, "run.finish");
         }
-        const requestMetricAttrs = buildRequestMetricAttrs(snapshot, summaryAttrs);
         const genAiRequestMetricAttrs = buildGenAiAgentRequestMetricAttrs(snapshot, summaryAttrs);
-        instruments.requestCounter.add(1, requestMetricAttrs);
         instruments.genAiAgentRequestCount?.add(1, genAiRequestMetricAttrs);
-        instruments.requestDuration.record(
-          Math.max(0, eventTimestamp(evt).getTime() - current.startedAt),
-          requestMetricAttrs,
-        );
         instruments.genAiAgentRequestDuration?.record(
           Math.max(0, eventTimestamp(evt).getTime() - current.startedAt),
           genAiRequestMetricAttrs,
@@ -1152,14 +1135,6 @@ export function createOtelPluginService(
           metricState.dirty = true;
           sessionMetricTokenState.set(sessionKey, metricState);
         }
-        instruments.modelCallCounter.add(
-          1,
-          buildModelMetricAttrs(
-            evt.provider ?? run.aggregate.lastProvider,
-            evt.model ?? run.aggregate.lastModel,
-          ),
-        );
-
         const summaryAttrs = traceAttrs({
           "openclaw.tokens.input": run.aggregate.inputTokens,
           "openclaw.tokens.output": run.aggregate.outputTokens,

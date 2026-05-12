@@ -555,9 +555,11 @@ test("tool and skill spans backfill session attrs from the snapshot", () => {
   assert.equal(toolSpan.attributes["gen_ai.agent_channel"], undefined);
 });
 
-test("tool completion records separate tool and skill client duration metrics", () => {
+test("tool completion records separate tool and skill agent operation metrics", () => {
   const spans = [];
   const durationRecords = [];
+  const agentOperationCounts = [];
+  const agentOperationDurations = [];
   const tracer = createFakeTracer(spans);
   const trace = {
     setSpan(ctx, span) {
@@ -579,8 +581,14 @@ test("tool completion records separate tool and skill client duration metrics", 
       toolCallCounter: { add() {} },
       toolErrorCounter: { add() {} },
       toolDuration: { record() {} },
-      genAiClientOperationDuration: {
+      genAiAgentOperationCount: {
+        add(value, attrs) {
+          agentOperationCounts.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationDuration: {
         record(value, attrs) {
+          agentOperationDurations.push({ value, attrs });
           durationRecords.push({ value, attrs });
         },
       },
@@ -674,6 +682,30 @@ test("tool completion records separate tool and skill client duration metrics", 
       outcome: "completed",
     },
   ]);
+  assert.deepEqual(
+    agentOperationCounts.map(({ value, attrs }) => ({
+      value,
+      operation_name: attrs.operation_name,
+      tool_name: attrs.tool_name,
+      skill_name: attrs.skill_name,
+    })),
+    [
+      { value: 1, operation_name: "tool", tool_name: "exec", skill_name: "dashboard" },
+      { value: 1, operation_name: "skill", tool_name: undefined, skill_name: "dashboard" },
+    ],
+  );
+  assert.deepEqual(
+    agentOperationDurations.map(({ value, attrs }) => ({
+      value,
+      operation_name: attrs.operation_name,
+      tool_name: attrs.tool_name,
+      skill_name: attrs.skill_name,
+    })),
+    [
+      { value: 380, operation_name: "tool", tool_name: "exec", skill_name: "dashboard" },
+      { value: 380, operation_name: "skill", tool_name: undefined, skill_name: "dashboard" },
+    ],
+  );
 });
 
 test("tool events use transcript tool call mappings when runtime args are absent", () => {
@@ -843,6 +875,9 @@ test("transcript tool calls can be replayed into tool spans", () => {
 test("synthetic model span creates a run when transcript metadata exists", () => {
   const spans = [];
   const durationRecords = [];
+  const tokenRecords = [];
+  const agentOperationCounts = [];
+  const agentOperationDurations = [];
   const tracer = createFakeTracer(spans);
   const trace = {
     setSpan(ctx, span) {
@@ -863,8 +898,19 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
       toolCallCounter: { add() {} },
       toolErrorCounter: { add() {} },
       toolDuration: { record() {} },
-      genAiClientOperationDuration: {
+      genAiAgentTokenUsage: {
         record(value, attrs) {
+          tokenRecords.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationCount: {
+        add(value, attrs) {
+          agentOperationCounts.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationDuration: {
+        record(value, attrs) {
+          agentOperationDurations.push({ value, attrs });
           durationRecords.push({ value, attrs });
         },
       },
@@ -943,6 +989,41 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
   assert.equal(durationRecords[0].attrs.provider_name, "openai");
   assert.equal(durationRecords[0].attrs.request_model, "gpt-5");
   assert.equal(durationRecords[0].attrs.session_id, "sid-1");
+  assert.deepEqual(
+    tokenRecords.map(({ value, attrs }) => ({
+      value,
+      token_type: attrs.token_type,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
+      { value: 12, token_type: "input", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 34, token_type: "output", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 46, token_type: "total", request_model: "gpt-5", session_id: "sid-1" },
+    ],
+  );
+  assert.deepEqual(
+    agentOperationCounts.map(({ value, attrs }) => ({
+      value,
+      operation_name: attrs.operation_name,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
+      { value: 1, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
+    ],
+  );
+  assert.deepEqual(
+    agentOperationDurations.map(({ value, attrs }) => ({
+      value,
+      operation_name: attrs.operation_name,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
+      { value: 2760, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
+    ],
+  );
 });
 
 test("transcript replay backfills run start from transcript timestamps", () => {
@@ -1026,6 +1107,9 @@ test("transcript replay backfills run start from transcript timestamps", () => {
 test("transcript model spans are replayed per assistant turn", () => {
   const spans = [];
   const durationRecords = [];
+  const tokenRecords = [];
+  const agentOperationCounts = [];
+  const agentOperationDurations = [];
   const tracer = createFakeTracer(spans);
   const trace = {
     setSpan(ctx, span) {
@@ -1045,8 +1129,19 @@ test("transcript model spans are replayed per assistant turn", () => {
       toolCallCounter: { add() {} },
       toolErrorCounter: { add() {} },
       toolDuration: { record() {} },
-      genAiClientOperationDuration: {
+      genAiAgentTokenUsage: {
         record(value, attrs) {
+          tokenRecords.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationCount: {
+        add(value, attrs) {
+          agentOperationCounts.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationDuration: {
+        record(value, attrs) {
+          agentOperationDurations.push({ value, attrs });
           durationRecords.push({ value, attrs });
         },
       },
@@ -1080,6 +1175,11 @@ test("transcript model spans are replayed per assistant turn", () => {
             endedAt: 2000,
             provider: "openai",
             model: "gpt-5",
+            usage: {
+              input: 11,
+              output: 7,
+              totalTokens: 18,
+            },
             inputPreview: "first question",
             thinking: "first reasoning",
             text: "first answer",
@@ -1091,6 +1191,11 @@ test("transcript model spans are replayed per assistant turn", () => {
             endedAt: 2600,
             provider: "openai",
             model: "gpt-5",
+            usage: {
+              input: 13,
+              output: 5,
+              totalTokens: 18,
+            },
             inputPreview: "{\"status\":\"ok\"}",
             thinking: "second reasoning",
             text: "second answer",
@@ -1156,6 +1261,46 @@ test("transcript model spans are replayed per assistant turn", () => {
         request_model: "gpt-5",
         session_id: "sid-1",
       },
+    ],
+  );
+  assert.deepEqual(
+    tokenRecords.map(({ value, attrs }) => ({
+      value,
+      token_type: attrs.token_type,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
+      { value: 11, token_type: "input", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 7, token_type: "output", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 18, token_type: "total", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 13, token_type: "input", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 5, token_type: "output", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 18, token_type: "total", request_model: "gpt-5", session_id: "sid-1" },
+    ],
+  );
+  assert.deepEqual(
+    agentOperationCounts.map(({ value, attrs }) => ({
+      value,
+      operation_name: attrs.operation_name,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
+      { value: 1, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 1, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
+    ],
+  );
+  assert.deepEqual(
+    agentOperationDurations.map(({ value, attrs }) => ({
+      value,
+      operation_name: attrs.operation_name,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
+      { value: 1000, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 300, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
     ],
   );
 });

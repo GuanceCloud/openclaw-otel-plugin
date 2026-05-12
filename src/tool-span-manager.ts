@@ -10,12 +10,11 @@ import type {
 import {
   addEvent,
   buildGenAiAgentSkillMetricAttrs,
+  buildGenAiAgentTokenMetricAttrs,
   buildGenAiClientModelMetricAttrs,
   buildGenAiClientSkillMetricAttrs,
   buildGenAiClientToolMetricAttrs,
-  buildSkillMetricAttrs,
   buildToolAttrs,
-  buildToolMetricAttrs,
   clipPreview,
   clipValuePreview,
   collectToolSummaryValues,
@@ -157,6 +156,47 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     };
   };
 
+  const recordGenAiAgentTokenUsage = (
+    provider: string | undefined,
+    model: string | undefined,
+    sessionId: string | undefined,
+    usage:
+      | {
+        input?: number;
+        output?: number;
+        totalTokens?: number;
+      }
+      | undefined,
+  ) => {
+    if (!usage) {
+      return;
+    }
+    const tokenMetrics = [
+      ["input", usage.input],
+      ["output", usage.output],
+      ["total", usage.totalTokens],
+    ] as const;
+    for (const [tokenType, tokenValue] of tokenMetrics) {
+      if (typeof tokenValue === "number" && tokenValue > 0) {
+        instruments.genAiAgentTokenUsage?.record(
+          tokenValue,
+          buildGenAiAgentTokenMetricAttrs(provider, model, {
+            session_id: sessionId,
+            token_type: tokenType,
+          }),
+        );
+      }
+    }
+  };
+
+  const recordGenAiAgentOperation = (
+    durationMs: number,
+    attrs: Record<string, string | number | boolean | undefined>,
+  ) => {
+    instruments.genAiAgentOperationCount?.add(1, attrs);
+    instruments.genAiAgentOperationDuration?.record(durationMs, attrs);
+  };
+
   const syncToolSummaryAttrs = (evt: SessionEvent, run: ActiveRunSpan) => {
     const attrs = traceAttrs({
       "openclaw.tools": Array.from(run.usedToolNames).join(", "),
@@ -230,7 +270,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     };
     run.skillSpans.set(normalizedSkillName, skillState);
     run.activeSkillName = normalizedSkillName;
-    instruments.skillActivationCounter.add(1, buildSkillMetricAttrs(normalizedSkillName, source));
     instruments.genAiAgentSkillActivationCount?.add(
       1,
       buildGenAiAgentSkillMetricAttrs(normalizedSkillName, source, evt.sessionId),
@@ -344,15 +383,14 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     } else {
       invocation.span.setStatus({ code: SpanStatusCode.OK });
     }
-    instruments.genAiClientOperationDuration?.record(
-      Math.max((endTime?.getTime() ?? Date.now()) - invocation.startedAt, 1),
-      buildGenAiClientSkillMetricAttrs(
-        invocation.name,
-        isError ? "error" : "completed",
-        evt.sessionId,
-        invocation.source,
-      ),
+    const durationMs = Math.max((endTime?.getTime() ?? Date.now()) - invocation.startedAt, 1);
+    const skillMetricAttrs = buildGenAiClientSkillMetricAttrs(
+      invocation.name,
+      isError ? "error" : "completed",
+      evt.sessionId,
+      invocation.source,
     );
+    recordGenAiAgentOperation(durationMs, skillMetricAttrs);
     endSpanSafely(invocation.span, endTime);
     run.skillInvocationSpans.delete(normalizedToolCallId);
   };
@@ -587,11 +625,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       event_tool_result_preview: resultPreview,
       event_tool_result_status: extractToolResultStatus(payload?.result),
     }));
-    const toolMetricAttrs = buildToolMetricAttrs(
-      tool,
-      isError ? "error" : "completed",
-      merged.resultStatus,
-    );
     const snapshot = loadSessionSnapshot(evt.sessionKey);
     const genAiToolMetricAttrs = buildGenAiClientToolMetricAttrs(
       tool,
@@ -600,17 +633,9 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       evt.sessionId,
       run.aggregate.lastModel ?? snapshot?.lastModel,
     );
-    instruments.toolCallCounter.add(1, toolMetricAttrs);
-    instruments.toolDuration.record(
-      Math.max(0, eventTimestamp(evt).getTime() - tool.startedAt),
-      toolMetricAttrs,
-    );
-    instruments.genAiClientOperationDuration?.record(
-      Math.max(0, eventTimestamp(evt).getTime() - tool.startedAt),
-      genAiToolMetricAttrs,
-    );
+    const durationMs = Math.max(0, eventTimestamp(evt).getTime() - tool.startedAt);
+    recordGenAiAgentOperation(durationMs, genAiToolMetricAttrs);
     if (isError) {
-      instruments.toolErrorCounter.add(1, toolMetricAttrs);
       setError(tool.span, SpanStatusCode.ERROR, resultPreview ?? "tool error");
     } else {
       tool.span.setStatus({ code: SpanStatusCode.OK });
@@ -770,15 +795,20 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       );
       span.setStatus({ code: SpanStatusCode.OK });
       endSpanSafely(span, new Date(endTs));
-      instruments.genAiClientOperationDuration?.record(
-        Math.max(endTs - startTs, 1),
-        buildGenAiClientModelMetricAttrs(
-          turn.provider ?? snapshot?.lastProvider,
-          turn.model ?? snapshot?.lastModel,
-          {
-            session_id: snapshot?.sessionId ?? evt.sessionId,
-          },
-        ),
+      const durationMs = Math.max(endTs - startTs, 1);
+      const modelMetricAttrs = buildGenAiClientModelMetricAttrs(
+        turn.provider ?? snapshot?.lastProvider,
+        turn.model ?? snapshot?.lastModel,
+        {
+          session_id: snapshot?.sessionId ?? evt.sessionId,
+        },
+      );
+      recordGenAiAgentOperation(durationMs, modelMetricAttrs);
+      recordGenAiAgentTokenUsage(
+        turn.provider ?? snapshot?.lastProvider,
+        turn.model ?? snapshot?.lastModel,
+        snapshot?.sessionId ?? evt.sessionId,
+        turn.usage,
       );
       run.modelCtx = trace.setSpan(run.ctx, span);
       run.modelStartTs = startTs;
@@ -888,11 +918,16 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       getActiveSkillCtx(run) ?? run.ctx,
     );
     span.setStatus({ code: SpanStatusCode.OK });
-    instruments.genAiClientOperationDuration?.record(
-      Math.max(modelEndTs - startTs, 1),
-      buildGenAiClientModelMetricAttrs(snapshot.lastProvider, snapshot.lastModel, {
-        session_id: snapshot.sessionId ?? evt.sessionId,
-      }),
+    const durationMs = Math.max(modelEndTs - startTs, 1);
+    const modelMetricAttrs = buildGenAiClientModelMetricAttrs(snapshot.lastProvider, snapshot.lastModel, {
+      session_id: snapshot.sessionId ?? evt.sessionId,
+    });
+    recordGenAiAgentOperation(durationMs, modelMetricAttrs);
+    recordGenAiAgentTokenUsage(
+      snapshot.lastProvider,
+      snapshot.lastModel,
+      snapshot.sessionId ?? evt.sessionId,
+      snapshot.lastAssistantUsage,
     );
     run.modelSpan = span;
     run.modelCtx = trace.setSpan(getActiveSkillCtx(run) ?? run.ctx, span);

@@ -267,31 +267,12 @@ export async function startOtelBootstrap(
   const tracer = trace.getTracer("openclaw-otel-plugin");
   const meter = metrics.getMeter("openclaw-otel-plugin");
   const instruments: MetricInstruments = {
-    requestCounter: meter.createCounter("openclaw.requests", {
-      description: "Total OpenClaw requests observed by the plugin",
-    }),
-    requestDuration: meter.createHistogram("openclaw.request.duration", {
-      description: "OpenClaw request duration in milliseconds",
-      unit: "ms",
-    }),
     genAiAgentRequestCount: meter.createCounter("gen_ai.agent.request.count", {
       description: "Total GenAI agent requests observed by the plugin",
     }),
     genAiAgentRequestDuration: meter.createHistogram("gen_ai.agent.request.duration", {
       description: "GenAI agent request duration in milliseconds",
       unit: "ms",
-    }),
-    sessionInputTokensCounter: meter.createCounter("openclaw.session.tokens.input", {
-      description: "Session-scoped input tokens emitted by periodic session scans",
-    }),
-    sessionOutputTokensCounter: meter.createCounter("openclaw.session.tokens.output", {
-      description: "Session-scoped output tokens emitted by periodic session scans",
-    }),
-    sessionTotalTokensCounter: meter.createCounter("openclaw.session.tokens.total", {
-      description: "Session-scoped total tokens emitted by periodic session scans",
-    }),
-    sessionTraceCounter: meter.createCounter("openclaw.session.traces", {
-      description: "Session trace count emitted by periodic session scans with session_id tagging",
     }),
     genAiAgentSessionTokenInput: meter.createCounter("gen_ai.agent.session.token.input", {
       description: "Session-scoped GenAI agent input token usage emitted by periodic session scans",
@@ -308,54 +289,19 @@ export async function startOtelBootstrap(
     genAiAgentSessionTraceCount: meter.createCounter("gen_ai.agent.session.trace.count", {
       description: "Session-scoped GenAI agent trace count emitted by periodic session scans",
     }),
-    toolCallCounter: meter.createCounter("openclaw.tool.calls", {
-      description: "Total OpenClaw tool calls observed by the plugin",
+    genAiAgentOperationCount: meter.createCounter("gen_ai.agent.operation.count", {
+      description: "GenAI agent operation count across model, tool, and skill execution",
     }),
-    toolErrorCounter: meter.createCounter("openclaw.tool.errors", {
-      description: "Total OpenClaw tool call errors observed by the plugin",
-    }),
-    toolDuration: meter.createHistogram("openclaw.tool.duration", {
-      description: "OpenClaw tool call duration in milliseconds",
+    genAiAgentOperationDuration: meter.createHistogram("gen_ai.agent.operation.duration", {
+      description: "GenAI agent operation duration in milliseconds across model, tool, and skill execution",
       unit: "ms",
-    }),
-    genAiClientOperationDuration: meter.createHistogram("gen_ai.client.operation.duration", {
-      description: "GenAI client operation duration in milliseconds",
-      unit: "ms",
-    }),
-    skillActivationCounter: meter.createCounter("openclaw.skill.activations", {
-      description: "Total OpenClaw skill activations observed by the plugin",
     }),
     genAiAgentSkillActivationCount: meter.createCounter("gen_ai.agent.skill.activation.count", {
       description: "Total GenAI agent skill activations observed by the plugin",
     }),
-    modelCallCounter: meter.createCounter("openclaw.model.calls", {
-      description: "Total OpenClaw model usage events observed by the plugin",
-    }),
-    diagnosticsTokensCounter: meter.createCounter("openclaw.tokens", {
-      description: "Model token usage emitted from OpenClaw diagnostics events",
-    }),
-    genAiClientTokenUsage: meter.createCounter("gen_ai.client.token.usage", {
-      description: "GenAI client token usage emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsCostUsdCounter: meter.createCounter("openclaw.cost.usd", {
-      description: "Model cost in USD emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsRunDurationMs: meter.createHistogram("openclaw.run.duration_ms", {
-      description: "Model run duration in milliseconds emitted from OpenClaw diagnostics events",
-      unit: "ms",
-    }),
-    diagnosticsContextTokens: meter.createHistogram("openclaw.context.tokens", {
-      description: "Context token usage emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsWebhookReceivedCounter: meter.createCounter("openclaw.webhook.received", {
-      description: "Webhook receive events emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsWebhookErrorCounter: meter.createCounter("openclaw.webhook.error", {
-      description: "Webhook error events emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsWebhookDurationMs: meter.createHistogram("openclaw.webhook.duration_ms", {
-      description: "Webhook processing duration in milliseconds emitted from OpenClaw diagnostics events",
-      unit: "ms",
+    genAiAgentTokenUsage: meter.createHistogram("gen_ai.agent.token.usage", {
+      description: "GenAI agent model token usage emitted by runtime and transcript replay",
+      unit: "{token}",
     }),
     genAiRuntimeWebhookReceivedCount: meter.createCounter("gen_ai.runtime.webhook.received.count", {
       description: "GenAI runtime webhook received events emitted from diagnostics",
@@ -367,16 +313,6 @@ export async function startOtelBootstrap(
       description: "GenAI runtime webhook processing duration in milliseconds",
       unit: "ms",
     }),
-    diagnosticsMessageQueuedCounter: meter.createCounter("openclaw.message.queued", {
-      description: "Message queued events emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsMessageProcessedCounter: meter.createCounter("openclaw.message.processed", {
-      description: "Message processed events emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsMessageDurationMs: meter.createHistogram("openclaw.message.duration_ms", {
-      description: "Message processing duration in milliseconds emitted from OpenClaw diagnostics events",
-      unit: "ms",
-    }),
     genAiRuntimeMessageQueuedCount: meter.createCounter("gen_ai.runtime.message.queued.count", {
       description: "GenAI runtime message queued events emitted from diagnostics",
     }),
@@ -385,19 +321,6 @@ export async function startOtelBootstrap(
     }),
     genAiRuntimeMessageDuration: meter.createHistogram("gen_ai.runtime.message.duration", {
       description: "GenAI runtime message processing duration in milliseconds",
-      unit: "ms",
-    }),
-    diagnosticsQueueLaneEnqueueCounter: meter.createCounter("openclaw.queue.lane.enqueue", {
-      description: "Queue enqueue events emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsQueueLaneDequeueCounter: meter.createCounter("openclaw.queue.lane.dequeue", {
-      description: "Queue dequeue events emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsQueueDepth: meter.createHistogram("openclaw.queue.depth", {
-      description: "Queue depth emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsQueueWaitMs: meter.createHistogram("openclaw.queue.wait_ms", {
-      description: "Queue wait time in milliseconds emitted from OpenClaw diagnostics events",
       unit: "ms",
     }),
     genAiRuntimeQueueEnqueueCount: meter.createCounter("gen_ai.runtime.queue.enqueue.count", {
@@ -413,18 +336,8 @@ export async function startOtelBootstrap(
       description: "GenAI runtime queue wait time in milliseconds",
       unit: "ms",
     }),
-    diagnosticsSessionStateCounter: meter.createCounter("openclaw.session.state", {
-      description: "Session state transitions emitted from OpenClaw diagnostics events",
-    }),
     genAiRuntimeSessionStateCount: meter.createCounter("gen_ai.runtime.session.state.count", {
       description: "GenAI runtime session state transitions emitted from diagnostics",
-    }),
-    diagnosticsSessionStuckCounter: meter.createCounter("openclaw.session.stuck", {
-      description: "Stuck session detections emitted from OpenClaw diagnostics events",
-    }),
-    diagnosticsSessionStuckAgeMs: meter.createHistogram("openclaw.session.stuck_age_ms", {
-      description: "Age in milliseconds for stuck sessions emitted from OpenClaw diagnostics events",
-      unit: "ms",
     }),
     genAiRuntimeSessionStuckCount: meter.createCounter("gen_ai.runtime.session.stuck.count", {
       description: "GenAI runtime stuck session detections emitted from diagnostics",
@@ -432,9 +345,6 @@ export async function startOtelBootstrap(
     genAiRuntimeSessionStuckAge: meter.createHistogram("gen_ai.runtime.session.stuck.age", {
       description: "GenAI runtime stuck session age in milliseconds",
       unit: "ms",
-    }),
-    diagnosticsRunAttemptCounter: meter.createCounter("openclaw.run.attempt", {
-      description: "Run attempts emitted from OpenClaw diagnostics events",
     }),
   };
 

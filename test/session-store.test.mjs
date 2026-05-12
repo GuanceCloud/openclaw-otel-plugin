@@ -283,6 +283,13 @@ test("session store aggregates session token totals and trace count", () => {
       endedAt: 2600,
       provider: undefined,
       model: undefined,
+      usage: {
+        input: 13,
+        output: 5,
+        cacheRead: undefined,
+        cacheWrite: undefined,
+        totalTokens: 18,
+      },
       inputPreview: "second",
       thinking: undefined,
       text: undefined,

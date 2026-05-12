@@ -2,12 +2,8 @@ import type { DiagnosticEventPayload } from "openclaw/plugin-sdk";
 import type { ActiveRunSpan, MetricInstruments, SessionSnapshot } from "./service-types.js";
 import {
   addEvent,
+  buildGenAiAgentTokenMetricAttrs,
   buildGenAiClientModelMetricAttrs,
-  buildDiagnosticsMessageMetricAttrs,
-  buildDiagnosticsModelMetricAttrs,
-  buildDiagnosticsQueueMetricAttrs,
-  buildDiagnosticsSessionMetricAttrs,
-  buildDiagnosticsWebhookMetricAttrs,
   buildGenAiRuntimeMessageMetricAttrs,
   buildGenAiRuntimeQueueMetricAttrs,
   buildGenAiRuntimeSessionMetricAttrs,
@@ -245,19 +241,11 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
           "openclaw.queueDepth": evt.queueDepth,
         };
-        instruments.diagnosticsSessionStateCounter.add(
-          1,
-          buildDiagnosticsSessionMetricAttrs(evt.state, evt.reason),
-        );
         instruments.genAiRuntimeSessionStateCount?.add(
           1,
           buildGenAiRuntimeSessionMetricAttrs(evt.state, evt.reason, evt.sessionId),
         );
         if (typeof evt.queueDepth === "number") {
-          instruments.diagnosticsQueueDepth.record(
-            evt.queueDepth,
-            buildDiagnosticsSessionMetricAttrs(evt.state, evt.reason),
-          );
           instruments.genAiRuntimeQueueDepth?.record(
             evt.queueDepth,
             buildGenAiRuntimeSessionMetricAttrs(evt.state, evt.reason, evt.sessionId),
@@ -361,10 +349,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.runId": evt.runId,
           "openclaw.attempt": evt.attempt,
         };
-        instruments.diagnosticsRunAttemptCounter.add(
-          1,
-          stringAttrs({ "openclaw.attempt": evt.attempt }),
-        );
         const root = getRoot(evt, true);
         if (root) {
           addEvent(root.span, "run.attempt", attemptAttrs);
@@ -420,12 +404,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.source": evt.source,
           "openclaw.queueDepth": evt.queueDepth,
         };
-        instruments.diagnosticsMessageQueuedCounter.add(
-          1,
-          buildDiagnosticsMessageMetricAttrs(evt.channel, {
-            "openclaw.source": evt.source,
-          }),
-        );
         instruments.genAiRuntimeMessageQueuedCount?.add(
           1,
           buildGenAiRuntimeMessageMetricAttrs(evt.channel, evt.sessionId, {
@@ -433,10 +411,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           }),
         );
         if (typeof evt.queueDepth === "number") {
-          instruments.diagnosticsQueueDepth.record(
-            evt.queueDepth,
-            buildDiagnosticsMessageMetricAttrs(evt.channel),
-          );
           instruments.genAiRuntimeQueueDepth?.record(
             evt.queueDepth,
             buildGenAiRuntimeMessageMetricAttrs(evt.channel, evt.sessionId),
@@ -490,11 +464,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           ...evt,
           ts: modelStartTs,
         });
-        const modelMetricAttrs = buildDiagnosticsModelMetricAttrs(
-          evt.channel,
-          evt.provider,
-          evt.model,
-        );
         const genAiModelMetricAttrs = buildGenAiClientModelMetricAttrs(
           evt.provider,
           evt.model,
@@ -511,46 +480,21 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         ] as const;
         for (const [tokenType, tokenValue] of tokenMetrics) {
           if (typeof tokenValue === "number" && tokenValue > 0) {
-            instruments.diagnosticsTokensCounter.add(
-              tokenValue,
-              buildDiagnosticsModelMetricAttrs(evt.channel, evt.provider, evt.model, {
-                "openclaw.token": tokenType,
-              }),
-            );
             if (tokenType === "input" || tokenType === "output" || tokenType === "total") {
-              const genAiTokenMetricAttrs = buildGenAiClientModelMetricAttrs(evt.provider, evt.model, {
+              const genAiTokenMetricAttrs = buildGenAiAgentTokenMetricAttrs(evt.provider, evt.model, {
                 session_id: resolvedSessionId,
                 token_type: tokenType,
               });
-              instruments.genAiClientTokenUsage?.add(
+              instruments.genAiAgentTokenUsage?.record(
                 tokenValue,
                 genAiTokenMetricAttrs,
               );
             }
           }
         }
-        if (typeof evt.costUsd === "number" && evt.costUsd > 0) {
-          instruments.diagnosticsCostUsdCounter.add(evt.costUsd, modelMetricAttrs);
-        }
         if (typeof evt.durationMs === "number") {
-          instruments.diagnosticsRunDurationMs.record(evt.durationMs, modelMetricAttrs);
-          instruments.genAiClientOperationDuration?.record(evt.durationMs, genAiModelMetricAttrs);
-        }
-        if (typeof evt.context?.limit === "number") {
-          instruments.diagnosticsContextTokens.record(
-            evt.context.limit,
-            buildDiagnosticsModelMetricAttrs(evt.channel, evt.provider, evt.model, {
-              "openclaw.context": "limit",
-            }),
-          );
-        }
-        if (typeof evt.context?.used === "number") {
-          instruments.diagnosticsContextTokens.record(
-            evt.context.used,
-            buildDiagnosticsModelMetricAttrs(evt.channel, evt.provider, evt.model, {
-              "openclaw.context": "used",
-            }),
-          );
+          instruments.genAiAgentOperationCount?.add(1, genAiModelMetricAttrs);
+          instruments.genAiAgentOperationDuration?.record(evt.durationMs, genAiModelMetricAttrs);
         }
         const run = ensureRuntimeLifecycleSpans(
           {
@@ -660,12 +604,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.provider": snapshot?.lastProvider,
           "openclaw.model": snapshot?.lastModel,
         };
-        instruments.diagnosticsMessageProcessedCounter.add(
-          1,
-          buildDiagnosticsMessageMetricAttrs(evt.channel, {
-            "openclaw.outcome": evt.outcome,
-          }),
-        );
         instruments.genAiRuntimeMessageProcessedCount?.add(
           1,
           buildGenAiRuntimeMessageMetricAttrs(evt.channel, evt.sessionId, {
@@ -673,12 +611,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           }),
         );
         if (typeof evt.durationMs === "number") {
-          instruments.diagnosticsMessageDurationMs.record(
-            evt.durationMs,
-            buildDiagnosticsMessageMetricAttrs(evt.channel, {
-              "openclaw.outcome": evt.outcome,
-            }),
-          );
           instruments.genAiRuntimeMessageDuration?.record(
             evt.durationMs,
             buildGenAiRuntimeMessageMetricAttrs(evt.channel, evt.sessionId, {
@@ -729,10 +661,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.webhook": evt.updateType,
           "openclaw.chatId": evt.chatId ? String(evt.chatId) : undefined,
         };
-        instruments.diagnosticsWebhookReceivedCounter.add(
-          1,
-          buildDiagnosticsWebhookMetricAttrs(evt.channel, evt.updateType),
-        );
         instruments.genAiRuntimeWebhookReceivedCount?.add(
           1,
           buildGenAiRuntimeWebhookMetricAttrs(evt.channel, evt.updateType),
@@ -754,10 +682,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.chatId": evt.chatId ? String(evt.chatId) : undefined,
         };
         if (typeof evt.durationMs === "number") {
-          instruments.diagnosticsWebhookDurationMs.record(
-            evt.durationMs,
-            buildDiagnosticsWebhookMetricAttrs(evt.channel, evt.updateType),
-          );
           instruments.genAiRuntimeWebhookDuration?.record(
             evt.durationMs,
             buildGenAiRuntimeWebhookMetricAttrs(evt.channel, evt.updateType),
@@ -785,10 +709,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.chatId": evt.chatId ? String(evt.chatId) : undefined,
           "openclaw.error": redactSensitiveText(evt.error),
         };
-        instruments.diagnosticsWebhookErrorCounter.add(
-          1,
-          buildDiagnosticsWebhookMetricAttrs(evt.channel, evt.updateType),
-        );
         instruments.genAiRuntimeWebhookErrorCount?.add(
           1,
           buildGenAiRuntimeWebhookMetricAttrs(evt.channel, evt.updateType),
@@ -812,27 +732,15 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.alert": true,
           "openclaw.alert.kind": "session_stuck",
         };
-        instruments.diagnosticsSessionStuckCounter.add(
-          1,
-          buildDiagnosticsSessionMetricAttrs(evt.state),
-        );
         instruments.genAiRuntimeSessionStuckCount?.add(
           1,
           buildGenAiRuntimeSessionMetricAttrs(evt.state, undefined, evt.sessionId),
-        );
-        instruments.diagnosticsSessionStuckAgeMs.record(
-          evt.ageMs,
-          buildDiagnosticsSessionMetricAttrs(evt.state),
         );
         instruments.genAiRuntimeSessionStuckAge?.record(
           evt.ageMs,
           buildGenAiRuntimeSessionMetricAttrs(evt.state, undefined, evt.sessionId),
         );
         if (typeof evt.queueDepth === "number") {
-          instruments.diagnosticsQueueDepth.record(
-            evt.queueDepth,
-            buildDiagnosticsSessionMetricAttrs(evt.state),
-          );
           instruments.genAiRuntimeQueueDepth?.record(
             evt.queueDepth,
             buildGenAiRuntimeSessionMetricAttrs(evt.state, undefined, evt.sessionId),
@@ -854,17 +762,9 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       case "diagnostic.heartbeat":
       case "tool.loop": {
         if (evt.type === "queue.lane.enqueue") {
-          instruments.diagnosticsQueueLaneEnqueueCounter.add(
-            1,
-            buildDiagnosticsQueueMetricAttrs(evt.lane),
-          );
           instruments.genAiRuntimeQueueEnqueueCount?.add(
             1,
             buildGenAiRuntimeQueueMetricAttrs(evt.lane, evt.sessionId),
-          );
-          instruments.diagnosticsQueueDepth.record(
-            evt.queueSize,
-            buildDiagnosticsQueueMetricAttrs(evt.lane),
           );
           instruments.genAiRuntimeQueueDepth?.record(
             evt.queueSize,
@@ -872,35 +772,17 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           );
         }
         if (evt.type === "queue.lane.dequeue") {
-          instruments.diagnosticsQueueLaneDequeueCounter.add(
-            1,
-            buildDiagnosticsQueueMetricAttrs(evt.lane),
-          );
           instruments.genAiRuntimeQueueDequeueCount?.add(
             1,
             buildGenAiRuntimeQueueMetricAttrs(evt.lane, evt.sessionId),
-          );
-          instruments.diagnosticsQueueDepth.record(
-            evt.queueSize,
-            buildDiagnosticsQueueMetricAttrs(evt.lane),
           );
           instruments.genAiRuntimeQueueDepth?.record(
             evt.queueSize,
             buildGenAiRuntimeQueueMetricAttrs(evt.lane, evt.sessionId),
           );
-          instruments.diagnosticsQueueWaitMs.record(
-            evt.waitMs,
-            buildDiagnosticsQueueMetricAttrs(evt.lane),
-          );
           instruments.genAiRuntimeQueueWait?.record(
             evt.waitMs,
             buildGenAiRuntimeQueueMetricAttrs(evt.lane, evt.sessionId),
-          );
-        }
-        if (evt.type === "diagnostic.heartbeat") {
-          instruments.diagnosticsQueueDepth.record(
-            evt.queued,
-            stringAttrs({ "openclaw.channel": "heartbeat" }),
           );
         }
         if (evt.type === "tool.loop" && annotateToolLoop(evt)) {

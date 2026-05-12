@@ -34,10 +34,12 @@ Trace 说明：
 
 常用指标包括：
 
-- `gen_ai.client.token.usage`
-- `gen_ai.client.operation.duration`
+- `gen_ai.client.operation.duration`（OTEL 原生指标名）
+- `gen_ai.agent.token.usage`
 - `gen_ai.agent.request.count`
 - `gen_ai.agent.request.duration`
+- `gen_ai.agent.operation.count`
+- `gen_ai.agent.operation.duration`
 - `gen_ai.agent.session.token.input`
 - `gen_ai.agent.session.token.output`
 - `gen_ai.agent.session.token.total`
@@ -47,6 +49,11 @@ Trace 说明：
 - `gen_ai.runtime.queue.*`
 - `gen_ai.runtime.session.*`
 - `gen_ai.runtime.webhook.*`
+
+指标边界说明：
+
+- `gen_ai.client.*` 保留给 OTEL 原生 client 语义；插件不再向这里写自定义 token 或 operation 指标
+- OpenClaw 自定义的模型 token 和 model / tool / skill operation 指标统一写到 `gen_ai.agent.token.usage` 与 `gen_ai.agent.operation.*`
 
 完整指标清单见 [docs/gen-ai-metrics.md](./docs/gen-ai-metrics.md)。
 

@@ -132,58 +132,30 @@ export type RuntimeMetadata = {
 };
 
 export type MetricInstruments = {
-  requestCounter: any;
-  requestDuration: any;
   genAiAgentRequestCount: any;
   genAiAgentRequestDuration: any;
-  sessionInputTokensCounter: any;
-  sessionOutputTokensCounter: any;
-  sessionTotalTokensCounter: any;
-  sessionTraceCounter: any;
   genAiAgentSessionTokenInput: any;
   genAiAgentSessionTokenOutput: any;
   genAiAgentSessionTokenTotal: any;
   genAiAgentSessionTokenUsage: any;
   genAiAgentSessionTraceCount: any;
-  toolCallCounter: any;
-  toolErrorCounter: any;
-  toolDuration: any;
-  genAiClientOperationDuration: any;
-  skillActivationCounter: any;
+  genAiAgentOperationCount: any;
+  genAiAgentOperationDuration: any;
   genAiAgentSkillActivationCount: any;
-  modelCallCounter: any;
-  diagnosticsTokensCounter: any;
-  genAiClientTokenUsage: any;
-  diagnosticsCostUsdCounter: any;
-  diagnosticsRunDurationMs: any;
-  diagnosticsContextTokens: any;
-  diagnosticsWebhookReceivedCounter: any;
-  diagnosticsWebhookErrorCounter: any;
-  diagnosticsWebhookDurationMs: any;
+  genAiAgentTokenUsage: any;
   genAiRuntimeWebhookReceivedCount: any;
   genAiRuntimeWebhookErrorCount: any;
   genAiRuntimeWebhookDuration: any;
-  diagnosticsMessageQueuedCounter: any;
-  diagnosticsMessageProcessedCounter: any;
-  diagnosticsMessageDurationMs: any;
   genAiRuntimeMessageQueuedCount: any;
   genAiRuntimeMessageProcessedCount: any;
   genAiRuntimeMessageDuration: any;
-  diagnosticsQueueLaneEnqueueCounter: any;
-  diagnosticsQueueLaneDequeueCounter: any;
-  diagnosticsQueueDepth: any;
-  diagnosticsQueueWaitMs: any;
   genAiRuntimeQueueEnqueueCount: any;
   genAiRuntimeQueueDequeueCount: any;
   genAiRuntimeQueueDepth: any;
   genAiRuntimeQueueWait: any;
-  diagnosticsSessionStateCounter: any;
   genAiRuntimeSessionStateCount: any;
-  diagnosticsSessionStuckCounter: any;
-  diagnosticsSessionStuckAgeMs: any;
   genAiRuntimeSessionStuckCount: any;
   genAiRuntimeSessionStuckAge: any;
-  diagnosticsRunAttemptCounter: any;
 };
 
 export type TranscriptToolCall = {
@@ -202,6 +174,13 @@ export type TranscriptAssistantTurn = {
   endedAt?: number;
   provider?: string;
   model?: string;
+  usage?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    totalTokens?: number;
+  };
   inputPreview?: string;
   thinking?: string;
   text?: string;

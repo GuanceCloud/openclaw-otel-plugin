@@ -22,6 +22,20 @@
 - 当前不展开历史兼容关系，不讨论旧指标映射
 - Resource 级属性也统一使用 canonical tag，例如 `agent_id`、`agent_name`、`agent_runtime`
 - 平台里如果还能看到 `gen_ai_agent_*`，通常来自历史指标点，不代表当前实现仍会继续上报
+- 旧 `openclaw.*` 指标兼容双写已移除；如果平台里还能看到，通常来自历史指标点
+
+## GenAI Client 边界
+
+当前实现里，`GenAI Client` 命名空间只承载 OTEL 原生 client 语义，不再混入 OpenClaw 自定义的 agent operation 统计。
+
+- `gen_ai.client.*`
+  用于 OTEL 原生 client 指标；本插件不再向该命名空间写入自定义 token / operation 数据
+- `gen_ai.agent.operation.*`
+  用于 OpenClaw 自定义的 model / tool / skill operation 统计
+- `gen_ai.runtime.*`
+  用于消息、队列、session、webhook 等运行时过程指标
+
+如果平台里还能看到 `gen_ai.client.operation.duration`，应将其视为 OTEL 原生来源，而不是本插件当前的主查询口径。
 
 ## Tag 设计
 
@@ -77,10 +91,14 @@
 
 ### GenAI Client
 
-| 指标名 | 类型 | 单位 | tags | 描述 |
-| --- | --- | --- | --- | --- |
-| `gen_ai.client.token.usage` | Counter | 保持当前 | `agent_runtime`, `operation_name`, `provider_name`, `request_model`, `response_model`, `token_type` | 模型 token 用量。当前 `operation_name=model`，通过 `token_type=input|output|total` 区分口径。 |
-| `gen_ai.client.operation.duration` | Histogram | `ms` | `agent_runtime`, `operation_name`, `outcome`；当 `operation_name=model` 时还带 `provider_name`, `request_model`, `response_model`；当 `operation_name=tool` 时还带 `tool_name`, `skill_name`, `model_name`, `tool_result_status`；当 `operation_name=skill` 时还带 `skill_name`, `skill_source` | Client 侧操作耗时。当前覆盖模型请求、工具执行和 skill 调用三类操作。 |
+说明：
+`gen_ai.client.*` 属于 OTEL 原生指标名。
+本插件不再向 `gen_ai.client.*` 写入自定义 token / operation 数据；本节仅保留 OTEL 原生语义说明。
+
+| 指标名 | 类型 | 单位 | tags | 描述                                                                                   |
+| --- | --- | --- | --- |--------------------------------------------------------------------------------------|
+| `gen_ai.client.token.usage` | Histogram | `{token}` | OTEL 原生 attrs，常见包括 `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.token.type`，以及可选的 `gen_ai.request.model`, `gen_ai.response.model`, `server.address`, `server.port` | Number of input and output tokens used. |
+| `gen_ai.client.operation.duration` | Histogram | `s` | OTEL 原生 attrs，常见包括 `gen_ai.operation.name`, `gen_ai.provider.name`，以及可选的 `gen_ai.request.model`, `gen_ai.response.model`, `server.address`, `server.port` | GenAI operation duration. |
 
 ### GenAI Agent
 
@@ -88,6 +106,9 @@
 | --- | --- | --- | --- | --- |
 | `gen_ai.agent.request.count` | Counter | - | `agent_runtime`, `channel`, `session_id`, `provider_name`, `request_model`, `session_state`, `outcome` | Agent request 总数。 |
 | `gen_ai.agent.request.duration` | Histogram | `ms` | `agent_runtime`, `channel`, `session_id`, `provider_name`, `request_model`, `session_state`, `outcome` | Agent request 总耗时。 |
+| `gen_ai.agent.token.usage` | Histogram | `{token}` | `agent_runtime`, `session_id`, `provider_name`, `request_model`, `response_model`, `token_type` | Agent 侧模型 token 用量。来自 runtime `model.usage` 事件以及 transcript / synthetic fallback 回放。 |
+| `gen_ai.agent.operation.count` | Counter | - | 基础：`agent_runtime`, `operation_name`, `outcome`<br>`operation_name=model`：`provider_name`, `request_model`, `response_model`<br>`operation_name=tool`：`tool_name`, `skill_name`, `model_name`, `tool_result_status`<br>`operation_name=skill`：`skill_name`, `skill_source` | Agent 侧 operation 次数统计。当前覆盖 `model`、`tool`、`skill` 三类操作。 |
+| `gen_ai.agent.operation.duration` | Histogram | `ms` | 基础：`agent_runtime`, `operation_name`, `outcome`<br>`operation_name=model`：`provider_name`, `request_model`, `response_model`<br>`operation_name=tool`：`tool_name`, `skill_name`, `model_name`, `tool_result_status`<br>`operation_name=skill`：`skill_name`, `skill_source` | Agent 侧 operation 耗时统计。当前覆盖 `model`、`tool`、`skill` 三类操作。 |
 | `gen_ai.agent.session.token.input` | Counter | 保持当前 | `agent_runtime`, `session_id`, `session_key`, `provider_name`, `request_model` | Session 级输入 token 聚合值，由 active session 周期扫描产生。 |
 | `gen_ai.agent.session.token.output` | Counter | 保持当前 | `agent_runtime`, `session_id`, `session_key`, `provider_name`, `request_model` | Session 级输出 token 聚合值，由 active session 周期扫描产生。 |
 | `gen_ai.agent.session.token.total` | Counter | 保持当前 | `agent_runtime`, `session_id`, `session_key`, `provider_name`, `request_model` | Session 级总 token 聚合值，由 active session 周期扫描产生。 |
@@ -119,8 +140,8 @@
    - `gen_ai.agent.request.count`
    - `gen_ai.agent.request.duration`
 2. 模型性能与 token 消耗优先看：
-   - `gen_ai.client.token.usage`
-   - `gen_ai.client.operation.duration`
+   - `gen_ai.agent.token.usage`
+   - `gen_ai.agent.operation.duration`
 3. 会话级分析优先看：
    - `gen_ai.agent.session.token.usage`
    - `gen_ai.agent.session.trace.count`
