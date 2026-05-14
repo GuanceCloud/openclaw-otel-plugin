@@ -4,8 +4,11 @@ set -euo pipefail
 REPO_OWNER="${OPENCLAW_PLUGIN_REPO_OWNER:-GuanceCloud}"
 REPO_NAME="${OPENCLAW_PLUGIN_REPO_NAME:-openclaw-otel-plugin}"
 PLUGIN_DIR="${OPENCLAW_PLUGIN_DIR:-$HOME/.openclaw/extensions/openclaw-otel-plugin}"
+CONFIG_FILE="${OPENCLAW_CONFIG_FILE:-$HOME/.openclaw/openclaw.json}"
 RESTART_GATEWAY=1
+WRITE_CONFIG=1
 VERSION_INPUT=""
+ENDPOINT=""
 
 log() {
   printf '[install] %s\n' "$1"
@@ -14,19 +17,31 @@ log() {
 usage() {
   cat <<'EOF'
 用法:
-  scripts/install.sh [latest|v0.1.0|0.1.0|/path/to/archive.tar.gz|https://...tar.gz] [--no-restart]
+  scripts/install.sh [latest|v0.6.0|0.6.0|/path/to/archive.tar.gz|https://...tar.gz] [--endpoint URL] [--no-config] [--no-restart]
 
 环境变量:
   OPENCLAW_PLUGIN_DIR        安装目录，默认 ~/.openclaw/extensions/openclaw-otel-plugin
+  OPENCLAW_CONFIG_FILE       OpenClaw 配置文件，默认 ~/.openclaw/openclaw.json
   OPENCLAW_PLUGIN_REPO_OWNER GitHub owner，默认 GuanceCloud
   OPENCLAW_PLUGIN_REPO_NAME  GitHub repo，默认 openclaw-otel-plugin
 EOF
 }
 
-for arg in "$@"; do
-  case "$arg" in
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --no-restart)
       RESTART_GATEWAY=0
+      ;;
+    --no-config)
+      WRITE_CONFIG=0
+      ;;
+    --endpoint)
+      shift
+      if [ "$#" -eq 0 ]; then
+        printf '[install] --endpoint 需要传入 URL\n' >&2
+        exit 1
+      fi
+      ENDPOINT="$1"
       ;;
     -h|--help)
       usage
@@ -34,10 +49,11 @@ for arg in "$@"; do
       ;;
     *)
       if [ -z "$VERSION_INPUT" ]; then
-        VERSION_INPUT="$arg"
+        VERSION_INPUT="$1"
       fi
       ;;
   esac
+  shift
 done
 
 if [ -z "$VERSION_INPUT" ]; then
@@ -91,6 +107,56 @@ install_payload() {
   cp -R "$payload_dir" "$PLUGIN_DIR"
 }
 
+configure_openclaw_json() {
+  require_command node
+
+  mkdir -p "$(dirname "$CONFIG_FILE")"
+
+  OPENCLAW_CONFIG_FILE_RUNTIME="$CONFIG_FILE" \
+  OPENCLAW_PLUGIN_DIR_RUNTIME="$PLUGIN_DIR" \
+  OPENCLAW_PLUGIN_ENDPOINT_RUNTIME="$ENDPOINT" \
+  node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const configFile = process.env.OPENCLAW_CONFIG_FILE_RUNTIME;
+const pluginDir = process.env.OPENCLAW_PLUGIN_DIR_RUNTIME;
+const endpoint = process.env.OPENCLAW_PLUGIN_ENDPOINT_RUNTIME || "";
+const pluginId = "openclaw-otel-plugin";
+
+let config = {};
+if (fs.existsSync(configFile)) {
+  const raw = fs.readFileSync(configFile, "utf8").trim();
+  if (raw) {
+    config = JSON.parse(raw);
+  }
+}
+
+config.plugins ??= {};
+config.plugins.allow = Array.isArray(config.plugins.allow) ? config.plugins.allow : [];
+if (!config.plugins.allow.includes(pluginId)) {
+  config.plugins.allow.push(pluginId);
+}
+
+config.plugins.load ??= {};
+config.plugins.load.paths = Array.isArray(config.plugins.load.paths) ? config.plugins.load.paths : [];
+if (!config.plugins.load.paths.includes(pluginDir)) {
+  config.plugins.load.paths.push(pluginDir);
+}
+
+config.plugins.entries ??= {};
+config.plugins.entries[pluginId] ??= {};
+config.plugins.entries[pluginId].enabled = true;
+config.plugins.entries[pluginId].config ??= {};
+if (endpoint) {
+  config.plugins.entries[pluginId].config.endpoint = endpoint;
+}
+
+fs.mkdirSync(path.dirname(configFile), { recursive: true });
+fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+NODE
+}
+
 main() {
   require_command curl
   require_command tar
@@ -134,20 +200,35 @@ main() {
 
   install_payload "$payload_dir"
   log "installed to ${PLUGIN_DIR}"
+  if [ "$WRITE_CONFIG" -eq 1 ]; then
+    configure_openclaw_json
+    log "updated ${CONFIG_FILE}"
+  else
+    cat <<EOF
 
-  cat <<EOF
-
-请确认 ~/.openclaw/openclaw.json 中已允许并加载该插件:
+请确认 ${CONFIG_FILE} 中已允许并加载该插件:
 
 {
   "plugins": {
     "allow": ["openclaw-otel-plugin"],
     "load": {
       "paths": ["${PLUGIN_DIR}"]
+    },
+    "entries": {
+      "openclaw-otel-plugin": {
+        "enabled": true
+      }
     }
   }
 }
 EOF
+  fi
+
+  if [ -n "$ENDPOINT" ]; then
+    log "configured OTLP endpoint: ${ENDPOINT}"
+  else
+    log "未设置 endpoint；如需立即启用，请在 ${CONFIG_FILE} 中为 openclaw-otel-plugin.config.endpoint 填写 OTLP 地址"
+  fi
 
   if [ "$RESTART_GATEWAY" -eq 1 ] && command -v openclaw >/dev/null 2>&1; then
     log "restarting openclaw gateway"

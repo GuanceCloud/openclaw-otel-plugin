@@ -90,27 +90,40 @@ Trace 说明：
 ## 安装
 
 推荐直接安装 release 包，不要求目标机器具备 Node.js 构建环境。
+安装脚本现在会自动把插件注册到 `~/.openclaw/openclaw.json`，并且可以在安装时顺手写入 OTLP endpoint。
 
 构建、打包、源码安装和发布流程见 [BUILDING.md](./BUILDING.md)。
 
-### 方式一：安装 GitHub Release
+### 方式一：快速安装
 
 ```bash
-git clone https://github.com/GuanceCloud/openclaw-otel-plugin.git
-cd openclaw-otel-plugin
-bash scripts/install.sh latest
+curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
+  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh
+bash /tmp/openclaw-otel-plugin-install.sh latest --endpoint http://127.0.0.1:4318/otel
 ```
 
 也可以安装指定版本：
 
 ```bash
-bash scripts/install.sh v0.6.0
+bash /tmp/openclaw-otel-plugin-install.sh v0.6.0 --endpoint http://127.0.0.1:4318/otel
+```
+
+如果只是先安装，稍后再补 endpoint：
+
+```bash
+bash /tmp/openclaw-otel-plugin-install.sh latest
 ```
 
 ### 方式二：安装本地打包产物
 
 ```bash
 bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz
+```
+
+安装本地包时也可以一并写入 endpoint：
+
+```bash
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz --endpoint http://127.0.0.1:4318/otel
 ```
 
 ## 升级
@@ -135,7 +148,15 @@ bash scripts/update.sh latest --no-restart
 
 ## 配置
 
-在 `~/.openclaw/openclaw.json` 中加入：
+如果安装时已经传了 `--endpoint`，脚本会自动写入最小可用配置。
+
+只有在下面这些场景才需要手动配置：
+
+- 安装时没有填写 endpoint
+- 需要补充高级配置
+- 安装时使用了 `--no-config`
+
+`~/.openclaw/openclaw.json` 最小示例：
 
 ```json
 {

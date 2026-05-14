@@ -62,8 +62,8 @@ npm run pack:release
 
 会生成到 `output/` 目录，例如：
 
-- `output/openclaw-otel-plugin-v0.1.0.tar.gz`
-- `output/openclaw-otel-plugin-v0.1.0.tar.gz.sha256`
+- `output/openclaw-otel-plugin-v0.6.0.tar.gz`
+- `output/openclaw-otel-plugin-v0.6.0.tar.gz.sha256`
 
 打包内容包括：
 
@@ -81,5 +81,5 @@ npm run pack:release
 1. 更新代码和文档。
 2. 运行 `npm test`。
 3. 运行 `npm run pack:release`。
-4. 提交版本变更并打 tag，例如 `v0.1.0`。
+4. 提交版本变更并打 tag，例如 `v0.6.0`。
 5. 将 `output/openclaw-otel-plugin-vX.Y.Z.tar.gz` 和对应 `.sha256` 上传到 GitHub Release。

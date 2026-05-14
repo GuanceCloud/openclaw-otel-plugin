@@ -90,27 +90,40 @@ Compatibility notes:
 ## Install
 
 The recommended path is to install a prebuilt release package so the target machine does not need a local Node.js build toolchain.
+The installer now registers the plugin in `~/.openclaw/openclaw.json` automatically, and can write the OTLP endpoint in the same step.
 
 For build, packaging, source install, and release workflow, see [BUILDING.md](./BUILDING.md).
 
-### Option 1: Install From GitHub Release
+### Option 1: Quick Install
 
 ```bash
-git clone https://github.com/GuanceCloud/openclaw-otel-plugin.git
-cd openclaw-otel-plugin
-bash scripts/install.sh latest
+curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
+  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh
+bash /tmp/openclaw-otel-plugin-install.sh latest --endpoint http://127.0.0.1:4318/otel
 ```
 
 Install a specific version:
 
 ```bash
-bash scripts/install.sh v0.6.0
+bash /tmp/openclaw-otel-plugin-install.sh v0.6.0 --endpoint http://127.0.0.1:4318/otel
+```
+
+If you want to install first and fill the endpoint later:
+
+```bash
+bash /tmp/openclaw-otel-plugin-install.sh latest
 ```
 
 ### Option 2: Install From A Local Release Artifact
 
 ```bash
 bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz
+```
+
+You can also write the endpoint while installing a local artifact:
+
+```bash
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz --endpoint http://127.0.0.1:4318/otel
 ```
 
 ## Update
@@ -135,7 +148,15 @@ bash scripts/update.sh latest --no-restart
 
 ## Configure
 
-Add the plugin to `~/.openclaw/openclaw.json`:
+If you installed with `--endpoint`, the installer already writes the minimal plugin registration for you.
+
+Manual configuration is only needed when:
+
+- you skipped endpoint setup during install
+- you want to customize advanced fields
+- you disabled config writing with `--no-config`
+
+Minimal example in `~/.openclaw/openclaw.json`:
 
 ```json
 {
