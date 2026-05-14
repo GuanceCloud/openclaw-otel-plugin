@@ -36,6 +36,7 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
   return {
     span: null,
     ctx,
+    runIds: new Set(),
     startedAt,
     lastTouchedAt: startedAt,
     mainStartTs,
@@ -142,6 +143,86 @@ export function resolveSessionSpanName(
 ): string {
   const name = sessionIdentity(evt)?.trim();
   return name || fallback;
+}
+
+export function buildTranscriptReplayEvent(
+  sessionKey: string,
+  snapshot: Pick<SessionSnapshot, "sessionId" | "runId" | "lastAssistantTs" | "lastChannel">,
+): {
+  sessionKey: string;
+  sessionId?: string;
+  runId?: string;
+  ts?: number;
+  channel?: string;
+} {
+  return {
+    sessionKey,
+    sessionId: snapshot.sessionId,
+    runId: snapshot.runId,
+    ts: snapshot.lastAssistantTs,
+    channel: snapshot.lastChannel,
+  };
+}
+
+export function rememberRunId(
+  state: {
+    runId?: string;
+    runIds?: Set<string>;
+  },
+  nextRunId?: string,
+): boolean {
+  const normalizedRunId = typeof nextRunId === "string" ? nextRunId.trim() : "";
+  if (!normalizedRunId) {
+    return false;
+  }
+  let changed = false;
+  if (!state.runId) {
+    state.runId = normalizedRunId;
+    changed = true;
+  }
+  if (!state.runIds) {
+    state.runIds = new Set<string>();
+  }
+  const sizeBefore = state.runIds.size;
+  state.runIds.add(normalizedRunId);
+  return changed || state.runIds.size !== sizeBefore;
+}
+
+export function buildRunScopeAttrs(
+  primaryRunId?: string,
+  ...runIdSources: Array<string | Iterable<string> | undefined>
+): {
+  run_id?: string;
+  run_ids?: string;
+} {
+  const seen = new Set<string>();
+  const orderedRunIds: string[] = [];
+  const push = (value: string | undefined) => {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    orderedRunIds.push(normalized);
+  };
+  push(primaryRunId);
+  for (const source of runIdSources) {
+    if (!source) {
+      continue;
+    }
+    if (typeof source === "string") {
+      push(source);
+      continue;
+    }
+    for (const value of source) {
+      push(value);
+    }
+  }
+  const resolvedPrimaryRunId = orderedRunIds[0];
+  return {
+    run_id: resolvedPrimaryRunId,
+    run_ids: orderedRunIds.length > 0 ? orderedRunIds.join(",") : undefined,
+  };
 }
 
 export function parseSessionKey(
@@ -321,6 +402,18 @@ function withCanonicalAliases(
   promoteAlias(next, "usage_total_tokens", "openclaw.tokens.total", "llm.total_tokens");
   promoteAlias(next, "usage_cache_read_input_tokens", "openclaw.tokens.cache_read");
   promoteAlias(next, "usage_cache_write_input_tokens", "openclaw.tokens.cache_write");
+  const cacheReadTokens = typeof next.usage_cache_read_input_tokens === "number"
+    ? next.usage_cache_read_input_tokens
+    : undefined;
+  const cacheWriteTokens = typeof next.usage_cache_write_input_tokens === "number"
+    ? next.usage_cache_write_input_tokens
+    : undefined;
+  if (
+    next.usage_cache_total_tokens === undefined
+    && (cacheReadTokens !== undefined || cacheWriteTokens !== undefined)
+  ) {
+    next.usage_cache_total_tokens = (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0);
+  }
   delete next["llm.provider"];
   delete next["llm.model"];
   delete next["llm.input_tokens"];

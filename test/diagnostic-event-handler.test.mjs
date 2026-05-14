@@ -883,7 +883,7 @@ test("session.state idle skips duplicate replay after the transcript has already
   assert.equal(clearRunCalls, 0);
 });
 
-test("model.usage emits model_request span and preserves model context", () => {
+test("model.usage emits llm span and preserves model context", () => {
   const childCalls = [];
   const run = {
     ctx: { ctx: "run" },
@@ -969,14 +969,14 @@ test("model.usage emits model_request span and preserves model context", () => {
     durationMs: 400,
   });
 
-  assert.equal(childCalls[0].name, "model_request");
+  assert.equal(childCalls[0].name, "llm");
   assert.equal(childCalls[0].attrs["span.kind"], "model");
   assert.equal(childCalls[0].attrs["openclaw.model"], "gpt-5");
   assert.equal(childCalls[0].attrs["llm.model"], "gpt-5");
   assert.equal(childCalls[0].span.status.code, "OK");
   assert.equal(childCalls[0].span.ended, true);
   assert.equal(run.modelStartTs, 600);
-  assert.equal(run.modelCtx.span.name, "model_request");
+  assert.equal(run.modelCtx.span.name, "llm");
 });
 
 test("model.usage uses snapshot sessionId for gen_ai agent token metrics when event sessionId is missing", () => {

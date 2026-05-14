@@ -12,7 +12,6 @@ export type OtelPluginConfig = {
   flushIntervalMs: number;
   rootSpanTtlMs: number;
   tracePayloadDebugEnabled: boolean;
-  tracePayloadDebugTraceIds?: string[];
   resourceAttributes?: Record<string, string | number | boolean>;
 };
 
@@ -175,7 +174,6 @@ export function resolveOtelPluginConfig(rawConfig: unknown): OtelPluginConfig {
     flushIntervalMs: normalizeMs(raw.flushIntervalMs, DEFAULT_FLUSH_INTERVAL_MS),
     rootSpanTtlMs: normalizeMs(raw.rootSpanTtlMs, DEFAULT_ROOT_SPAN_TTL_MS),
     tracePayloadDebugEnabled: raw.tracePayloadDebugEnabled === true,
-    tracePayloadDebugTraceIds: asStringArray(raw.tracePayloadDebugTraceIds),
     resourceAttributes: resolveResourceAttributes(raw),
   };
 }

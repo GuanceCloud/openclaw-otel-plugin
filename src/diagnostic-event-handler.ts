@@ -346,7 +346,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       }
       case "run.attempt": {
         const attemptAttrs = {
-          "openclaw.runId": evt.runId,
+          run_id: evt.runId,
           "openclaw.attempt": evt.attempt,
         };
         const root = getRoot(evt, true);
@@ -551,7 +551,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           run.orchestrationCursorTs = evt.ts;
         } else {
           const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
-            "model_request",
+            "llm",
             evt,
             enrichedModelUsageAttrs,
             evt.durationMs,

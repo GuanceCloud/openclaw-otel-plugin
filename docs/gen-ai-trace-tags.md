@@ -13,12 +13,12 @@
 - 当前 trace 里，`AI Agent` 的主要观测边界是：
   - `openclaw_request`：一条用户消息对应的一次完整请求
   - `agent_run`：这次请求里的 agent 主执行窗口
-  - `model_request`：agent 在执行过程中发起的一次模型调用
+  - `llm`：agent 在执行过程中发起的一次模型调用
   - `skill:* / tool:*`：agent 在执行过程中使用的能力与外部操作
 - 因此：
-  - `model_request` 不等于 `agent`
+  - `llm` 不等于 `agent`
   - `agent_run` 才是最接近 `AI Agent execution` 的 span
-  - 多轮 `model_request`、`tool:*`、`skill:*` 共同构成一次 agent 执行
+  - 多轮 `llm`、`tool:*`、`skill:*` 共同构成一次 agent 执行
 
 ## 最终 Span 规范
 
@@ -30,7 +30,7 @@
 - `agent_run`
 - `session_processing`
 - `runtime_orchestration`
-- `model_request`
+- `llm`
 - `skill:*`
 - `skill_call:*`
 - `tool:*`
@@ -47,8 +47,8 @@
 说明：
 
 - 这些节点当前通过已有 span 的走向、属性或结果来表达，不额外创建独立 span
-- `Final Answer` 由最后一个 `model_request` 与 `channel_egress` 共同表示
-- `Decision Router` 由 `model_request` 之后进入 `skill/tool/finish` 的分支体现
+- `Final Answer` 由最后一个 `llm` 与 `channel_egress` 共同表示
+- `Decision Router` 由 `llm` 之后进入 `skill/tool/finish` 的分支体现
 
 ### 设计边界
 
@@ -87,7 +87,7 @@
   - token 汇总
   - 最终执行结果
 
-### `model_request`
+### `llm`
 
 表示“一次模型请求”。
 
@@ -106,7 +106,15 @@
 - `status`
   - 表示当前 span 自身的执行状态
   - 用于判断某个具体 span 是否报错
-  - 例如 `tool:*`、`model_request`、`channel_egress` 是否执行失败
+  - 例如 `tool:*`、`llm`、`channel_egress` 是否执行失败
+
+  当前推荐按以下语义理解：
+
+  | 值 | 含义 |
+  | --- | --- |
+  | `ok` | 当前 span 执行成功 |
+  | `error` | 当前 span 执行失败 |
+  | `unset` / 空 | 当前 span 没有显式设置状态 |
 
 - `final_status`
   - 表示一条 `openclaw_request` / `agent_run` 最终的业务结果
@@ -132,7 +140,7 @@
 补充说明：
 
 - `completed` 不要求所有子 span 都没有错误；只要 agent 最终成功产出结果即可
-- `error` 表示从业务结果看本轮失败，不等同于某个单独 `tool:*` 或 `model_request` 的 `status = error`
+- `error` 表示从业务结果看本轮失败，不等同于某个单独 `tool:*` 或 `llm` 的 `status = error`
 - `superseded` 常见于同一会话里新消息到来，旧请求被提前收尾
 
 ## Resource 级字段
@@ -158,6 +166,8 @@
 | 字段 | 描述 |
 | --- | --- |
 | `channel` | 当前消息所属通道，例如 `feishu` |
+| `run_id` | OpenClaw 首次观测到的执行标识；同一条用户请求发生内部续跑时不覆盖 |
+| `run_ids` | 同一条 trace 内观测到的全部 `run_id`，按首次出现顺序逗号拼接 |
 | `session_id` | session id，推荐用于和 metrics 侧字段对齐 |
 | `session_key` | session key，推荐主字段 |
 | `session_namespace` | session namespace |
@@ -211,6 +221,7 @@
 | `usage_total_tokens` | 总 token 数 |
 | `usage_cache_read_input_tokens` | cache read token 数 |
 | `usage_cache_write_input_tokens` | cache write token 数 |
+| `usage_cache_total_tokens` | cache read + cache write token 总数 |
 
 ## Tool 相关字段
 

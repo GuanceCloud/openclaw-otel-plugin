@@ -135,6 +135,106 @@ function readSessionCreatedAt(sessionFile: string): number | undefined {
   return undefined;
 }
 
+function readSessionLatestRunId(sessionFile: string): string | undefined {
+  const trajectoryFile = resolveSessionTrajectoryFile(sessionFile);
+  if (!trajectoryFile || !fs.existsSync(trajectoryFile)) {
+    return undefined;
+  }
+  let latestRunId: string | undefined;
+  try {
+    for (const line of readJsonLines(trajectoryFile)) {
+      const runId = typeof line?.runId === "string" ? line.runId.trim() : "";
+      if (!runId) {
+        continue;
+      }
+      latestRunId = runId;
+    }
+  } catch {
+    // Ignore trajectory read failures; session traces can still be emitted.
+  }
+  return latestRunId;
+}
+
+function readSessionLatestRunState(
+  sessionFile: string,
+): { runId?: string; runCompleted?: boolean; runTerminalType?: string } {
+  const trajectoryFile = resolveSessionTrajectoryFile(sessionFile);
+  if (!trajectoryFile || !fs.existsSync(trajectoryFile)) {
+    return {};
+  }
+  let latestRunId: string | undefined;
+  let latestRunTerminalType: string | undefined;
+  try {
+    for (const line of readJsonLines(trajectoryFile)) {
+      const runId = typeof line?.runId === "string" ? line.runId.trim() : "";
+      if (!runId) {
+        continue;
+      }
+      latestRunId = runId;
+      latestRunTerminalType = typeof line?.type === "string" ? line.type : undefined;
+    }
+  } catch {
+    return {};
+  }
+  const runCompleted = latestRunTerminalType === "trace.artifacts" || latestRunTerminalType === "session.ended";
+  return {
+    runId: latestRunId,
+    runCompleted,
+    runTerminalType: latestRunTerminalType,
+  };
+}
+
+function readSessionRunState(
+  sessionFile: string,
+  targetRunId?: string,
+): { runId?: string; runCompleted?: boolean; runTerminalType?: string } {
+  if (!targetRunId) {
+    return readSessionLatestRunState(sessionFile);
+  }
+  const trajectoryFile = resolveSessionTrajectoryFile(sessionFile);
+  if (!trajectoryFile || !fs.existsSync(trajectoryFile)) {
+    return {};
+  }
+  let sawRunId = false;
+  let latestType: string | undefined;
+  let runCompleted = false;
+  try {
+    for (const line of readJsonLines(trajectoryFile)) {
+      const runId = typeof line?.runId === "string" ? line.runId.trim() : "";
+      if (runId !== targetRunId) {
+        continue;
+      }
+      sawRunId = true;
+      latestType = typeof line?.type === "string" ? line.type : latestType;
+      if (latestType === "trace.artifacts" || latestType === "session.ended") {
+        runCompleted = true;
+      }
+    }
+  } catch {
+    return {};
+  }
+  if (!sawRunId) {
+    return {};
+  }
+  return {
+    runId: targetRunId,
+    runCompleted,
+    runTerminalType: latestType,
+  };
+}
+
+function readTrajectoryMtimeMs(sessionFile: string): number | undefined {
+  const trajectoryFile = resolveSessionTrajectoryFile(sessionFile);
+  if (!trajectoryFile || !fs.existsSync(trajectoryFile)) {
+    return undefined;
+  }
+  try {
+    return fs.statSync(trajectoryFile).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createSessionSnapshotStore(stateDir: string): SessionSnapshotStore {
   const transcriptSnapshotBySession = new Map<string, SessionSnapshot>();
   const latestAssistantTextBySession = new Map<string, string>();
@@ -279,8 +379,14 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
     }
     try {
       const stats = fs.statSync(sessionFile);
+      const trajectoryMtimeMs = readTrajectoryMtimeMs(sessionFile);
       const cached = transcriptSnapshotBySession.get(sessionKey);
-      if (cached && cached.sessionFile === sessionFile && cached.mtimeMs === stats.mtimeMs) {
+      if (
+        cached
+        && cached.sessionFile === sessionFile
+        && cached.mtimeMs === stats.mtimeMs
+        && cached.trajectoryMtimeMs === trajectoryMtimeMs
+      ) {
         const liveAssistantText = latestAssistantTextBySession.get(sessionKey);
         if (liveAssistantText && liveAssistantText !== cached.lastAssistantText) {
           cached.lastAssistantText = liveAssistantText;
@@ -482,10 +588,14 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       )) {
         mentionedSkillNames.add(skillName);
       }
+      const latestRunState = readSessionLatestRunState(sessionFile);
       const snapshot: SessionSnapshot = {
         sessionFile,
         sessionKey,
         sessionId: sessionMetaBySessionKey.get(sessionKey)?.sessionId,
+        runId: latestRunState.runId ?? readSessionLatestRunId(sessionFile),
+        runCompleted: latestRunState.runCompleted,
+        runTerminalType: latestRunState.runTerminalType,
         createdAt: readSessionCreatedAt(sessionFile),
         updatedAt: sessionMetaBySessionKey.get(sessionKey)?.updatedAt,
         chatType: sessionMetaBySessionKey.get(sessionKey)?.chatType,
@@ -510,6 +620,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         sessionUsageTotals,
         traceCount,
         mtimeMs: stats.mtimeMs,
+        trajectoryMtimeMs,
       };
       transcriptSnapshotBySession.set(sessionKey, snapshot);
       return snapshot;
@@ -521,6 +632,20 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
   return {
     refreshSessionsIndex,
     loadSessionSnapshot,
+    resolveSessionKeyByFile(sessionFile: string) {
+      for (const [sessionKey, currentSessionFile] of sessionFileBySessionKey.entries()) {
+        if (currentSessionFile === sessionFile) {
+          return sessionKey;
+        }
+      }
+      refreshSessionsIndex();
+      for (const [sessionKey, currentSessionFile] of sessionFileBySessionKey.entries()) {
+        if (currentSessionFile === sessionFile) {
+          return sessionKey;
+        }
+      }
+      return undefined;
+    },
     setLatestAssistantText(sessionKey: string, text: string) {
       latestAssistantTextBySession.set(sessionKey, text);
       const cached = transcriptSnapshotBySession.get(sessionKey);
@@ -534,6 +659,20 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           transcriptSnapshotBySession.delete(sessionKey);
         }
       }
+    },
+    loadSessionRunState(sessionKey: string | undefined, runId?: string) {
+      if (!sessionKey) {
+        return {};
+      }
+      let sessionFile = sessionFileBySessionKey.get(sessionKey);
+      if (!sessionFile) {
+        refreshSessionsIndex();
+        sessionFile = sessionFileBySessionKey.get(sessionKey);
+      }
+      if (!sessionFile) {
+        return {};
+      }
+      return readSessionRunState(sessionFile, runId);
     },
     clear() {
       transcriptSnapshotBySession.clear();

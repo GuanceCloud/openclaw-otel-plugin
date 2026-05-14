@@ -12,7 +12,7 @@
 - A request-scoped root span named `openclaw_request`
 - A request-scoped run span named `agent_run`
 - Runtime lifecycle spans such as `channel_ingress`, `dispatch_queue`, `session_processing`, `runtime_orchestration`, and `channel_egress`
-- Model spans named `model_request`
+- Model spans named `llm`
 - Skill summary spans such as `skill:<name>`
 - Skill call spans such as `skill_call:<name>`
 - Tool spans such as `tool:<name>`
@@ -22,7 +22,7 @@ Trace notes:
 
 - One inbound user message maps to one trace
 - `message.processed` replays transcript turns first; trailing `session.state idle` only acts as a fallback close path
-- Transcript replay emits one `model_request` per assistant turn so multi-tool sessions show `model -> tool -> model` loops instead of one oversized model span
+- Transcript replay emits one `llm` per assistant turn so multi-tool sessions show `model -> tool -> model` loops instead of one oversized model span
 
 ### Metrics
 
@@ -382,6 +382,7 @@ Then send a test message in OpenClaw and query by:
 - Check auth headers
 - Check whether the plugin entry is enabled
 - Check `gateway.log` for `enabled`, `succeeded`, or `failed` exporter lines
+- When debugging trace parent/child links or missing `run_id`, enable `tracePayloadDebugEnabled=true` to log the full trace export payload before OTLP export
 
 ### Logs missing
 

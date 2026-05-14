@@ -942,6 +942,8 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
         lastAssistantUsage: {
           input: 12,
           output: 34,
+          cacheRead: 5,
+          cacheWrite: 7,
           totalTokens: 46,
         },
       };
@@ -967,7 +969,7 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
     durationMs: 900,
   });
 
-  const modelSpan = spans.find((span) => span.name === "model_request");
+  const modelSpan = spans.find((span) => span.name === "llm");
   assert.ok(modelSpan);
   assert.deepEqual(getRunCalls, [true]);
   assert.equal(modelSpan.options.kind, "client");
@@ -975,6 +977,9 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
   assert.equal(modelSpan.options.attributes.usage_input_tokens, 12);
   assert.equal(modelSpan.options.attributes.usage_output_tokens, 34);
   assert.equal(modelSpan.options.attributes.usage_total_tokens, 46);
+  assert.equal(modelSpan.options.attributes.usage_cache_read_input_tokens, 5);
+  assert.equal(modelSpan.options.attributes.usage_cache_write_input_tokens, 7);
+  assert.equal(modelSpan.options.attributes.usage_cache_total_tokens, 12);
   assert.equal(modelSpan.options.attributes["llm.input_tokens"], undefined);
   assert.equal(modelSpan.parentCtx.ctx, "run");
   assert.equal(modelSpan.status.code, "OK");
@@ -1224,7 +1229,7 @@ test("transcript model spans are replayed per assistant turn", () => {
 
   assert.equal(emitted, true);
   assert.equal(run.mainStartTs, 1000);
-  const modelSpans = spans.filter((span) => span.name === "model_request");
+  const modelSpans = spans.filter((span) => span.name === "llm");
   assert.equal(modelSpans.length, 2);
   assert.equal(spans.some((span) => span.name === "thinking"), false);
   assert.equal(modelSpans[0].options.startTime.getTime(), 1000);
@@ -1232,11 +1237,23 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(modelSpans[0].options.attributes.input_preview, "first question");
   assert.equal(modelSpans[0].options.attributes.output_preview, "first answer");
   assert.equal(modelSpans[0].options.attributes.output_summary, "first reasoning");
+  assert.equal(modelSpans[0].options.attributes.usage_input_tokens, 11);
+  assert.equal(modelSpans[0].options.attributes.usage_output_tokens, 7);
+  assert.equal(modelSpans[0].options.attributes.usage_total_tokens, 18);
   assert.equal(modelSpans[1].options.startTime.getTime(), 2300);
   assert.equal(modelSpans[1].endTime.getTime(), 2600);
   assert.equal(modelSpans[1].options.attributes.input_preview, "{\"status\":\"ok\"}");
   assert.equal(modelSpans[1].options.attributes.output_preview, "second answer");
   assert.equal(modelSpans[1].options.attributes.output_summary, "second reasoning");
+  assert.equal(modelSpans[1].options.attributes.usage_input_tokens, 13);
+  assert.equal(modelSpans[1].options.attributes.usage_output_tokens, 5);
+  assert.equal(modelSpans[1].options.attributes.usage_total_tokens, 18);
+  assert.equal(run.span.attributes.usage_input_tokens, 24);
+  assert.equal(run.span.attributes.usage_output_tokens, 12);
+  assert.equal(run.span.attributes.usage_total_tokens, 36);
+  assert.equal(rootSpan.attributes.usage_input_tokens, 24);
+  assert.equal(rootSpan.attributes.usage_output_tokens, 12);
+  assert.equal(rootSpan.attributes.usage_total_tokens, 36);
   assert.equal(durationRecords.length, 2);
   assert.deepEqual(
     durationRecords.map(({ value, attrs }) => ({
@@ -1300,6 +1317,184 @@ test("transcript model spans are replayed per assistant turn", () => {
     })),
     [
       { value: 1000, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 300, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
+    ],
+  );
+});
+
+test("transcript model replay skips turns already covered by runtime model usage", () => {
+  const spans = [];
+  const durationRecords = [];
+  const tokenRecords = [];
+  const agentOperationCounts = [];
+  const agentOperationDurations = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  const run = createRunState({ ctx: "root" }, 1000, 1000);
+  run.span = createFakeSpan("agent_run");
+  run.ctx = { ctx: "run" };
+  run.modelSpanEmitted = true;
+  run.aggregate.inputTokens = 11;
+  run.aggregate.outputTokens = 7;
+  run.aggregate.totalTokens = 18;
+  run.aggregate.modelCalls = 1;
+  run.aggregate.lastProvider = "openai";
+  run.aggregate.lastModel = "gpt-5";
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+      genAiAgentTokenUsage: {
+        record(value, attrs) {
+          tokenRecords.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationCount: {
+        add(value, attrs) {
+          agentOperationCounts.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationDuration: {
+        record(value, attrs) {
+          agentOperationDurations.push({ value, attrs });
+          durationRecords.push({ value, attrs });
+        },
+      },
+    },
+    getRun() {
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      throw new Error("not expected");
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 1000,
+        sessionId: "sid-1",
+        lastChannel: "chat",
+        lastProvider: "openai",
+        lastModel: "gpt-5",
+        lastRunAssistantTurns: [
+          {
+            startedAt: 1000,
+            endedAt: 2000,
+            provider: "openai",
+            model: "gpt-5",
+            usage: {
+              input: 11,
+              output: 7,
+              totalTokens: 18,
+            },
+            inputPreview: "first question",
+            thinking: "first reasoning",
+            text: "first answer",
+            outputPreview: "first answer",
+            outputKind: "text",
+          },
+          {
+            startedAt: 2300,
+            endedAt: 2600,
+            provider: "openai",
+            model: "gpt-5",
+            usage: {
+              input: 13,
+              output: 5,
+              totalTokens: 18,
+            },
+            inputPreview: "{\"status\":\"ok\"}",
+            thinking: "second reasoning",
+            text: "second answer",
+            outputPreview: "second answer",
+            outputKind: "text",
+          },
+        ],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  const emitted = manager.emitTranscriptModelSpans({ sessionKey: "s1", ts: 3000 });
+
+  assert.equal(emitted, true);
+  const modelSpans = spans.filter((span) => span.name === "llm");
+  assert.equal(modelSpans.length, 1);
+  assert.equal(modelSpans[0].options.startTime.getTime(), 2300);
+  assert.equal(modelSpans[0].endTime.getTime(), 2600);
+  assert.equal(modelSpans[0].options.attributes.usage_input_tokens, 13);
+  assert.equal(modelSpans[0].options.attributes.usage_output_tokens, 5);
+  assert.equal(modelSpans[0].options.attributes.usage_total_tokens, 18);
+  assert.equal(run.aggregate.inputTokens, 24);
+  assert.equal(run.aggregate.outputTokens, 12);
+  assert.equal(run.aggregate.totalTokens, 36);
+  assert.equal(run.aggregate.modelCalls, 2);
+  assert.equal(run.transcriptAssistantTurnsEmitted, 2);
+  assert.equal(run.span.attributes.usage_input_tokens, 24);
+  assert.equal(run.span.attributes.usage_output_tokens, 12);
+  assert.equal(run.span.attributes.usage_total_tokens, 36);
+  assert.equal(rootSpan.attributes.usage_input_tokens, 24);
+  assert.equal(rootSpan.attributes.usage_output_tokens, 12);
+  assert.equal(rootSpan.attributes.usage_total_tokens, 36);
+  assert.deepEqual(
+    tokenRecords.map(({ value, attrs }) => ({
+      value,
+      token_type: attrs.token_type,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
+      { value: 13, token_type: "input", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 5, token_type: "output", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 18, token_type: "total", request_model: "gpt-5", session_id: "sid-1" },
+    ],
+  );
+  assert.deepEqual(
+    agentOperationCounts.map(({ value, attrs }) => ({
+      value,
+      operation_name: attrs.operation_name,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
+      { value: 1, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
+    ],
+  );
+  assert.deepEqual(
+    agentOperationDurations.map(({ value, attrs }) => ({
+      value,
+      operation_name: attrs.operation_name,
+      request_model: attrs.request_model,
+      session_id: attrs.session_id,
+    })),
+    [
       { value: 300, operation_name: "model", request_model: "gpt-5", session_id: "sid-1" },
     ],
   );
@@ -1391,7 +1586,7 @@ test("transcript model replay only appends turns that were not emitted yet", () 
   ];
   assert.equal(manager.emitTranscriptModelSpans({ sessionKey: "s1", ts: 4000 }), true);
 
-  const modelSpans = spans.filter((span) => span.name === "model_request");
+  const modelSpans = spans.filter((span) => span.name === "llm");
   assert.equal(modelSpans.length, 2);
   assert.equal(run.transcriptAssistantTurnsEmitted, 2);
   assert.equal(modelSpans[0].options.startTime.getTime(), 1000);
@@ -1472,7 +1667,7 @@ test("transcript model spans do not inherit session output preview without turn 
 
   manager.emitTranscriptModelSpans({ sessionKey: "s1", ts: 3000 });
 
-  const modelSpan = spans.find((span) => span.name === "model_request");
+  const modelSpan = spans.find((span) => span.name === "llm");
   assert.ok(modelSpan);
   assert.equal(modelSpan.options.attributes.input_preview, "search result payload");
   assert.equal("output_preview" in modelSpan.options.attributes, false);

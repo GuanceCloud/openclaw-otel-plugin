@@ -2,6 +2,18 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-05-14
+
+### Trace Debugging
+
+- Fixed transcript fallback replay so snapshot-backed spans now carry `run_id` when a run is reconstructed from session transcript state.
+- Fixed transcript-replayed `llm` spans so per-turn token usage is written back onto trace attrs, transcript-only runs now accumulate token totals onto `agent_run` / `openclaw_request` summary spans, and runtime-covered model turns are not double-counted during replay.
+- Added `usage_cache_total_tokens` trace tag as the sum of `usage_cache_read_input_tokens` and `usage_cache_write_input_tokens`.
+- Restored request trace grouping to session/request lineage instead of forcing one trace per `run_id`, while keeping `run_id` on emitted spans for correlation.
+- Preserved the first `run_id` on request / run summary spans when a request triggers multiple internal runs, and added `run_ids` as the ordered aggregate of every observed run id on that trace.
+- Simplified trace payload debugging back to a single `tracePayloadDebugEnabled` switch so enabling debug always logs the full exported payload.
+- Extended trace export payload debug logs to include `run_id` alongside `trace_id`, `span_id`, and `parent_id`.
+
 ## 2026-05-12
 
 ### Installation Flow
@@ -72,8 +84,8 @@ Current work is recorded by calendar day. Historical entries before the current 
 - Fixed repeated `message.queued` handling so a pending run is reused instead of starting a duplicate trace.
 - Added replay watermarks so the same transcript is only finalized once across `message.processed` and trailing `session.state idle` events.
 - Made the model span mandatory when transcript metadata already includes `provider` and `model`, even if runtime `model.usage` is missing.
-- Renamed model span resources to the fixed name `model_request` instead of embedding `provider/model` in the span name.
-- Switched transcript replay from one synthetic span per run to one `model_request` per assistant turn, so multi-tool sessions show `model -> tool -> model` loops correctly.
+- Renamed model span resources to the fixed name `llm` instead of embedding `provider/model` in the span name.
+- Switched transcript replay from one synthetic span per run to one `llm` per assistant turn, so multi-tool sessions show `model -> tool -> model` loops correctly.
 - Moved per-turn transcript replay to `message.processed` first and kept `session.state idle` as a fallback-only close path.
 
 ### Runtime Lifecycle

@@ -21,7 +21,6 @@ type OtelLogger = {
 
 type TracePayloadDebugOptions = {
   enabled: boolean;
-  traceIds?: string[];
 };
 
 function compactResourceAttrs(
@@ -91,23 +90,23 @@ function collectTracePayloadSummary(
   if (!debugOptions?.enabled || !Array.isArray(items) || items.length === 0) {
     return undefined;
   }
-  const filter = new Set((debugOptions.traceIds ?? []).filter(Boolean));
   const spans = items
     .map((item) => {
       const spanContext = typeof (item as { spanContext?: unknown }).spanContext === "function"
         ? ((item as { spanContext: () => { traceId?: string; spanId?: string } }).spanContext())
         : (item as { spanContext?: { traceId?: string; spanId?: string } }).spanContext;
       const traceId = spanContext?.traceId;
-      if (!traceId || (filter.size > 0 && !filter.has(traceId))) {
+      if (!traceId) {
         return undefined;
       }
       const parent = (item as { parentSpanContext?: { spanId?: string } }).parentSpanContext;
       const resourceAttrs = (item as { resource?: { attributes?: Record<string, unknown> } }).resource?.attributes ?? {};
       const attrs = (item as { attributes?: Record<string, unknown> }).attributes ?? {};
-      return {
+      const summary = {
         trace_id: traceId,
         span_id: spanContext?.spanId,
         parent_id: parent?.spanId ?? "0",
+        run_id: typeof attrs.run_id === "string" ? String(attrs.run_id) : undefined,
         resource: String((item as { name?: unknown }).name ?? ""),
         service: typeof resourceAttrs["service.name"] === "string"
           ? String(resourceAttrs["service.name"])
@@ -117,6 +116,7 @@ function collectTracePayloadSummary(
         session_id: typeof attrs.session_id === "string" ? String(attrs.session_id) : undefined,
         session_key: typeof attrs.session_key === "string" ? String(attrs.session_key) : undefined,
       };
+      return summary;
     })
     .filter(Boolean) as Array<Record<string, string | number | boolean | undefined>>;
   if (spans.length === 0) {
@@ -202,7 +202,6 @@ export async function startOtelBootstrap(
     logger,
     tracePayloadDebug: {
       enabled: config.tracePayloadDebugEnabled,
-      traceIds: config.tracePayloadDebugTraceIds,
     },
   });
   const metricExporter = withExportLogging(new OTLPMetricExporter({

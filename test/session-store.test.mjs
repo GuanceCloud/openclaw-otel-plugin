@@ -494,3 +494,74 @@ test("session store reads session create time from trajectory", () => {
   assert.ok(snapshot);
   assert.equal(snapshot.createdAt, Date.parse("2026-05-07T05:49:08.061Z"));
 });
+
+test("session store refreshes snapshot when only trajectory changes", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "s5.jsonl");
+  const trajectoryFile = path.join(sessionsDir, "s5.trajectory.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s5: {
+        sessionFile,
+        sessionId: "session-5",
+      },
+    }),
+  );
+  fs.writeFileSync(
+    trajectoryFile,
+    `${JSON.stringify({
+      type: "session.started",
+      ts: "2026-05-14T12:06:33.000Z",
+    })}\n${JSON.stringify({
+      type: "run.started",
+      runId: "run-1",
+      ts: "2026-05-14T12:06:33.000Z",
+    })}\n`,
+  );
+  fs.writeFileSync(
+    sessionFile,
+    `${JSON.stringify({
+      type: "message",
+      timestamp: "2026-05-14T12:06:34.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+      },
+    })}\n${JSON.stringify({
+      type: "message",
+      timestamp: "2026-05-14T12:06:40.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "world" }],
+      },
+    })}\n`,
+  );
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const before = store.loadSessionSnapshot("s5");
+
+  assert.ok(before);
+  assert.equal(before.runId, "run-1");
+  assert.equal(before.runCompleted, false);
+
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  fs.appendFileSync(
+    trajectoryFile,
+    `${JSON.stringify({
+      type: "trace.artifacts",
+      runId: "run-1",
+      ts: "2026-05-14T12:08:57.000Z",
+    })}\n`,
+  );
+
+  const after = store.loadSessionSnapshot("s5");
+  assert.ok(after);
+  assert.equal(after.runId, "run-1");
+  assert.equal(after.runCompleted, true);
+  assert.equal(after.runTerminalType, "trace.artifacts");
+});

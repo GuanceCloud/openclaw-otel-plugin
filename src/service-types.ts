@@ -1,6 +1,8 @@
 export type ActiveRootSpan = {
   requestKey?: string;
   sessionIdentity?: string;
+  runId?: string;
+  runIds?: Set<string>;
   span: any;
   ctx: any;
   startedAt: number;
@@ -62,6 +64,8 @@ export type SessionUsageTotals = {
 export type ActiveRunSpan = {
   requestKey?: string;
   sessionIdentity?: string;
+  runId?: string;
+  runIds?: Set<string>;
   span: any;
   ctx: any;
   startedAt: number;
@@ -192,6 +196,9 @@ export type SessionSnapshot = {
   sessionFile: string;
   sessionKey?: string;
   sessionId?: string;
+  runId?: string;
+  runCompleted?: boolean;
+  runTerminalType?: string;
   createdAt?: number;
   updatedAt?: number;
   chatType?: string;
@@ -222,6 +229,7 @@ export type SessionSnapshot = {
   sessionUsageTotals?: SessionUsageTotals;
   traceCount?: number;
   mtimeMs: number;
+  trajectoryMtimeMs?: number;
 };
 
 export type SkillCatalogEntry = {
@@ -232,6 +240,11 @@ export type SkillCatalogEntry = {
 export type SessionSnapshotStore = {
   refreshSessionsIndex(): void;
   loadSessionSnapshot(sessionKey: string | undefined): SessionSnapshot | undefined;
+  loadSessionRunState(
+    sessionKey: string | undefined,
+    runId?: string,
+  ): { runId?: string; runCompleted?: boolean; runTerminalType?: string };
+  resolveSessionKeyByFile(sessionFile: string): string | undefined;
   setLatestAssistantText(sessionKey: string, text: string): void;
   invalidateSessionFile(sessionFile: string): void;
   clear(): void;

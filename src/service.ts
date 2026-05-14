@@ -21,6 +21,8 @@ import {
   addEvent,
   buildGenAiAgentSessionMetricAttrs,
   buildGenAiAgentRequestMetricAttrs,
+  buildRunScopeAttrs,
+  buildTranscriptReplayEvent,
   clipPreview,
   computeSessionMetricDelta,
   createRunState,
@@ -32,6 +34,7 @@ import {
   normalizeUserInputPreview,
   parseSessionKey,
   redactSensitiveText,
+  rememberRunId,
   resolveIngressLifecycleWindows,
   resolveSessionMetricTotals,
   resolveSpanWindow,
@@ -64,6 +67,7 @@ export function createOtelPluginService(
     traceCount: number;
   }>();
   const replayWatermarkBySession = new Map<string, string>();
+  const finalizedReplayRunIdBySession = new Map<string, string>();
   let requestSequence = 0;
   const sessionMetricTokenState = new Map<string, {
     inputTokens: number;
@@ -136,6 +140,16 @@ export function createOtelPluginService(
         return replayWatermarkBySession.get(sessionKey) === watermark;
       };
 
+      const hasFinalizedReplayRunId = (
+        sessionKey: string | undefined,
+        runId: string | undefined,
+      ) => {
+        if (!sessionKey || !runId) {
+          return false;
+        }
+        return finalizedReplayRunIdBySession.get(sessionKey) === runId;
+      };
+
       const markReplayWatermark = (
         sessionKey: string | undefined,
         snapshot: ReturnType<typeof loadSessionSnapshot>,
@@ -148,6 +162,25 @@ export function createOtelPluginService(
           return;
         }
         replayWatermarkBySession.set(sessionKey, watermark);
+      };
+
+      const markFinalizedReplayRunId = (
+        sessionKey: string | undefined,
+        runId: string | undefined,
+      ) => {
+        if (!sessionKey || !runId) {
+          return;
+        }
+        finalizedReplayRunIdBySession.set(sessionKey, runId);
+      };
+
+      const isHeartbeatTranscriptSnapshot = (
+        snapshot: ReturnType<typeof loadSessionSnapshot>,
+      ): boolean => {
+        const lastTurn = snapshot?.lastRunAssistantTurns?.at(-1);
+        const inputPreview = (lastTurn?.inputPreview ?? snapshot?.lastUserText ?? "").trim();
+        const outputPreview = (lastTurn?.outputPreview ?? snapshot?.lastAssistantText ?? "").trim();
+        return inputPreview === "[OpenClaw heartbeat poll]" || outputPreview === "HEARTBEAT_OK";
       };
 
       const enrichWithTranscript = (
@@ -229,7 +262,15 @@ export function createOtelPluginService(
       const resolveSessionKey = (evt: { sessionKey?: string; sessionId?: string }) =>
         sessionIdentity(evt);
 
-      const buildRequestKey = (evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number }) => {
+      const resolveRunId = (evt: { runId?: string }) =>
+        typeof evt.runId === "string" && evt.runId.trim() ? evt.runId.trim() : undefined;
+
+      const traceRunScopeAttrs = (
+        primaryRunId?: string,
+        ...runIdSources: Array<string | Iterable<string> | undefined>
+      ) => traceAttrs(buildRunScopeAttrs(primaryRunId, ...runIdSources));
+
+      const buildRequestKey = (evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number; runId?: string }) => {
         const sessionKey = resolveSessionKey(evt);
         if (!sessionKey) {
           return undefined;
@@ -243,7 +284,7 @@ export function createOtelPluginService(
       };
 
       const resolveRequestKey = (
-        evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number },
+        evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number; runId?: string },
         createIfMissing = false,
       ) => {
         const sessionKey = resolveSessionKey(evt);
@@ -266,7 +307,7 @@ export function createOtelPluginService(
       };
 
       const beginRequestTrace = (
-        evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number },
+        evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number; runId?: string },
       ) => {
         const sessionKey = resolveSessionKey(evt);
         if (!sessionKey) {
@@ -297,7 +338,7 @@ export function createOtelPluginService(
       };
 
       const emitRuntimeOrchestrationSpan = (
-        evt: { sessionKey?: string; sessionId?: string },
+        evt: { sessionKey?: string; sessionId?: string; runId?: string },
         startTs: number | undefined,
         endTs: number | undefined,
         phase: string,
@@ -338,6 +379,12 @@ export function createOtelPluginService(
               __suppress_session_input_preview: true,
               __suppress_session_output_preview: true,
               __suppress_session_output_summary: true,
+              ...buildRunScopeAttrs(
+                run?.runId ?? root?.runId ?? resolveRunId(evt),
+                run?.runIds,
+                root?.runIds,
+                resolveRunId(evt),
+              ),
               session_id: evt.sessionId,
               "openclaw.sessionId": evt.sessionId,
               session_update_time: endTs,
@@ -364,6 +411,7 @@ export function createOtelPluginService(
         evt: {
           sessionKey?: string;
           sessionId?: string;
+          runId?: string;
           ts?: number;
           channel?: string;
           source?: string;
@@ -388,6 +436,7 @@ export function createOtelPluginService(
         const lifecycleEvt = {
           sessionKey: evt.sessionKey,
           sessionId: evt.sessionId,
+          runId: evt.runId,
           ts: options?.startTsHint ?? evt.ts,
         };
         const run = getRun(lifecycleEvt, options?.createIfMissing ?? false);
@@ -604,6 +653,70 @@ export function createOtelPluginService(
         });
       };
 
+      function replayTranscriptSnapshot(
+        sessionKey: string,
+        options?: { source?: "update" | "sweep"; sessionFile?: string },
+      ) {
+        sessionStore?.refreshSessionsIndex();
+        if (options?.sessionFile) {
+          sessionStore?.invalidateSessionFile(options.sessionFile);
+        }
+        const snapshot = loadSessionSnapshot(sessionKey);
+        if (!snapshot?.lastAssistantTs || (!snapshot.lastAssistantText && !snapshot.lastRunAssistantTurns?.length)) {
+          return;
+        }
+        if (isHeartbeatTranscriptSnapshot(snapshot)) {
+          return;
+        }
+        const transcriptEvt = buildTranscriptReplayEvent(sessionKey, snapshot);
+        const hasActiveTrace = Boolean(getRun(transcriptEvt, false) || getRoot(transcriptEvt, false));
+        const replayAlreadyFinalized = hasReplayWatermark(sessionKey, snapshot);
+        const replayRunAlreadyFinalized = hasFinalizedReplayRunId(sessionKey, snapshot.runId);
+        if ((replayAlreadyFinalized || replayRunAlreadyFinalized) && !hasActiveTrace) {
+          return;
+        }
+        if (!hasActiveTrace) {
+          ctx.logger.info(
+            `[otel-plugin] transcript fallback replay${options?.source === "sweep" ? " (sweep)" : ""} for ${sessionKey} (${snapshot.sessionId ?? "unknown-session"})`,
+          );
+        }
+        ensureTranscriptSkillSpans(transcriptEvt);
+        const emittedTranscriptModelSpans = emitTranscriptModelSpans(transcriptEvt);
+        if (emittedTranscriptModelSpans) {
+          emitTranscriptToolSpans(transcriptEvt);
+        } else {
+          emitSyntheticModelSpan(transcriptEvt);
+        }
+        if (snapshot.runCompleted !== true) {
+          return;
+        }
+        ensureRuntimeLifecycleSpans(transcriptEvt, {
+          createIfMissing: true,
+          emitEgress: true,
+          snapshot,
+          outputPreview: clipPreview(snapshot.lastAssistantText),
+          outputLength: snapshot.lastAssistantText?.length,
+          outcome: "completed",
+        });
+        syncRootFromRun(transcriptEvt);
+        const run = getRun(transcriptEvt, false);
+        if (run) {
+          run.pendingFinalOutcome = "completed";
+          run.lastTouchedAt = Date.now();
+        }
+        endRun(transcriptEvt, stringAttrs({
+          "openclaw.state": "completed",
+          "openclaw.outcome": "completed",
+        }));
+        endRoot(transcriptEvt, stringAttrs({
+          "openclaw.state": "completed",
+          "openclaw.outcome": "completed",
+        }));
+        clearRun(transcriptEvt);
+        markReplayWatermark(sessionKey, snapshot);
+        markFinalizedReplayRunId(sessionKey, snapshot.runId);
+      }
+
       const reportSessionMetrics = () => {
         try {
           sessionStore?.refreshSessionsIndex();
@@ -620,6 +733,7 @@ export function createOtelPluginService(
             ...pendingSessionKeys,
           ]);
           for (const sessionKey of activeSessionKeys) {
+            replayTranscriptSnapshot(sessionKey, { source: "sweep" });
             const snapshot = loadSessionSnapshot(sessionKey);
             const tokenState = sessionMetricTokenState.get(sessionKey);
             const seriesKey = snapshot?.sessionId?.trim() || sessionKey;
@@ -735,7 +849,7 @@ export function createOtelPluginService(
       };
 
       const getRoot = (
-        evt: { sessionKey?: string; sessionId?: string; channel?: string; source?: string; queueDepth?: number },
+        evt: { sessionKey?: string; sessionId?: string; runId?: string; channel?: string; source?: string; queueDepth?: number },
         createIfMissing = false,
       ) => {
         const sessionKey = resolveSessionKey(evt);
@@ -745,6 +859,17 @@ export function createOtelPluginService(
         }
         const current = activeRoots.get(requestKey);
         if (current) {
+          const resolvedRunId = resolveRunId(evt);
+          if (rememberRunId(current, resolvedRunId)) {
+            const run = activeRuns.get(requestKey);
+            if (run) {
+              rememberRunId(run, resolvedRunId);
+              if (run.span) {
+                run.span.setAttributes(traceRunScopeAttrs(run.runId, run.runIds, current.runIds));
+              }
+            }
+            current.span.setAttributes(traceRunScopeAttrs(current.runId, current.runIds));
+          }
           current.lastTouchedAt = Date.now();
           return current;
         }
@@ -763,6 +888,7 @@ export function createOtelPluginService(
             attributes: traceAttrs(enrichWithTranscript(sessionKey, {
               "openclaw.sessionKey": evt.sessionKey,
               "openclaw.sessionId": evt.sessionId,
+              ...buildRunScopeAttrs(resolveRunId(evt), resolveRunId(evt)),
               "openclaw.channel": evt.channel,
               "openclaw.source": evt.source,
               "openclaw.queueDepth": evt.queueDepth,
@@ -775,6 +901,8 @@ export function createOtelPluginService(
         const root = {
           requestKey,
           sessionIdentity: sessionKey,
+          runId: resolveRunId(evt),
+          runIds: resolveRunId(evt) ? new Set([resolveRunId(evt)]) : new Set<string>(),
           span,
           ctx: trace.setSpan(context.active(), span),
           startedAt: rootStartTs,
@@ -785,7 +913,7 @@ export function createOtelPluginService(
       };
 
       const getRun = (
-        evt: { sessionKey?: string; sessionId?: string },
+        evt: { sessionKey?: string; sessionId?: string; runId?: string },
         createIfMissing = false,
       ) => {
         const sessionKey = resolveSessionKey(evt);
@@ -795,6 +923,17 @@ export function createOtelPluginService(
         }
         const current = activeRuns.get(requestKey);
         if (current?.span || (current && !createIfMissing)) {
+          const resolvedRunId = resolveRunId(evt);
+          if (rememberRunId(current, resolvedRunId)) {
+            const root = activeRoots.get(requestKey);
+            if (root) {
+              rememberRunId(root, resolvedRunId);
+              root.span.setAttributes(traceRunScopeAttrs(root.runId, root.runIds, current.runIds));
+            }
+            if (current.span) {
+              current.span.setAttributes(traceRunScopeAttrs(current.runId, current.runIds));
+            }
+          }
           current.lastTouchedAt = Date.now();
           return current;
         }
@@ -805,6 +944,10 @@ export function createOtelPluginService(
         if (!root) {
           return undefined;
         }
+        const resolvedRunId = resolveRunId(evt);
+        if (rememberRunId(root, resolvedRunId)) {
+          root.span.setAttributes(traceRunScopeAttrs(root.runId, root.runIds));
+        }
         const userCtx = current?.userCtx;
         const span = tracer.startSpan(
           "agent_run",
@@ -814,6 +957,7 @@ export function createOtelPluginService(
             attributes: traceAttrs(enrichWithTranscript(sessionKey, {
               "openclaw.sessionKey": evt.sessionKey,
               "openclaw.sessionId": evt.sessionId,
+              ...buildRunScopeAttrs(root.runId ?? resolvedRunId, root.runIds, resolvedRunId),
               session_update_time: eventTimestamp(evt).getTime(),
               "span.kind": "agent",
             })),
@@ -824,6 +968,7 @@ export function createOtelPluginService(
         const run = current ?? createRunState(userCtx ?? root.ctx, runStartTs, runStartTs);
         run.requestKey = requestKey;
         run.sessionIdentity = sessionKey;
+        rememberRunId(run, resolvedRunId ?? root.runId);
         run.span = span;
         run.ctx = trace.setSpan(userCtx ?? root.ctx, span);
         activeRuns.set(requestKey, run);
@@ -831,7 +976,7 @@ export function createOtelPluginService(
       };
 
       const ensureUserSpan = (
-        evt: { sessionKey?: string; sessionId?: string; ts: number; channel?: string; source?: string; queueDepth?: number },
+        evt: { sessionKey?: string; sessionId?: string; runId?: string; ts: number; channel?: string; source?: string; queueDepth?: number },
       ) => {
         const sessionKey = resolveSessionKey(evt);
         const requestKey = resolveRequestKey(evt, true);
@@ -843,6 +988,10 @@ export function createOtelPluginService(
         if (!root) {
           return undefined;
         }
+        const resolvedRunId = resolveRunId(evt);
+        if (rememberRunId(root, resolvedRunId)) {
+          root.span.setAttributes(traceRunScopeAttrs(root.runId, root.runIds));
+        }
         const snapshot = loadSessionSnapshot(evt.sessionKey);
         root.span.setAttributes(traceAttrs({
           session_update_time: evt.ts,
@@ -852,6 +1001,7 @@ export function createOtelPluginService(
         const run = existing ?? createRunState(root.ctx, evt.ts, evt.ts);
         run.requestKey = requestKey;
         run.sessionIdentity = sessionKey;
+        rememberRunId(run, resolvedRunId ?? root.runId);
         run.userCtx = root.ctx;
         run.userStartTs = evt.ts;
         run.lastTouchedAt = Date.now();
@@ -859,7 +1009,7 @@ export function createOtelPluginService(
         return activeRuns.get(requestKey);
       };
 
-      const endRoot = (evt: { sessionKey?: string; sessionId?: string }, attrs?: Record<string, string | number | boolean>) => {
+      const endRoot = (evt: { sessionKey?: string; sessionId?: string; runId?: string }, attrs?: Record<string, string | number | boolean>) => {
         const sessionKey = resolveSessionKey(evt);
         const requestKey = resolveRequestKey(evt, false);
         if (!sessionKey || !requestKey) {
@@ -877,6 +1027,12 @@ export function createOtelPluginService(
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
         const finalAttrs = traceAttrs({
           ...enrichWithTranscript(sessionKey, summaryAttrs),
+          ...buildRunScopeAttrs(
+            current.runId ?? run?.runId ?? resolveRunId(evt),
+            current.runIds,
+            run?.runIds,
+            resolveRunId(evt),
+          ),
           session_update_time: eventTimestamp(evt).getTime(),
           "openclaw.skills": run ? Array.from(run.usedSkillNames).join(", ") : undefined,
           "openclaw.skill.count": run ? run.usedSkillNames.size : undefined,
@@ -902,7 +1058,7 @@ export function createOtelPluginService(
         releaseRequestKey(sessionKey, requestKey);
       };
 
-      const syncRootFromRun = (evt: { sessionKey?: string; sessionId?: string }) => {
+      const syncRootFromRun = (evt: { sessionKey?: string; sessionId?: string; runId?: string }) => {
         const sessionKey = resolveSessionKey(evt);
         const requestKey = resolveRequestKey(evt, false);
         if (!sessionKey || !requestKey) {
@@ -915,6 +1071,7 @@ export function createOtelPluginService(
         }
         const snapshot = loadSessionSnapshot(sessionKey);
         root.span.setAttributes(traceAttrs({
+          ...buildRunScopeAttrs(root.runId ?? run.runId ?? resolveRunId(evt), root.runIds, run.runIds, resolveRunId(evt)),
           session_update_time: run.modelEndTs ?? run.mainEndTs ?? run.lastTouchedAt ?? Date.now(),
           "openclaw.tokens.input":
             run.aggregate.inputTokens || snapshot?.lastAssistantUsage?.input || 0,
@@ -943,7 +1100,7 @@ export function createOtelPluginService(
       };
 
       const endRun = (
-        evt: { sessionKey?: string; sessionId?: string },
+        evt: { sessionKey?: string; sessionId?: string; runId?: string },
         attrs?: Record<string, string | number | boolean>,
       ) => {
         const sessionKey = resolveSessionKey(evt);
@@ -978,6 +1135,7 @@ export function createOtelPluginService(
         }
         const finalAttrs = traceAttrs({
           ...enrichWithTranscript(sessionKey, summaryAttrs),
+          ...buildRunScopeAttrs(current.runId ?? resolveRunId(evt), current.runIds, resolveRunId(evt)),
           session_update_time: eventTimestamp(evt).getTime(),
           "openclaw.tokens.input":
             sessionInputTokens,
@@ -1019,7 +1177,7 @@ export function createOtelPluginService(
         finalizeRunSpans(current, eventTimestamp(evt));
       };
 
-      const clearRun = (evt: { sessionKey?: string; sessionId?: string }) => {
+      const clearRun = (evt: { sessionKey?: string; sessionId?: string; runId?: string }) => {
         const sessionKey = resolveSessionKey(evt);
         const requestKey = resolveRequestKey(evt, false);
         if (!sessionKey || !requestKey) {
@@ -1091,7 +1249,15 @@ export function createOtelPluginService(
             kind: name.includes("/")
               ? SpanKind.CLIENT
               : SpanKind.INTERNAL,
-            attributes: traceAttrs(attrs),
+            attributes: traceAttrs({
+              ...buildRunScopeAttrs(
+                ("runId" in evt ? resolveRunId(evt) : undefined) ?? run?.runId ?? root?.runId,
+                ("runId" in evt ? resolveRunId(evt) : undefined),
+                run?.runIds,
+                root?.runIds,
+              ),
+              ...attrs,
+            }),
           },
           parentCtx ?? root?.ctx,
         );
@@ -1204,8 +1370,11 @@ export function createOtelPluginService(
       unsubscribeAgent = runtime?.events?.onAgentEvent?.(handleAgentEvent) ?? null;
 
       unsubscribeTranscript = runtime?.events?.onSessionTranscriptUpdate?.((update) => {
-        sessionStore?.refreshSessionsIndex();
-        sessionStore?.invalidateSessionFile(update.sessionFile);
+        const sessionKey = sessionStore?.resolveSessionKeyByFile(update.sessionFile);
+        if (!sessionKey) {
+          return;
+        }
+        replayTranscriptSnapshot(sessionKey, { source: "update", sessionFile: update.sessionFile });
       }) ?? null;
 
       const handleDiagnosticEvent = createDiagnosticEventHandler({
@@ -1285,6 +1454,7 @@ export function createOtelPluginService(
       activeRoots.clear();
       activeRequestKeyBySession.clear();
       replayWatermarkBySession.clear();
+      finalizedReplayRunIdBySession.clear();
       reportedSessionMetrics.clear();
       sessionMetricTokenState.clear();
       sessionStore?.clear();

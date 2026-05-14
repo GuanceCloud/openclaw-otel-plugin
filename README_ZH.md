@@ -12,7 +12,7 @@
 - 按单条用户消息生成的 root span：固定命名为 `openclaw_request`
 - 按单条用户消息生成的 run span：固定命名为 `agent_run`
 - 运行时生命周期 span，例如 `channel_ingress`、`dispatch_queue`、`session_processing`、`runtime_orchestration`、`channel_egress`
-- 模型 span：固定命名为 `model_request`
+- 模型 span：固定命名为 `llm`
 - Skill 汇总 span，例如 `skill:<name>`
 - Skill 调用 span，例如 `skill_call:<name>`
 - Tool span，例如 `tool:<name>`
@@ -22,7 +22,7 @@ Trace 说明：
 
 - 一条入站用户消息对应一条 trace
 - `message.processed` 会优先按 transcript 回放完整 turn；后续 `session.state idle` 只作为 fallback 收尾
-- transcript 回放会按 assistant turn 逐个产出 `model_request`，多工具会话会显示成 `model -> tool -> model` 循环，而不是一个超长模型 span
+- transcript 回放会按 assistant turn 逐个产出 `llm`，多工具会话会显示成 `model -> tool -> model` 循环，而不是一个超长模型 span
 
 ### Metrics
 
@@ -382,6 +382,7 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 - 检查鉴权 Header
 - 检查插件条目是否启用
 - 检查 `gateway.log` 中是否出现 exporter 的 `enabled`、`succeeded`、`failed` 日志
+- 如果要排查 trace 父子关系或 `run_id` 缺失，开启 `tracePayloadDebugEnabled=true`，让插件在 OTLP 导出前打印完整 trace payload
 
 ### 没有 logs
 

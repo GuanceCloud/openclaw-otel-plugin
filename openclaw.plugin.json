@@ -62,13 +62,6 @@
         "type": "boolean",
         "description": "Log the exact trace export payload summary before handing it to the OTLP trace exporter."
       },
-      "tracePayloadDebugTraceIds": {
-        "type": "array",
-        "description": "Optional trace_id allowlist for trace export payload debug logs.",
-        "items": {
-          "type": "string"
-        }
-      },
       "resourceAttributes": {
         "type": "object",
         "description": "Fixed OTEL resource attributes applied to traces, metrics, and logs.",

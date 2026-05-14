@@ -6,6 +6,8 @@ import {
   buildGenAiAgentRequestMetricAttrs,
   buildGenAiAgentSkillMetricAttrs,
   buildGenAiAgentSessionMetricAttrs,
+  buildRunScopeAttrs,
+  buildTranscriptReplayEvent,
   buildGenAiClientModelMetricAttrs,
   buildGenAiClientSkillMetricAttrs,
   buildGenAiClientToolMetricAttrs,
@@ -16,6 +18,7 @@ import {
   buildSessionMetricAttrs,
   computeSessionMetricDelta,
   extractToolResultStatus,
+  rememberRunId,
   resolveIngressLifecycleWindows,
   resolveSessionSpanName,
   resolveSpanWindow,
@@ -55,6 +58,48 @@ test("resolveSessionSpanName prefers session_key over fallback names", () => {
   );
 });
 
+test("buildTranscriptReplayEvent carries snapshot runId into replay events", () => {
+  const evt = buildTranscriptReplayEvent("agent:main:chat:direct:user-1", {
+    sessionId: "session-1",
+    runId: "run-123",
+    lastAssistantTs: 1710000000000,
+    lastChannel: "chat",
+  });
+
+  assert.deepEqual(evt, {
+    sessionKey: "agent:main:chat:direct:user-1",
+    sessionId: "session-1",
+    runId: "run-123",
+    ts: 1710000000000,
+    channel: "chat",
+  });
+});
+
+test("rememberRunId keeps the first run_id and accumulates later run ids", () => {
+  const state = {};
+
+  assert.equal(rememberRunId(state, "run-1"), true);
+  assert.equal(rememberRunId(state, "run-2"), true);
+  assert.equal(rememberRunId(state, "run-2"), false);
+
+  assert.equal(state.runId, "run-1");
+  assert.deepEqual(Array.from(state.runIds ?? []), ["run-1", "run-2"]);
+});
+
+test("buildRunScopeAttrs preserves the primary run_id and exposes the run_ids summary", () => {
+  const attrs = buildRunScopeAttrs(
+    "run-1",
+    new Set(["run-1", "run-2"]),
+    "run-3",
+    ["run-2", "run-4"],
+  );
+
+  assert.deepEqual(attrs, {
+    run_id: "run-1",
+    run_ids: "run-1,run-2,run-3,run-4",
+  });
+});
+
 test("resolveIngressLifecycleWindows emits a queue window when processing starts much later", () => {
   const windows = resolveIngressLifecycleWindows(1000, 4000);
 
@@ -90,6 +135,8 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
     "openclaw.tokens.input": 12,
     "openclaw.tokens.output": 34,
     "openclaw.tokens.total": 46,
+    "openclaw.tokens.cache_read": 5,
+    "openclaw.tokens.cache_write": 7,
     "openclaw.tool.call_id": "call-1",
     "openclaw.tool.name": "read",
     "openclaw.tool.target": "/tmp/demo.txt",
@@ -127,6 +174,9 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.usage_input_tokens, 12);
   assert.equal(attrs.usage_output_tokens, 34);
   assert.equal(attrs.usage_total_tokens, 46);
+  assert.equal(attrs.usage_cache_read_input_tokens, 5);
+  assert.equal(attrs.usage_cache_write_input_tokens, 7);
+  assert.equal(attrs.usage_cache_total_tokens, 12);
   assert.equal(attrs.output_kind, "tool_call");
   assert.equal(attrs.tool_call_id, "call-1");
   assert.equal(attrs.tool_name, "read");

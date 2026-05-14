@@ -36,6 +36,7 @@ import {
 type SessionEvent = {
   sessionKey?: string;
   sessionId?: string;
+  runId?: string;
   ts?: number;
 };
 
@@ -206,6 +207,71 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       "openclaw.tool.result_statuses": Array.from(run.usedToolResultStatuses).join(", "),
       "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
       "openclaw.skill.count": run.usedSkillNames.size,
+    });
+    run.span?.setAttributes(attrs);
+    getRoot(evt, false)?.span.setAttributes(attrs);
+  };
+
+  const accumulateTranscriptUsage = (
+    run: ActiveRunSpan,
+    usage:
+      | {
+        input?: number;
+        output?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+        totalTokens?: number;
+      }
+      | undefined,
+    provider: string | undefined,
+    model: string | undefined,
+  ) => {
+    if (!usage) {
+      return;
+    }
+    const inputTokens = typeof usage.input === "number" ? usage.input : 0;
+    const outputTokens = typeof usage.output === "number" ? usage.output : 0;
+    const cacheReadTokens = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
+    const cacheWriteTokens = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
+    const totalTokens = typeof usage.totalTokens === "number"
+      ? usage.totalTokens
+      : inputTokens > 0 || outputTokens > 0
+        ? inputTokens + outputTokens
+        : 0;
+    if (
+      inputTokens <= 0 &&
+      outputTokens <= 0 &&
+      cacheReadTokens <= 0 &&
+      cacheWriteTokens <= 0 &&
+      totalTokens <= 0
+    ) {
+      return;
+    }
+    run.aggregate.inputTokens += inputTokens;
+    run.aggregate.outputTokens += outputTokens;
+    run.aggregate.cacheReadTokens += cacheReadTokens;
+    run.aggregate.cacheWriteTokens += cacheWriteTokens;
+    run.aggregate.totalTokens += totalTokens;
+    run.aggregate.modelCalls += 1;
+    run.aggregate.lastProvider = provider ?? run.aggregate.lastProvider;
+    run.aggregate.lastModel = model ?? run.aggregate.lastModel;
+  };
+
+  const syncRunUsageSummaryAttrs = (evt: SessionEvent, run: ActiveRunSpan) => {
+    const attrs = traceAttrs({
+      "openclaw.tokens.input": run.aggregate.inputTokens,
+      "openclaw.tokens.output": run.aggregate.outputTokens,
+      "openclaw.tokens.cache_read": run.aggregate.cacheReadTokens,
+      "openclaw.tokens.cache_write": run.aggregate.cacheWriteTokens,
+      "openclaw.tokens.total": run.aggregate.totalTokens,
+      "openclaw.model.calls": run.aggregate.modelCalls,
+      "openclaw.provider": run.aggregate.lastProvider,
+      "openclaw.model": run.aggregate.lastModel,
+      "llm.input_tokens": run.aggregate.inputTokens,
+      "llm.output_tokens": run.aggregate.outputTokens,
+      "llm.total_tokens": run.aggregate.totalTokens,
+      "llm.provider": run.aggregate.lastProvider,
+      "llm.model": run.aggregate.lastModel,
     });
     run.span?.setAttributes(attrs);
     getRoot(evt, false)?.span.setAttributes(attrs);
@@ -725,20 +791,29 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     const run = getRun({
       sessionKey: evt.sessionKey,
       sessionId: evt.sessionId,
+      runId: evt.runId,
       ts: replayStartTs,
     }, true);
     if (!run) {
       return false;
     }
     const emittedTurns = run.transcriptAssistantTurnsEmitted ?? 0;
+    const coveredTurnCount = Math.min(run.aggregate.modelCalls, turns.length);
     if (emittedTurns >= turns.length) {
       return emittedTurns > 0 || run.modelSpanEmitted === true;
     }
-    const pendingTurns = turns.slice(emittedTurns);
+    const replayStartIndex = Math.max(emittedTurns, coveredTurnCount);
+    if (replayStartIndex >= turns.length) {
+      run.transcriptAssistantTurnsEmitted = turns.length;
+      run.modelSpanEmitted = true;
+      return turns.length > 0;
+    }
+    const pendingTurns = turns.slice(replayStartIndex);
     ensureRuntimeLifecycleSpans(
       {
         sessionKey: evt.sessionKey,
         sessionId: evt.sessionId,
+        runId: evt.runId,
         ts: replayStartTs,
         channel: snapshot?.lastChannel,
       },
@@ -752,7 +827,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     );
 
     for (const [offset, turn] of pendingTurns.entries()) {
-      const index = emittedTurns + offset;
+      const index = replayStartIndex + offset;
       if (offset === 0 && typeof run.orchestrationCursorTs === "number") {
         emitRuntimeOrchestrationSpan(
           evt,
@@ -771,7 +846,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       const startTs = Math.max(rawStartTs, run.mainStartTs);
       const endTs = Math.max(rawEndTs, startTs + 1);
       const span = tracer.startSpan(
-        "model_request",
+        "llm",
         {
           startTime: new Date(startTs),
           kind: SpanKind.CLIENT,
@@ -779,6 +854,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
             __suppress_session_output_preview: true,
             __suppress_session_output_summary: true,
             session_update_time: endTs,
+            turn_index: index + 1,
             "span.kind": "model",
             "openclaw.input.preview": turn.inputPreview,
             "openclaw.output.preview": turn.outputPreview,
@@ -789,6 +865,14 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
             "openclaw.model": turn.model ?? snapshot?.lastModel,
             "llm.provider": turn.provider ?? snapshot?.lastProvider,
             "llm.model": turn.model ?? snapshot?.lastModel,
+            "llm.input_tokens": turn.usage?.input,
+            "llm.output_tokens": turn.usage?.output,
+            "llm.total_tokens": turn.usage?.totalTokens,
+            "openclaw.tokens.input": turn.usage?.input,
+            "openclaw.tokens.output": turn.usage?.output,
+            "openclaw.tokens.cache_read": turn.usage?.cacheRead,
+            "openclaw.tokens.cache_write": turn.usage?.cacheWrite,
+            "openclaw.tokens.total": turn.usage?.totalTokens,
           })),
         },
         run.ctx,
@@ -810,6 +894,13 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         snapshot?.sessionId ?? evt.sessionId,
         turn.usage,
       );
+      accumulateTranscriptUsage(
+        run,
+        turn.usage,
+        turn.provider ?? snapshot?.lastProvider,
+        turn.model ?? snapshot?.lastModel,
+      );
+      syncRunUsageSummaryAttrs(evt, run);
       run.modelCtx = trace.setSpan(run.ctx, span);
       run.modelStartTs = startTs;
       run.modelEndTs = endTs;
@@ -826,6 +917,11 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         start_ts: startTs,
         end_ts: endTs,
         duration_ms: Math.max(endTs - startTs, 1),
+        usage_input_tokens: turn.usage?.input,
+        usage_output_tokens: turn.usage?.output,
+        usage_total_tokens: turn.usage?.totalTokens,
+        usage_cache_read_input_tokens: turn.usage?.cacheRead,
+        usage_cache_write_input_tokens: turn.usage?.cacheWrite,
         input_preview: turn.inputPreview,
         output_preview: turn.outputPreview,
         output_kind: turn.outputKind,
@@ -845,6 +941,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     const run = getRun({
       sessionKey: evt.sessionKey,
       sessionId: evt.sessionId,
+      runId: evt.runId,
       ts: replayStartTs,
     }, true);
     if (!run || run.modelSpanEmitted || (!snapshot?.lastProvider && !snapshot?.lastModel)) {
@@ -855,6 +952,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       {
         sessionKey: evt.sessionKey,
         sessionId: evt.sessionId,
+        runId: evt.runId,
         ts: replayStartTs,
         channel: snapshot?.lastChannel,
       },
@@ -889,7 +987,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       run.ctx,
     );
     const span = tracer.startSpan(
-      "model_request",
+      "llm",
       {
         startTime: new Date(startTs),
         kind: SpanKind.CLIENT,
@@ -897,6 +995,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           __suppress_session_output_preview: true,
           __suppress_session_output_summary: true,
           session_update_time: modelEndTs,
+          turn_index: lastTurn ? snapshot.lastRunAssistantTurns?.length : undefined,
           "span.kind": "model",
           "openclaw.input.preview": lastTurn?.inputPreview ?? snapshot.lastUserText,
           "openclaw.output.preview": lastTurn?.outputPreview ?? clipPreview(snapshot.lastAssistantText),
@@ -912,6 +1011,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           "llm.total_tokens": snapshot.lastAssistantUsage?.totalTokens,
           "openclaw.tokens.input": snapshot.lastAssistantUsage?.input,
           "openclaw.tokens.output": snapshot.lastAssistantUsage?.output,
+          "openclaw.tokens.cache_read": snapshot.lastAssistantUsage?.cacheRead,
+          "openclaw.tokens.cache_write": snapshot.lastAssistantUsage?.cacheWrite,
           "openclaw.tokens.total": snapshot.lastAssistantUsage?.totalTokens,
         })),
       },
@@ -964,6 +1065,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     const run = getRun({
       sessionKey,
       sessionId: evt.sessionId,
+      runId: evt.runId,
       ts: replayStartTs,
     }, true);
     if (!run) {
@@ -977,6 +1079,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       }
       handleAgentEvent({
         sessionKey,
+        sessionId: evt.sessionId ?? snapshot?.sessionId,
+        runId: evt.runId,
         ts: toolCall.startedAt ?? evt.ts ?? Date.now(),
         stream: "tool",
         data: {
@@ -991,6 +1095,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       }
       handleAgentEvent({
         sessionKey,
+        sessionId: evt.sessionId ?? snapshot?.sessionId,
+        runId: evt.runId,
         ts: toolCall.endedAt ?? toolCall.startedAt ?? evt.ts ?? Date.now(),
         stream: "tool",
         data: {
@@ -1009,6 +1115,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
   const handleAgentEvent = (evt: any) => {
     const sessionKey = typeof evt?.sessionKey === "string" ? evt.sessionKey : undefined;
     const sessionId = typeof evt?.sessionId === "string" ? evt.sessionId : undefined;
+    const runId = typeof evt?.runId === "string" ? evt.runId : undefined;
     const channel = typeof evt?.channel === "string" ? evt.channel : undefined;
     if (!sessionKey) {
       return;
@@ -1017,8 +1124,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       const text = typeof evt.data.text === "string" ? evt.data.text : undefined;
       if (text?.trim()) {
         setLatestAssistantText(sessionKey, text);
-        const run = getRun({ sessionKey }, false);
-        const root = getRoot({ sessionKey }, false);
+        const run = getRun({ sessionKey, sessionId, runId }, false);
+        const root = getRoot({ sessionKey, sessionId, runId }, false);
         const attrs = traceAttrs({
           "openclaw.output.preview": clipPreview(text),
         });
@@ -1030,7 +1137,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       return;
     }
     const toolName = typeof evt.data.name === "string" ? evt.data.name : undefined;
-    const run = getRun({ sessionKey }, false) ?? ensureUserSpan({ sessionKey, ts: evt.ts ?? Date.now() });
+    const run = getRun({ sessionKey, sessionId, runId }, false)
+      ?? ensureUserSpan({ sessionKey, sessionId, runId, ts: evt.ts ?? Date.now(), channel });
     if (!run || !toolName) {
       return;
     }
