@@ -104,13 +104,13 @@ bash scripts/install.sh latest
 Install a specific version:
 
 ```bash
-bash scripts/install.sh v0.1.0
+bash scripts/install.sh v0.6.0
 ```
 
 ### Option 2: Install From A Local Release Artifact
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.1.0.tar.gz
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz
 ```
 
 ## Update
@@ -124,7 +124,7 @@ bash scripts/update.sh
 Update to a specific version:
 
 ```bash
-bash scripts/update.sh v0.1.0
+bash scripts/update.sh v0.6.0
 ```
 
 Install files without restarting the gateway immediately:

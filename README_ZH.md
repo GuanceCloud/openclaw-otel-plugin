@@ -104,13 +104,13 @@ bash scripts/install.sh latest
 也可以安装指定版本：
 
 ```bash
-bash scripts/install.sh v0.1.0
+bash scripts/install.sh v0.6.0
 ```
 
 ### 方式二：安装本地打包产物
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.1.0.tar.gz
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz
 ```
 
 ## 升级
@@ -124,7 +124,7 @@ bash scripts/update.sh
 指定版本升级：
 
 ```bash
-bash scripts/update.sh v0.1.0
+bash scripts/update.sh v0.6.0
 ```
 
 如果只想安装文件、不立即重启 gateway：
