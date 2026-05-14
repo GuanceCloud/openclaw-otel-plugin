@@ -1,4 +1,14 @@
-import { createRequire } from "node:module";
+import { context, metrics, trace, SpanKind, SpanStatusCode } from "@opentelemetry/api";
+import { SeverityNumber } from "@opentelemetry/api-logs";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+import { resourceFromAttributes } from "@opentelemetry/resources";
+import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs";
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
+import { ParentBasedSampler, TraceIdRatioBasedSampler } from "@opentelemetry/sdk-trace-base";
+import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import type { OtelPluginConfig } from "./config.js";
 import type { MetricInstruments, OtelBootstrapResult, RuntimeMetadata } from "./service-types.js";
 import { resolveOtelUrl } from "./trace-runtime.js";
@@ -178,21 +188,6 @@ export async function startOtelBootstrap(
   runtimeMetadata?: RuntimeMetadata,
   logger?: OtelLogger,
 ): Promise<OtelBootstrapResult> {
-  const require = createRequire(import.meta.url);
-  const { context, metrics, trace, SpanKind, SpanStatusCode } = require("@opentelemetry/api");
-  const { SeverityNumber } = require("@opentelemetry/api-logs");
-  const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-proto");
-  const { OTLPMetricExporter } = require("@opentelemetry/exporter-metrics-otlp-proto");
-  const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-proto");
-  const { resourceFromAttributes } = require("@opentelemetry/resources");
-  const { BatchLogRecordProcessor, LoggerProvider } = require("@opentelemetry/sdk-logs");
-  const { NodeSDK } = require("@opentelemetry/sdk-node");
-  const { PeriodicExportingMetricReader } = require("@opentelemetry/sdk-metrics");
-  const {
-    ParentBasedSampler,
-    TraceIdRatioBasedSampler,
-  } = require("@opentelemetry/sdk-trace-base");
-  const { ATTR_SERVICE_NAME } = require("@opentelemetry/semantic-conventions");
 
   const traceUrl = resolveOtelUrl(config.endpoint, config.tracePath);
   const metricUrl = resolveOtelUrl(config.endpoint, config.metricsPath);

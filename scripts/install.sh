@@ -148,7 +148,7 @@ extract_archive() {
 install_payload() {
   local payload_dir="$1"
 
-  if [ ! -f "${payload_dir}/openclaw.plugin.json" ] || [ ! -f "${payload_dir}/dist/index.js" ]; then
+  if [ ! -f "${payload_dir}/openclaw.plugin.json" ] || [ ! -f "${payload_dir}/dist/index.cjs" ]; then
     printf '[install] 安装包内容不完整: %s\n' "$payload_dir" >&2
     exit 1
   fi

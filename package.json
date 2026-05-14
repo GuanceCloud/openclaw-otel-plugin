@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "npm run build && node --test",
-    "build": "rm -rf dist && esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js && esbuild src/config.ts src/service.ts src/otel-bootstrap.ts src/session-store.ts src/service-utils.ts src/tool-span-manager.ts src/diagnostic-event-handler.ts --platform=node --format=esm --target=node22 --outdir=dist --outbase=. && mkdir -p dist/src && cp src/trace-runtime.js dist/src/trace-runtime.js",
+    "build": "rm -rf dist && esbuild index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/index.cjs && esbuild src/config.ts src/service.ts src/otel-bootstrap.ts src/session-store.ts src/service-utils.ts src/tool-span-manager.ts src/diagnostic-event-handler.ts --platform=node --format=esm --target=node22 --outdir=dist --outbase=. && mkdir -p dist/src && cp src/trace-runtime.js dist/src/trace-runtime.js",
     "restart:gateway": "openclaw gateway restart",
     "dev": "node scripts/dev.mjs",
     "pack:release": "npm run build && node scripts/release.mjs"
@@ -18,14 +18,16 @@
     "@opentelemetry/sdk-metrics": "^2.6.0",
     "@opentelemetry/sdk-node": "^0.213.0",
     "@opentelemetry/sdk-trace-base": "^2.6.0",
-    "@opentelemetry/semantic-conventions": "^1.40.0"
+    "@opentelemetry/semantic-conventions": "^1.40.0",
+    "supports-color": "^10.2.2"
   },
   "openclaw": {
     "extensions": [
-      "./dist/index.js"
+      "./dist/index.cjs"
     ]
   },
   "devDependencies": {
-    "esbuild": "^0.27.4"
+    "esbuild": "^0.27.4",
+    "openclaw": "2026.5.7"
   }
 }
