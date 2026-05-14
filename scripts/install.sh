@@ -9,15 +9,27 @@ RESTART_GATEWAY=1
 WRITE_CONFIG=1
 VERSION_INPUT=""
 ENDPOINT=""
+INSTALL_TYPE=""
+X_TOKEN=""
+TAGS=()
+tmp_dir=""
 
 log() {
   printf '[install] %s\n' "$1"
 }
 
+cleanup() {
+  if [ -n "${tmp_dir:-}" ] && [ -d "${tmp_dir:-}" ]; then
+    rm -rf "$tmp_dir"
+  fi
+}
+
+trap cleanup EXIT
+
 usage() {
   cat <<'EOF'
 用法:
-  scripts/install.sh [latest|v0.6.0|0.6.0|/path/to/archive.tar.gz|https://...tar.gz] [--endpoint URL] [--no-config] [--no-restart]
+  scripts/install.sh [latest|v0.6.0|0.6.0|/path/to/archive.tar.gz|https://...tar.gz] [--type TYPE] [--endpoint URL] [--x-token TOKEN] [--tag KEY=VALUE] [--no-config] [--no-restart]
 
 环境变量:
   OPENCLAW_PLUGIN_DIR        安装目录，默认 ~/.openclaw/extensions/openclaw-otel-plugin
@@ -42,6 +54,45 @@ while [ "$#" -gt 0 ]; do
         exit 1
       fi
       ENDPOINT="$1"
+      ;;
+    --endpoint=*)
+      ENDPOINT="${1#*=}"
+      ;;
+    --x-token)
+      shift
+      if [ "$#" -eq 0 ]; then
+        printf '[install] --x-token 需要传入 TOKEN\n' >&2
+        exit 1
+      fi
+      X_TOKEN="$1"
+      ;;
+    --x-token=*)
+      X_TOKEN="${1#*=}"
+      ;;
+    --type)
+      shift
+      if [ "$#" -eq 0 ]; then
+        printf '[install] --type 需要传入类型\n' >&2
+        exit 1
+      fi
+      INSTALL_TYPE="$1"
+      ;;
+    --type=*)
+      INSTALL_TYPE="${1#*=}"
+      ;;
+    type=*)
+      INSTALL_TYPE="${1#*=}"
+      ;;
+    --tag)
+      shift
+      if [ "$#" -eq 0 ]; then
+        printf '[install] --tag 需要传入 KEY=VALUE\n' >&2
+        exit 1
+      fi
+      TAGS+=("$1")
+      ;;
+    --tag=*)
+      TAGS+=("${1#*=}")
       ;;
     -h|--help)
       usage
@@ -112,9 +163,18 @@ configure_openclaw_json() {
 
   mkdir -p "$(dirname "$CONFIG_FILE")"
 
+  local tags_json='[]'
+  if [ "${#TAGS[@]}" -gt 0 ]; then
+    require_command python3
+    tags_json="$(printf '%s\n' "${TAGS[@]}" | python3 -c 'import json,sys; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))')"
+  fi
+
   OPENCLAW_CONFIG_FILE_RUNTIME="$CONFIG_FILE" \
   OPENCLAW_PLUGIN_DIR_RUNTIME="$PLUGIN_DIR" \
   OPENCLAW_PLUGIN_ENDPOINT_RUNTIME="$ENDPOINT" \
+  OPENCLAW_PLUGIN_INSTALL_TYPE_RUNTIME="$INSTALL_TYPE" \
+  OPENCLAW_PLUGIN_X_TOKEN_RUNTIME="$X_TOKEN" \
+  OPENCLAW_PLUGIN_TAGS_RUNTIME="$tags_json" \
   node <<'NODE'
 const fs = require("fs");
 const path = require("path");
@@ -122,6 +182,9 @@ const path = require("path");
 const configFile = process.env.OPENCLAW_CONFIG_FILE_RUNTIME;
 const pluginDir = process.env.OPENCLAW_PLUGIN_DIR_RUNTIME;
 const endpoint = process.env.OPENCLAW_PLUGIN_ENDPOINT_RUNTIME || "";
+const installType = process.env.OPENCLAW_PLUGIN_INSTALL_TYPE_RUNTIME || "";
+const xToken = process.env.OPENCLAW_PLUGIN_X_TOKEN_RUNTIME || "";
+const tags = JSON.parse(process.env.OPENCLAW_PLUGIN_TAGS_RUNTIME || "[]");
 const pluginId = "openclaw-otel-plugin";
 
 let config = {};
@@ -148,8 +211,31 @@ config.plugins.entries ??= {};
 config.plugins.entries[pluginId] ??= {};
 config.plugins.entries[pluginId].enabled = true;
 config.plugins.entries[pluginId].config ??= {};
+config.plugins.entries[pluginId].config.resourceAttributes ??= {};
+if (!config.plugins.entries[pluginId].config.resourceAttributes.agent_runtime) {
+  config.plugins.entries[pluginId].config.resourceAttributes.agent_runtime = "openclaw";
+}
+
+for (const tag of tags) {
+  const [key, ...rest] = String(tag).split("=");
+  if (!key || rest.length === 0) continue;
+  config.plugins.entries[pluginId].config.resourceAttributes[key] = rest.join("=");
+}
+
 if (endpoint) {
   config.plugins.entries[pluginId].config.endpoint = endpoint;
+}
+if (installType === "gtrace") {
+  config.plugins.entries[pluginId].config.tracePath = "v1/write/otel-llm";
+  config.plugins.entries[pluginId].config.metricsPath = "v1/write/otel-metrics";
+  config.plugins.entries[pluginId].config.logsEnabled = false;
+  config.plugins.entries[pluginId].config.logsPath = "v1/write/otel-logs";
+  config.plugins.entries[pluginId].config.headers ??= {};
+  config.plugins.entries[pluginId].config.headers["to_headless"] = "true";
+}
+if (xToken) {
+  config.plugins.entries[pluginId].config.headers ??= {};
+  config.plugins.entries[pluginId].config.headers["X-Token"] = xToken;
 }
 
 fs.mkdirSync(path.dirname(configFile), { recursive: true });
@@ -161,9 +247,7 @@ main() {
   require_command curl
   require_command tar
 
-  local tmp_dir
   tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "$tmp_dir"' EXIT
 
   local archive_path="${tmp_dir}/plugin.tar.gz"
   local payload_dir
@@ -201,6 +285,16 @@ main() {
   install_payload "$payload_dir"
   log "installed to ${PLUGIN_DIR}"
   if [ "$WRITE_CONFIG" -eq 1 ]; then
+    if [ "$INSTALL_TYPE" = "gtrace" ]; then
+      if [ -z "$ENDPOINT" ]; then
+        printf '[install] type=gtrace 时必须传入 --endpoint\n' >&2
+        exit 1
+      fi
+      if [ -z "$X_TOKEN" ]; then
+        printf '[install] type=gtrace 时必须传入 --x-token\n' >&2
+        exit 1
+      fi
+    fi
     configure_openclaw_json
     log "updated ${CONFIG_FILE}"
   else
@@ -228,6 +322,9 @@ EOF
     log "configured OTLP endpoint: ${ENDPOINT}"
   else
     log "未设置 endpoint；如需立即启用，请在 ${CONFIG_FILE} 中为 openclaw-otel-plugin.config.endpoint 填写 OTLP 地址"
+  fi
+  if [ -n "$INSTALL_TYPE" ]; then
+    log "install type: ${INSTALL_TYPE}"
   fi
 
   if [ "$RESTART_GATEWAY" -eq 1 ] && command -v openclaw >/dev/null 2>&1; then

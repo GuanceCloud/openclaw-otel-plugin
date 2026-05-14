@@ -4,6 +4,24 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 ## 2026-05-12
 
+### Installation Flow
+
+- Fixed `scripts/install.sh` cleanup so successful installs no longer end with `tmp_dir: 未绑定的变量`.
+- Added installer parameters for Guance GTrace:
+  - `--type gtrace`
+  - `--endpoint`
+  - `--x-token`
+  - `--tag key=value`
+- When `--type gtrace` is used, the installer now writes the following defaults:
+  - `tracePath = v1/write/otel-llm`
+  - `metricsPath = v1/write/otel-metrics`
+  - `logsEnabled = false`
+  - `logsPath = v1/write/otel-logs`
+  - `headers.to_headless = true`
+- `--type gtrace` now requires both `endpoint` and `X-Token`.
+- Every `--tag key=value` is merged into `resourceAttributes`.
+- Updated README and README_ZH quick-install examples to use safer chained commands.
+
 ### OTEL Metric Alignment
 
 - Kept `gen_ai.client.token.usage` and `gen_ai.client.operation.duration` as OTEL-native metric names in documentation only; the plugin no longer writes custom token or operation data into the `gen_ai.client.*` namespace.

@@ -97,20 +97,40 @@ Trace 说明：
 ### 方式一：快速安装
 
 ```bash
+rm -f /tmp/openclaw-otel-plugin-install.sh && \
 curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
-  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh
+  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
 bash /tmp/openclaw-otel-plugin-install.sh latest --endpoint http://127.0.0.1:4318/otel
+```
+
+安装观测云 GTrace：
+
+```bash
+rm -f /tmp/openclaw-otel-plugin-install.sh && \
+curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
+  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
+bash /tmp/openclaw-otel-plugin-install.sh latest \
+  --type gtrace \
+  --endpoint https://llm-openway.guance.com \
+  --x-token agent_xxx \
+  --tag env=prod
 ```
 
 也可以安装指定版本：
 
 ```bash
+rm -f /tmp/openclaw-otel-plugin-install.sh && \
+curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
+  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
 bash /tmp/openclaw-otel-plugin-install.sh v0.6.0 --endpoint http://127.0.0.1:4318/otel
 ```
 
 如果只是先安装，稍后再补 endpoint：
 
 ```bash
+rm -f /tmp/openclaw-otel-plugin-install.sh && \
+curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
+  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
 bash /tmp/openclaw-otel-plugin-install.sh latest
 ```
 
@@ -124,6 +144,16 @@ bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz
 
 ```bash
 bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz --endpoint http://127.0.0.1:4318/otel
+```
+
+本地包安装到观测云 GTrace：
+
+```bash
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz \
+  --type gtrace \
+  --endpoint https://llm-openway.guance.com \
+  --x-token agent_xxx \
+  --tag env=prod
 ```
 
 ## 升级
@@ -149,6 +179,7 @@ bash scripts/update.sh latest --no-restart
 ## 配置
 
 如果安装时已经传了 `--endpoint`，脚本会自动写入最小可用配置。
+如果安装时传了 `--type gtrace`，脚本还会自动写入观测云专用的 OTLP 路径和请求头。
 
 只有在下面这些场景才需要手动配置：
 
@@ -198,11 +229,40 @@ bash scripts/update.sh latest --no-restart
 }
 ```
 
+`--type gtrace` 自动写入示例：
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "openclaw-otel-plugin": {
+        "config": {
+          "endpoint": "https://llm-openway.guance.com",
+          "tracePath": "v1/write/otel-llm",
+          "metricsPath": "v1/write/otel-metrics",
+          "logsEnabled": false,
+          "logsPath": "v1/write/otel-logs",
+          "headers": {
+            "X-Token": "agent_xxx",
+            "to_headless": "true"
+          },
+          "resourceAttributes": {
+            "agent_runtime": "openclaw",
+            "env": "prod"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
 ### 配置项说明
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `endpoint` | `http://127.0.0.1:4318/otel` | 接收端基础地址，结尾多余 `/` 会被自动去掉 |
+| `type` | 未设置 | 当值为 `gtrace` 时，安装脚本要求必须传入 `endpoint` 和 `X-Token`，并自动写入观测云专用 OTLP 路径 |
 | `tracePath` | `v1/traces` | trace 写入路径，会追加到 `endpoint` 后面 |
 | `metricsPath` | `v1/metrics` | metrics 写入路径，会追加到 `endpoint` 后面 |
 | `logsEnabled` | `false` | 只有显式开启后才导出 OTEL logs |
@@ -210,10 +270,11 @@ bash scripts/update.sh latest --no-restart
 | `protocol` | `http/protobuf` | 当前唯一支持的协议 |
 | `serviceName` | `openclaw-otel-plugin` | 会作为 OTEL `service.name` 导出 |
 | `headers` | 未设置 | 对 traces、metrics、logs 统一附加的 HTTP Header |
+| `headers.X-Token` | 未设置 | `--type gtrace` 时必填 |
 | `sampleRate` | 未设置 | 可选采样率，取值范围 `[0, 1]` |
 | `flushIntervalMs` | `30000` | metrics 周期导出间隔 |
 | `rootSpanTtlMs` | `600000` | root/run span 长时间无活动后自动收尾 |
-| `resourceAttributes` | `{ "agent_runtime": "openclaw" }` | 固定 OTEL resource attributes |
+| `resourceAttributes` | `{ "agent_runtime": "openclaw" }` | 固定 OTEL resource attributes；每个 `--tag key=value` 都会合并到这里 |
 
 兼容字段仍然支持：
 
