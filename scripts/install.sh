@@ -232,6 +232,8 @@ if (installType === "gtrace") {
   config.plugins.entries[pluginId].config.logsPath = "v1/write/otel-logs";
   config.plugins.entries[pluginId].config.headers ??= {};
   config.plugins.entries[pluginId].config.headers["to_headless"] = "true";
+  delete config.plugins.entries[pluginId].config.resourceAttributes.app_name;
+  delete config.plugins.entries[pluginId].config.resourceAttributes.app_id;
 }
 if (xToken) {
   config.plugins.entries[pluginId].config.headers ??= {};

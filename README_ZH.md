@@ -218,9 +218,7 @@ bash scripts/update.sh latest --no-restart
           "rootSpanTtlMs": 600000,
           "resourceAttributes": {
             "agent_runtime": "openclaw",
-            "env": "prod",
-            "app_name":"openclaw-agent",
-	          "app_id":"999999990000000000iuui"
+            "env": "prod"
           }
         }
       }
@@ -274,7 +272,7 @@ bash scripts/update.sh latest --no-restart
 | `sampleRate` | 未设置 | 可选采样率，取值范围 `[0, 1]` |
 | `flushIntervalMs` | `30000` | metrics 周期导出间隔 |
 | `rootSpanTtlMs` | `600000` | root/run span 长时间无活动后自动收尾 |
-| `resourceAttributes` | `{ "agent_runtime": "openclaw" }` | 固定 OTEL resource attributes；每个 `--tag key=value` 都会合并到这里 |
+| `resourceAttributes` | `{ "agent_runtime": "openclaw" }` | 固定 OTEL resource attributes；每个 `--tag key=value` 都会合并到这里。`type=gtrace` 时会默认移除 `app_name` 和 `app_id` |
 
 兼容字段仍然支持：
 

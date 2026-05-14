@@ -18,6 +18,7 @@ Current work is recorded by calendar day. Historical entries before the current 
   - `logsEnabled = false`
   - `logsPath = v1/write/otel-logs`
   - `headers.to_headless = true`
+- When `--type gtrace` is used, the installer also removes `app_name` and `app_id` from the default `resourceAttributes`.
 - `--type gtrace` now requires both `endpoint` and `X-Token`.
 - Every `--tag key=value` is merged into `resourceAttributes`.
 - Updated README and README_ZH quick-install examples to use safer chained commands.
