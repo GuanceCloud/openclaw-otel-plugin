@@ -158,6 +158,22 @@ install_payload() {
   cp -R "$payload_dir" "$PLUGIN_DIR"
 }
 
+link_openclaw_runtime() {
+  require_command npm
+
+  local npm_root
+  npm_root="$(npm root -g 2>/dev/null || true)"
+  if [ -z "$npm_root" ] || [ ! -d "${npm_root}/openclaw" ]; then
+    printf '[install] 未找到全局 openclaw 包目录，请先确认 OpenClaw CLI 已正确安装\n' >&2
+    exit 1
+  fi
+
+  mkdir -p "${PLUGIN_DIR}/node_modules"
+  rm -rf "${PLUGIN_DIR}/node_modules/openclaw"
+  ln -s "${npm_root}/openclaw" "${PLUGIN_DIR}/node_modules/openclaw"
+  log "linked host openclaw runtime from ${npm_root}/openclaw"
+}
+
 configure_openclaw_json() {
   require_command node
 
@@ -286,6 +302,7 @@ main() {
 
   install_payload "$payload_dir"
   log "installed to ${PLUGIN_DIR}"
+  link_openclaw_runtime
   if [ "$WRITE_CONFIG" -eq 1 ]; then
     if [ "$INSTALL_TYPE" = "gtrace" ]; then
       if [ -z "$ENDPOINT" ]; then

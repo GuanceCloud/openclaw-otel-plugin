@@ -7,7 +7,8 @@ Current work is recorded by calendar day. Historical entries before the current 
 ### Installation Flow
 
 - Fixed `scripts/install.sh` cleanup so successful installs no longer end with `tmp_dir: 未绑定的变量`.
-- Bundled a CommonJS runtime entrypoint at `dist/index.cjs` for release/runtime use so installed plugin packages no longer depend on external module lookup from the extension directory and do not hit ESM dynamic-require failures.
+- Bundled a CommonJS runtime entrypoint at `dist/index.cjs` for release/runtime use.
+- The installer now links the host `openclaw` package into the plugin directory under `node_modules/openclaw`, so release installs reuse the local OpenClaw runtime instead of bundling the full host package into the plugin artifact.
 - Added installer parameters for Guance GTrace:
   - `--type gtrace`
   - `--endpoint`
