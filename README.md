@@ -125,7 +125,7 @@ Install a specific version:
 rm -f /tmp/openclaw-otel-plugin-install.sh && \
 curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
   https://static.guance.com/openclaw-otel-plugin/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh v0.6.3 \
+bash /tmp/openclaw-otel-plugin-install.sh v0.6.4 \
   --endpoint https://llm-openway.guance.com \
   --x-token agent_xxx \
   --tag env=prod
@@ -143,13 +143,13 @@ bash /tmp/openclaw-otel-plugin-install.sh latest --no-config
 ### Option 2: Install From A Local Release Artifact
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.4.tar.gz
 ```
 
 You can also write the endpoint while installing a local artifact:
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz \
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.4.tar.gz \
   --endpoint https://llm-openway.guance.com \
   --x-token agent_xxx \
   --tag env=prod
@@ -158,7 +158,7 @@ bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz \
 Install a local artifact to a standard OTLP HTTP/protobuf receiver:
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz \
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.4.tar.gz \
   --type otlp \
   --endpoint http://127.0.0.1:4318/otel
 ```
@@ -174,7 +174,7 @@ bash scripts/update.sh
 Update to a specific version:
 
 ```bash
-bash scripts/update.sh v0.6.3
+bash scripts/update.sh v0.6.4
 ```
 
 Install files without restarting the gateway immediately:

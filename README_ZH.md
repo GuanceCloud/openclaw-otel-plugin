@@ -125,7 +125,7 @@ bash /tmp/openclaw-otel-plugin-install.sh latest \
 rm -f /tmp/openclaw-otel-plugin-install.sh && \
 curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
   https://static.guance.com/openclaw-otel-plugin/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh v0.6.3 \
+bash /tmp/openclaw-otel-plugin-install.sh v0.6.4 \
   --endpoint https://llm-openway.guance.com \
   --x-token agent_xxx \
   --tag env=prod
@@ -143,13 +143,13 @@ bash /tmp/openclaw-otel-plugin-install.sh latest --no-config
 ### 方式二：安装本地打包产物
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.4.tar.gz
 ```
 
 安装本地包时也可以一并写入 endpoint：
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz \
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.4.tar.gz \
   --endpoint https://llm-openway.guance.com \
   --x-token agent_xxx \
   --tag env=prod
@@ -158,7 +158,7 @@ bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz \
 本地包安装到标准 OTLP HTTP/protobuf 接收端：
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz \
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.4.tar.gz \
   --type otlp \
   --endpoint http://127.0.0.1:4318/otel
 ```
@@ -174,7 +174,7 @@ bash scripts/update.sh
 指定版本升级：
 
 ```bash
-bash scripts/update.sh v0.6.3
+bash scripts/update.sh v0.6.4
 ```
 
 如果只想安装文件、不立即重启 gateway：
