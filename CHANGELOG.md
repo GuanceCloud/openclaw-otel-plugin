@@ -15,6 +15,8 @@ Current work is recorded by calendar day. Historical entries before the current 
 - Restored per-call `usage_total_tokens` on `llm` spans as `input + output`, and restored per-call `usage_cache_total_tokens` on `llm` spans as `cache read + cache write`.
 - Tightened `session.state` close handling so the current `run_id` is marked finalized even when the transcript snapshot has not yet observed `runCompleted=true`, preventing a late transcript replay from reopening the same run as a second trace.
 - Excluded internal OpenClaw heartbeat poll / `HEARTBEAT_OK` traffic from runtime request tracing, so heartbeat health checks no longer appear as duplicate user traces.
+- Normalized `session_create_at` / `session_updated_at` on summary spans, removed the leaked `session_updatedAt` legacy field, and kept zero-valued summary token attrs on `openclaw_request` / `agent_run` instead of dropping them.
+- Guarded `message.processed` replay against stale transcript snapshots from an older request, so a new queued message no longer emits `0 ns` ghost traces by replaying the previous request's transcript or synthetic model span.
 
 ## 2026-05-14
 

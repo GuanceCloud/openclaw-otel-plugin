@@ -224,6 +224,34 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     return resolvedTs;
   };
 
+  const resolveSnapshotActivityTs = (snapshot: SessionSnapshot | undefined): number | undefined => {
+    const candidates = [
+      snapshot?.lastUserTs,
+      snapshot?.lastAssistantTs,
+      ...(snapshot?.lastRunToolCalls ?? []).flatMap((toolCall) => [toolCall.startedAt, toolCall.endedAt]),
+      ...(snapshot?.lastRunAssistantTurns ?? []).flatMap((turn) => [turn.startedAt, turn.endedAt]),
+    ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    if (candidates.length === 0) {
+      return undefined;
+    }
+    return Math.max(...candidates);
+  };
+
+  const snapshotIsFreshForQueuedRequest = (
+    snapshot: SessionSnapshot | undefined,
+    run: ActiveRunSpan | undefined,
+  ): boolean => {
+    const minRequestTs = run?.messageQueuedTs;
+    if (typeof minRequestTs !== "number") {
+      return true;
+    }
+    const snapshotActivityTs = resolveSnapshotActivityTs(snapshot);
+    if (typeof snapshotActivityTs !== "number") {
+      return false;
+    }
+    return snapshotActivityTs >= minRequestTs;
+  };
+
   return (evt: DiagnosticEventPayload) => {
     cleanupExpiredRoots();
 
@@ -651,10 +679,12 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           );
         }
         ensureTranscriptSkillSpans(evt);
-        const hasActiveTrace = Boolean(getRun(evt, false) || getRoot(evt, false));
+        const activeRun = getRun(evt, false);
+        const hasActiveTrace = Boolean(activeRun || getRoot(evt, false));
         const replayAlreadyFinalized = hasReplayWatermark(evt.sessionKey, snapshot);
         const replayRunAlreadyFinalized = hasFinalizedReplayRunId(evt.sessionKey, snapshot?.runId);
-        if ((!replayAlreadyFinalized && !replayRunAlreadyFinalized) || hasActiveTrace) {
+        const replaySnapshotIsFresh = snapshotIsFreshForQueuedRequest(snapshot, activeRun);
+        if (((!replayAlreadyFinalized && !replayRunAlreadyFinalized) || hasActiveTrace) && replaySnapshotIsFresh) {
           const emittedTranscriptModelSpans = emitTranscriptModelSpans(evt);
           if (emittedTranscriptModelSpans) {
             emitTranscriptToolSpans(evt);

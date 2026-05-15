@@ -570,11 +570,11 @@ function withCanonicalAliases(
   promoteAlias(next, "queue_depth", "openclaw.queueDepth", "queueDepth", "queue_depth");
   promoteAlias(next, "runtime_phase", "openclaw.runtime.phase", "runtime.phase");
   promoteAlias(next, "skill_count", "skill.count", "skill_count");
-  promoteAlias(next, "session_create_at", "session_create_time", "gen_ai.session_create_time");
-  promoteAlias(next, "session_created_at", "session.createdAt");
-  promoteAlias(next, "session_updated_at", "session.updatedAt", "session_update_time");
-  promoteAlias(next, "session_chat_type", "session.chatType");
-  promoteAlias(next, "session_file", "session.file");
+  promoteAlias(next, "session_create_at", "session_create_time", "gen_ai.session_create_time", "openclaw.session.createdAt");
+  promoteAlias(next, "session_created_at", "session.createdAt", "openclaw.session.createdAt");
+  promoteAlias(next, "session_updated_at", "session.updatedAt", "session_update_time", "openclaw.session.updatedAt");
+  promoteAlias(next, "session_chat_type", "session.chatType", "openclaw.session.chatType");
+  promoteAlias(next, "session_file", "session.file", "openclaw.session.file");
   mirrorAlias(next, "skill_call_id", "openclaw.skill.call_id");
   mirrorAlias(next, "skill_name", "openclaw.skill.name");
   mirrorAlias(next, "skill_type", "openclaw.skill.kind");
@@ -639,6 +639,7 @@ const LEGACY_TRACE_CONTEXT_KEYS = new Set([
   "tool.phase",
   "tool.outcome",
   "session.createdAt",
+  "session.updatedAt",
   "session_update_time",
   "session.chatType",
   "session.file",

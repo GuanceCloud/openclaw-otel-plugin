@@ -908,6 +908,7 @@ export function createOtelPluginService(
         const rootStartTs = typeof seededRun?.messageQueuedTs === "number"
           ? seededRun.messageQueuedTs
           : eventTimestamp(evt).getTime();
+        const snapshot = loadSessionSnapshot(sessionKey);
         const span = tracer.startSpan(
           "openclaw_request",
           {
@@ -920,7 +921,7 @@ export function createOtelPluginService(
               "openclaw.channel": evt.channel,
               "openclaw.source": evt.source,
               "openclaw.queueDepth": evt.queueDepth,
-              session_create_time: loadSessionSnapshot(sessionKey)?.createdAt,
+              session_create_at: snapshot?.createdAt,
               session_update_time: rootStartTs,
               "span.kind": "request",
             })),
@@ -977,6 +978,7 @@ export function createOtelPluginService(
           root.span.setAttributes(traceRunScopeAttrs(root.runId, root.runIds));
         }
         const userCtx = current?.userCtx;
+        const snapshot = loadSessionSnapshot(sessionKey);
         const span = tracer.startSpan(
           "agent_run",
           {
@@ -986,6 +988,7 @@ export function createOtelPluginService(
               "openclaw.sessionKey": evt.sessionKey,
               "openclaw.sessionId": evt.sessionId,
               ...buildRunScopeAttrs(root.runId ?? resolvedRunId, root.runIds, resolvedRunId),
+              session_create_at: snapshot?.createdAt,
               session_update_time: eventTimestamp(evt).getTime(),
               "span.kind": "agent",
             })),
@@ -1052,6 +1055,13 @@ export function createOtelPluginService(
           return;
         }
         const run = activeRuns.get(requestKey);
+        const snapshot = loadSessionSnapshot(sessionKey);
+        const snapshotUsageTotals = resolveSnapshotUsageTotals(snapshot);
+        const rootInputTokens = run?.aggregate.inputTokens || snapshotUsageTotals.inputTokens;
+        const rootOutputTokens = run?.aggregate.outputTokens || snapshotUsageTotals.outputTokens;
+        const rootCacheReadTokens = run?.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens;
+        const rootCacheWriteTokens = run?.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens;
+        const rootTotalTokens = run?.aggregate.totalTokens || snapshotUsageTotals.totalTokens;
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
         const finalAttrs = traceAttrs({
           ...enrichWithTranscript(sessionKey, summaryAttrs),
@@ -1061,9 +1071,20 @@ export function createOtelPluginService(
             run?.runIds,
             resolveRunId(evt),
           ),
+          session_create_at: snapshot?.createdAt,
           session_update_time: eventTimestamp(evt).getTime(),
+          usage_input_tokens: rootInputTokens,
+          usage_output_tokens: rootOutputTokens,
+          usage_cache_read_input_tokens: rootCacheReadTokens,
+          usage_cache_write_input_tokens: rootCacheWriteTokens,
+          usage_total_tokens: rootTotalTokens,
           "openclaw.skills": run ? Array.from(run.usedSkillNames).join(", ") : undefined,
           "openclaw.skill.count": run ? run.usedSkillNames.size : undefined,
+          "openclaw.tokens.input": rootInputTokens,
+          "openclaw.tokens.output": rootOutputTokens,
+          "openclaw.tokens.cache_read": rootCacheReadTokens,
+          "openclaw.tokens.cache_write": rootCacheWriteTokens,
+          "openclaw.tokens.total": rootTotalTokens,
           "openclaw.tools": run ? Array.from(run.usedToolNames).join(", ") : undefined,
           "openclaw.tool.count": run ? run.usedToolNames.size : undefined,
           "openclaw.tool.targets": run ? Array.from(run.usedToolTargets).join(" | ") : undefined,
@@ -1108,19 +1129,25 @@ export function createOtelPluginService(
         }
         const snapshot = loadSessionSnapshot(sessionKey);
         const snapshotUsageTotals = resolveSnapshotUsageTotals(snapshot);
+        const rootInputTokens = run.aggregate.inputTokens || snapshotUsageTotals.inputTokens;
+        const rootOutputTokens = run.aggregate.outputTokens || snapshotUsageTotals.outputTokens;
+        const rootCacheReadTokens = run.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens;
+        const rootCacheWriteTokens = run.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens;
+        const rootTotalTokens = run.aggregate.totalTokens || snapshotUsageTotals.totalTokens;
         root.span.setAttributes(traceAttrs({
           ...buildRunScopeAttrs(root.runId ?? run.runId ?? resolveRunId(evt), root.runIds, run.runIds, resolveRunId(evt)),
+          session_create_at: snapshot?.createdAt,
           session_update_time: run.modelEndTs ?? run.mainEndTs ?? run.lastTouchedAt ?? Date.now(),
-          "openclaw.tokens.input":
-            run.aggregate.inputTokens || snapshotUsageTotals.inputTokens,
-          "openclaw.tokens.output":
-            run.aggregate.outputTokens || snapshotUsageTotals.outputTokens,
-          "openclaw.tokens.cache_read":
-            run.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens,
-          "openclaw.tokens.cache_write":
-            run.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens,
-          "openclaw.tokens.total":
-            run.aggregate.totalTokens || snapshotUsageTotals.totalTokens,
+          usage_input_tokens: rootInputTokens,
+          usage_output_tokens: rootOutputTokens,
+          usage_cache_read_input_tokens: rootCacheReadTokens,
+          usage_cache_write_input_tokens: rootCacheWriteTokens,
+          usage_total_tokens: rootTotalTokens,
+          "openclaw.tokens.input": rootInputTokens,
+          "openclaw.tokens.output": rootOutputTokens,
+          "openclaw.tokens.cache_read": rootCacheReadTokens,
+          "openclaw.tokens.cache_write": rootCacheWriteTokens,
+          "openclaw.tokens.total": rootTotalTokens,
           "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
           "openclaw.skill.count": run.usedSkillNames.size,
           "openclaw.tools": Array.from(run.usedToolNames).join(", "),
@@ -1169,17 +1196,18 @@ export function createOtelPluginService(
         const finalAttrs = traceAttrs({
           ...enrichWithTranscript(sessionKey, summaryAttrs),
           ...buildRunScopeAttrs(current.runId ?? resolveRunId(evt), current.runIds, resolveRunId(evt)),
+          session_create_at: snapshot?.createdAt,
           session_update_time: eventTimestamp(evt).getTime(),
-          "openclaw.tokens.input":
-            sessionInputTokens,
-          "openclaw.tokens.output":
-            sessionOutputTokens,
-          "openclaw.tokens.cache_read":
-            current.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens,
-          "openclaw.tokens.cache_write":
-            current.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens,
-          "openclaw.tokens.total":
-            sessionTotalTokens,
+          usage_input_tokens: sessionInputTokens,
+          usage_output_tokens: sessionOutputTokens,
+          usage_cache_read_input_tokens: current.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens,
+          usage_cache_write_input_tokens: current.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens,
+          usage_total_tokens: sessionTotalTokens,
+          "openclaw.tokens.input": sessionInputTokens,
+          "openclaw.tokens.output": sessionOutputTokens,
+          "openclaw.tokens.cache_read": current.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens,
+          "openclaw.tokens.cache_write": current.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens,
+          "openclaw.tokens.total": sessionTotalTokens,
           "openclaw.skills": Array.from(current.usedSkillNames).join(", "),
           "openclaw.skill.count": current.usedSkillNames.size,
           "openclaw.tools": Array.from(current.usedToolNames).join(", "),

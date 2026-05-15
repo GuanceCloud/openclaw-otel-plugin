@@ -122,7 +122,7 @@ Install a specific version:
 rm -f /tmp/openclaw-otel-plugin-install.sh && \
 curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
   https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh v0.6.2 --endpoint http://127.0.0.1:4318/otel
+bash /tmp/openclaw-otel-plugin-install.sh v0.6.3 --endpoint http://127.0.0.1:4318/otel
 ```
 
 If you want to install first and fill the endpoint later:
@@ -137,19 +137,19 @@ bash /tmp/openclaw-otel-plugin-install.sh latest
 ### Option 2: Install From A Local Release Artifact
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.2.tar.gz
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz
 ```
 
 You can also write the endpoint while installing a local artifact:
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.2.tar.gz --endpoint http://127.0.0.1:4318/otel
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz --endpoint http://127.0.0.1:4318/otel
 ```
 
 Install a local artifact for Guance GTrace:
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.2.tar.gz \
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz \
   --type gtrace \
   --endpoint https://llm-openway.guance.com \
   --x-token agent_xxx \
@@ -167,7 +167,7 @@ bash scripts/update.sh
 Update to a specific version:
 
 ```bash
-bash scripts/update.sh v0.6.2
+bash scripts/update.sh v0.6.3
 ```
 
 Install files without restarting the gateway immediately:
