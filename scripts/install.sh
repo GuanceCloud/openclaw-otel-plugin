@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_OWNER="${OPENCLAW_PLUGIN_REPO_OWNER:-GuanceCloud}"
-REPO_NAME="${OPENCLAW_PLUGIN_REPO_NAME:-openclaw-otel-plugin}"
+PLUGIN_NAME="${OPENCLAW_PLUGIN_NAME:-openclaw-otel-plugin}"
+DOWNLOAD_BASE_URL="${OPENCLAW_PLUGIN_DOWNLOAD_BASE_URL:-https://static.guance.com/openclaw-otel-plugin}"
 PLUGIN_DIR="${OPENCLAW_PLUGIN_DIR:-$HOME/.openclaw/extensions/openclaw-otel-plugin}"
 CONFIG_FILE="${OPENCLAW_CONFIG_FILE:-$HOME/.openclaw/openclaw.json}"
 RESTART_GATEWAY=1
 WRITE_CONFIG=1
 VERSION_INPUT=""
 ENDPOINT=""
-INSTALL_TYPE=""
+INSTALL_TYPE="${OPENCLAW_PLUGIN_INSTALL_TYPE:-gtrace}"
 X_TOKEN=""
 TAGS=()
 tmp_dir=""
@@ -29,13 +29,16 @@ trap cleanup EXIT
 usage() {
   cat <<'EOF'
 用法:
-  scripts/install.sh [latest|v0.6.3|0.6.3|/path/to/archive.tar.gz|https://...tar.gz] [--type TYPE] [--endpoint URL] [--x-token TOKEN] [--tag KEY=VALUE] [--no-config] [--no-restart]
+  scripts/install.sh [latest|v0.6.3|0.6.3|/path/to/archive.tar.gz|https://...tar.gz] [--type gtrace|otlp] [--endpoint URL] [--x-token TOKEN] [--tag KEY=VALUE] [--no-config] [--no-restart]
 
 环境变量:
   OPENCLAW_PLUGIN_DIR        安装目录，默认 ~/.openclaw/extensions/openclaw-otel-plugin
   OPENCLAW_CONFIG_FILE       OpenClaw 配置文件，默认 ~/.openclaw/openclaw.json
-  OPENCLAW_PLUGIN_REPO_OWNER GitHub owner，默认 GuanceCloud
-  OPENCLAW_PLUGIN_REPO_NAME  GitHub repo，默认 openclaw-otel-plugin
+  OPENCLAW_PLUGIN_DOWNLOAD_BASE_URL
+                             插件 OSS 下载目录，默认 https://static.guance.com/openclaw-otel-plugin
+  OPENCLAW_PLUGIN_NAME       插件包名前缀，默认 openclaw-otel-plugin
+  OPENCLAW_PLUGIN_INSTALL_TYPE
+                             安装配置类型，默认 gtrace；可设为 otlp
 EOF
 }
 
@@ -118,9 +121,19 @@ require_command() {
   fi
 }
 
-resolve_latest_version() {
-  local api_url="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
-  curl -fsSL "$api_url" | sed -n 's/.*"tag_name":[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1
+normalize_install_type() {
+  case "$1" in
+    ""|gtrace)
+      printf 'gtrace'
+      ;;
+    otlp|otel)
+      printf 'otlp'
+      ;;
+    *)
+      printf '[install] 不支持的 --type: %s，可选值为 gtrace 或 otlp\n' "$1" >&2
+      exit 1
+      ;;
+  esac
 }
 
 normalize_version() {
@@ -129,13 +142,43 @@ normalize_version() {
   printf '%s' "$value"
 }
 
-download_release_archive() {
-  local version="$1"
+download_archive() {
+  local url="$1"
   local target="$2"
-  local asset_name="${REPO_NAME}-v${version}.tar.gz"
-  local url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${asset_name}"
   log "downloading ${url}"
   curl -fL "$url" -o "$target"
+
+  local checksum_path="${target}.sha256"
+  if curl -fsSL "${url}.sha256" -o "$checksum_path"; then
+    if command -v sha256sum >/dev/null 2>&1; then
+      local expected
+      local actual
+      expected="$(sed -n '1s/[[:space:]].*//p' "$checksum_path")"
+      actual="$(sha256sum "$target" | awk '{print $1}')"
+      if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+        printf '[install] sha256 校验失败: %s\n' "$url" >&2
+        exit 1
+      fi
+      log "sha256 verified"
+    else
+      log "sha256sum 不存在，跳过校验"
+    fi
+  else
+    log "checksum not found, skipped sha256 verification"
+  fi
+}
+
+download_latest_archive() {
+  local target="$1"
+  local base_url="${DOWNLOAD_BASE_URL%/}"
+  download_archive "${base_url}/${PLUGIN_NAME}.tar.gz" "$target"
+}
+
+download_version_archive() {
+  local version="$1"
+  local target="$2"
+  local base_url="${DOWNLOAD_BASE_URL%/}"
+  download_archive "${base_url}/${PLUGIN_NAME}-v${version}.tar.gz" "$target"
 }
 
 extract_archive() {
@@ -265,6 +308,18 @@ main() {
   require_command curl
   require_command tar
 
+  INSTALL_TYPE="$(normalize_install_type "$INSTALL_TYPE")"
+  if [ "$WRITE_CONFIG" -eq 1 ] && [ "$INSTALL_TYPE" = "gtrace" ]; then
+    if [ -z "$ENDPOINT" ]; then
+      printf '[install] type=gtrace 时必须传入 --endpoint\n' >&2
+      exit 1
+    fi
+    if [ -z "$X_TOKEN" ]; then
+      printf '[install] type=gtrace 时必须传入 --x-token\n' >&2
+      exit 1
+    fi
+  fi
+
   tmp_dir="$(mktemp -d)"
 
   local archive_path="${tmp_dir}/plugin.tar.gz"
@@ -274,23 +329,18 @@ main() {
   case "$VERSION_INPUT" in
     http://*|https://*)
       log "downloading archive from custom url"
-      curl -fL "$VERSION_INPUT" -o "$archive_path"
+      download_archive "$VERSION_INPUT" "$archive_path"
       ;;
     *.tar.gz)
       log "using local archive ${VERSION_INPUT}"
       cp "$VERSION_INPUT" "$archive_path"
       ;;
     latest|"")
-      version="$(resolve_latest_version)"
-      if [ -z "$version" ]; then
-        printf '[install] 无法解析 latest 版本\n' >&2
-        exit 1
-      fi
-      download_release_archive "$version" "$archive_path"
+      download_latest_archive "$archive_path"
       ;;
     *)
       version="$(normalize_version "$VERSION_INPUT")"
-      download_release_archive "$version" "$archive_path"
+      download_version_archive "$version" "$archive_path"
       ;;
   esac
 
@@ -304,16 +354,6 @@ main() {
   log "installed to ${PLUGIN_DIR}"
   link_openclaw_runtime
   if [ "$WRITE_CONFIG" -eq 1 ]; then
-    if [ "$INSTALL_TYPE" = "gtrace" ]; then
-      if [ -z "$ENDPOINT" ]; then
-        printf '[install] type=gtrace 时必须传入 --endpoint\n' >&2
-        exit 1
-      fi
-      if [ -z "$X_TOKEN" ]; then
-        printf '[install] type=gtrace 时必须传入 --x-token\n' >&2
-        exit 1
-      fi
-    fi
     configure_openclaw_json
     log "updated ${CONFIG_FILE}"
   else

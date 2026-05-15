@@ -89,31 +89,34 @@ Compatibility notes:
 
 ## Install
 
-The recommended path is to install a prebuilt release package so the target machine does not need a local Node.js build toolchain.
+The recommended path is to install a prebuilt release package from Guance OSS so the target machine does not need a local Node.js build toolchain.
 The installer now registers the plugin in `~/.openclaw/openclaw.json` automatically, and can write the OTLP endpoint in the same step.
 
 For build, packaging, source install, and release workflow, see [BUILDING.md](./BUILDING.md).
 
 ### Option 1: Quick Install
 
-```bash
-rm -f /tmp/openclaw-otel-plugin-install.sh && \
-curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
-  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh latest --endpoint http://127.0.0.1:4318/otel
-```
-
-Install for Guance GTrace:
+Guance GTrace is the default install type. It writes Guance-specific OTLP paths and requires both `--endpoint` and `--x-token`.
 
 ```bash
 rm -f /tmp/openclaw-otel-plugin-install.sh && \
 curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
-  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
+  https://static.guance.com/openclaw-otel-plugin/install.sh && \
 bash /tmp/openclaw-otel-plugin-install.sh latest \
-  --type gtrace \
   --endpoint https://llm-openway.guance.com \
   --x-token agent_xxx \
   --tag env=prod
+```
+
+Install to a standard OTLP HTTP/protobuf receiver:
+
+```bash
+rm -f /tmp/openclaw-otel-plugin-install.sh && \
+curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
+  https://static.guance.com/openclaw-otel-plugin/install.sh && \
+bash /tmp/openclaw-otel-plugin-install.sh latest \
+  --type otlp \
+  --endpoint http://127.0.0.1:4318/otel
 ```
 
 Install a specific version:
@@ -121,17 +124,20 @@ Install a specific version:
 ```bash
 rm -f /tmp/openclaw-otel-plugin-install.sh && \
 curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
-  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh v0.6.3 --endpoint http://127.0.0.1:4318/otel
+  https://static.guance.com/openclaw-otel-plugin/install.sh && \
+bash /tmp/openclaw-otel-plugin-install.sh v0.6.3 \
+  --endpoint https://llm-openway.guance.com \
+  --x-token agent_xxx \
+  --tag env=prod
 ```
 
-If you want to install first and fill the endpoint later:
+If you want to install files first and fill the config later:
 
 ```bash
 rm -f /tmp/openclaw-otel-plugin-install.sh && \
 curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
-  https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh latest
+  https://static.guance.com/openclaw-otel-plugin/install.sh && \
+bash /tmp/openclaw-otel-plugin-install.sh latest --no-config
 ```
 
 ### Option 2: Install From A Local Release Artifact
@@ -143,22 +149,23 @@ bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz
 You can also write the endpoint while installing a local artifact:
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz --endpoint http://127.0.0.1:4318/otel
-```
-
-Install a local artifact for Guance GTrace:
-
-```bash
 bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz \
-  --type gtrace \
   --endpoint https://llm-openway.guance.com \
   --x-token agent_xxx \
   --tag env=prod
 ```
 
+Install a local artifact to a standard OTLP HTTP/protobuf receiver:
+
+```bash
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.3.tar.gz \
+  --type otlp \
+  --endpoint http://127.0.0.1:4318/otel
+```
+
 ## Update
 
-Updates reuse the same installer and replace the plugin directory in place. By default the script downloads the latest release:
+Updates reuse the same installer and replace the plugin directory in place. By default the script downloads the latest OSS package:
 
 ```bash
 bash scripts/update.sh
@@ -176,16 +183,17 @@ Install files without restarting the gateway immediately:
 bash scripts/update.sh latest --no-restart
 ```
 
+The default download base is `https://static.guance.com/openclaw-otel-plugin`. Override it with `OPENCLAW_PLUGIN_DOWNLOAD_BASE_URL` only when testing another OSS mirror.
+
 ## Configure
 
-If you installed with `--endpoint`, the installer already writes the minimal plugin registration for you.
-If you installed with `--type gtrace`, the installer also writes Guance-specific OTLP paths and headers automatically.
+The installer defaults to `--type gtrace`, so it writes Guance-specific OTLP paths and headers automatically.
+Use `--type otlp` only when installing to a standard OTLP HTTP/protobuf receiver.
 
 Manual configuration is only needed when:
 
-- you skipped endpoint setup during install
+- you installed with `--no-config`
 - you want to customize advanced fields
-- you disabled config writing with `--no-config`
 
 Minimal example in `~/.openclaw/openclaw.json`:
 
@@ -260,7 +268,7 @@ Example generated by `--type gtrace`:
 | Field | Default | Notes |
 | --- | --- | --- |
 | `endpoint` | `http://127.0.0.1:4318/otel` | Receiver base URL. Trailing `/` is removed automatically |
-| `type` | unset | When `gtrace`, the installer requires `endpoint` and `X-Token`, and writes Guance-specific OTLP paths |
+| `type` | `gtrace` | Installer profile. Default `gtrace` requires `endpoint` and `X-Token`, and writes Guance-specific OTLP paths. Use `otlp` for standard OTLP receivers |
 | `tracePath` | `v1/traces` | Trace route appended to `endpoint` |
 | `metricsPath` | `v1/metrics` | Metrics route appended to `endpoint` |
 | `logsEnabled` | `false` | Logs are exported only when explicitly enabled |
@@ -268,7 +276,7 @@ Example generated by `--type gtrace`:
 | `protocol` | `http/protobuf` | The only supported protocol |
 | `serviceName` | `openclaw-otel-plugin` | Exported as OTEL `service.name` |
 | `headers` | unset | Fixed HTTP headers applied to traces, metrics, and logs |
-| `headers.X-Token` | unset | Required by `--type gtrace` |
+| `headers.X-Token` | unset | Required by the default `gtrace` profile |
 | `sampleRate` | unset | Optional root sampler ratio in `[0, 1]` |
 | `flushIntervalMs` | `30000` | Metrics export interval |
 | `rootSpanTtlMs` | `600000` | Closes stale root/run spans after inactivity |

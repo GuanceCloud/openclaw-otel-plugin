@@ -64,6 +64,12 @@ npm run pack:release
 
 - `output/openclaw-otel-plugin-v0.6.3.tar.gz`
 - `output/openclaw-otel-plugin-v0.6.3.tar.gz.sha256`
+- `output/openclaw-otel-plugin.tar.gz`
+- `output/openclaw-otel-plugin.tar.gz.sha256`
+- `output/install.sh`
+- `output/update.sh`
+
+其中带版本包是不可变发布包，`openclaw-otel-plugin.tar.gz` 是 latest 包，每次发布可以覆盖。
 
 打包内容包括：
 
@@ -73,6 +79,8 @@ npm run pack:release
 - `README.md`
 - `README_ZH.md`
 - `LICENSE`
+- `scripts/install.sh`
+- `scripts/update.sh`
 - `VERSION`
 - `RELEASE.json`
 
@@ -82,4 +90,4 @@ npm run pack:release
 2. 运行 `npm test`。
 3. 运行 `npm run pack:release`。
 4. 提交版本变更并打 tag，例如 `v0.6.3`。
-5. 将 `output/openclaw-otel-plugin-vX.Y.Z.tar.gz` 和对应 `.sha256` 上传到 GitHub Release。
+5. 将 `output/` 下的 `install.sh`、`update.sh`、带版本包、latest 包以及对应 `.sha256` 上传到 OSS 的 `openclaw-otel-plugin/` 目录。
