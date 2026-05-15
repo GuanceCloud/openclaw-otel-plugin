@@ -345,6 +345,8 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
     "tool.outcome": "completed",
     session_create_time: 1234567890,
     session_update_time: 3333333333,
+    "openclaw.session.createdAt": 1234567890,
+    "openclaw.session.updatedAt": 2222222222,
     "session.createdAt": 1111111111,
     "session.updatedAt": 2222222222,
     "session.chatType": "direct",
@@ -425,8 +427,27 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   assert.equal(attrs.session_update_time, undefined);
   assert.equal(attrs["session.createdAt"], undefined);
   assert.equal(attrs["session.updatedAt"], undefined);
+  assert.equal(attrs.session_updatedAt, undefined);
   assert.equal(attrs["session.chatType"], undefined);
   assert.equal(attrs["session.file"], undefined);
+  assert.equal(attrs["openclaw.session.createdAt"], undefined);
+  assert.equal(attrs["openclaw.session.updatedAt"], undefined);
+});
+
+test("stringAttrs keeps zero-valued token aliases on summary spans", () => {
+  const attrs = stringAttrs({
+    "openclaw.tokens.input": 0,
+    "openclaw.tokens.output": 0,
+    "openclaw.tokens.total": 0,
+    "openclaw.tokens.cache_read": 0,
+    "openclaw.tokens.cache_write": 0,
+  });
+
+  assert.equal(attrs.usage_input_tokens, 0);
+  assert.equal(attrs.usage_output_tokens, 0);
+  assert.equal(attrs.usage_total_tokens, 0);
+  assert.equal(attrs.usage_cache_read_input_tokens, 0);
+  assert.equal(attrs.usage_cache_write_input_tokens, 0);
 });
 
 test("extractToolResultStatus only uses explicit status fields", () => {
