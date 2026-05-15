@@ -51,6 +51,15 @@ async function writeSha256(filePath) {
   return checksumPath;
 }
 
+async function copyReleaseScript(relativePath) {
+  const sourcePath = path.join(repoRoot, relativePath);
+  const targetPath = path.join(outputDir, path.basename(relativePath));
+  await fs.copyFile(sourcePath, targetPath);
+  const stat = await fs.stat(sourcePath);
+  await fs.chmod(targetPath, stat.mode);
+  return targetPath;
+}
+
 async function main() {
   const packageJsonPath = path.join(repoRoot, "package.json");
   const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
@@ -67,10 +76,13 @@ async function main() {
   const artifactBase = `${pluginName}-v${version}`;
   const stagingDir = path.join(outputDir, artifactBase);
   const archivePath = path.join(outputDir, `${artifactBase}.tar.gz`);
+  const latestArchivePath = path.join(outputDir, `${pluginName}.tar.gz`);
 
   await fs.rm(stagingDir, { recursive: true, force: true });
   await fs.rm(archivePath, { force: true });
   await fs.rm(`${archivePath}.sha256`, { force: true });
+  await fs.rm(latestArchivePath, { force: true });
+  await fs.rm(`${latestArchivePath}.sha256`, { force: true });
   await fs.mkdir(stagingDir, { recursive: true });
 
   const releaseFiles = [
@@ -80,6 +92,8 @@ async function main() {
     "README.md",
     "README_ZH.md",
     "LICENSE",
+    "scripts/install.sh",
+    "scripts/update.sh",
   ];
 
   for (const relativePath of releaseFiles) {
@@ -98,9 +112,17 @@ async function main() {
   log(`packaging ${artifactBase}.tar.gz`);
   await createArchive(archivePath, artifactBase);
   const checksumPath = await writeSha256(archivePath);
+  await fs.copyFile(archivePath, latestArchivePath);
+  const latestChecksumPath = await writeSha256(latestArchivePath);
+  const installScriptPath = await copyReleaseScript("scripts/install.sh");
+  const updateScriptPath = await copyReleaseScript("scripts/update.sh");
 
   log(`artifact: ${path.relative(repoRoot, archivePath)}`);
   log(`checksum: ${path.relative(repoRoot, checksumPath)}`);
+  log(`latest artifact: ${path.relative(repoRoot, latestArchivePath)}`);
+  log(`latest checksum: ${path.relative(repoRoot, latestChecksumPath)}`);
+  log(`install script: ${path.relative(repoRoot, installScriptPath)}`);
+  log(`update script: ${path.relative(repoRoot, updateScriptPath)}`);
 }
 
 main().catch((error) => {

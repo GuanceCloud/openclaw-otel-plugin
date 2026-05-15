@@ -4,6 +4,13 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 ## 2026-05-15
 
+### OSS Release Delivery
+
+- Switched installer default downloads from GitHub Release to Guance OSS at `https://static.guance.com/openclaw-otel-plugin`.
+- Changed `latest` installs to download the unversioned `openclaw-otel-plugin.tar.gz` package while keeping versioned installs on `openclaw-otel-plugin-vX.Y.Z.tar.gz`.
+- Added release output copies for `install.sh`, `update.sh`, the latest tarball, and matching `.sha256` files for OSS publication.
+- Made Guance GTrace the default installer profile, with `--type otlp` retained as the explicit standard OTLP receiver switch.
+
 ### Trace Replay And Run Scope
 
 - Persisted transcript replay finalization watermarks across restarts so completed historical sessions are not replayed into duplicate traces after the plugin or gateway restarts.
