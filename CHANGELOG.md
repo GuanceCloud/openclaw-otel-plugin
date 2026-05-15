@@ -2,6 +2,13 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-05-15
+
+### Trace Replay And Run Scope
+
+- Persisted transcript replay finalization watermarks across restarts so completed historical sessions are not replayed into duplicate traces after the plugin or gateway restarts.
+- Fixed missing `run_id` / `run_ids` propagation on normal tool, skill, transcript tool, transcript model, and synthetic model spans so runtime and replay paths now carry the same run correlation tags.
+
 ## 2026-05-14
 
 ### Trace Debugging

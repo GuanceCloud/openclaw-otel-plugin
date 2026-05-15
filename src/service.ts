@@ -34,13 +34,16 @@ import {
   normalizeUserInputPreview,
   parseSessionKey,
   redactSensitiveText,
+  readReplayFinalizationState,
   rememberRunId,
+  resolveReplayFinalizationStateFile,
   resolveIngressLifecycleWindows,
   resolveSessionMetricTotals,
   resolveSpanWindow,
   sessionIdentity,
   stringAttrs,
   traceAttrs,
+  writeReplayFinalizationState,
 } from "./service-utils.js";
 import { createToolSpanManager } from "./tool-span-manager.js";
 import {
@@ -105,6 +108,16 @@ export function createOtelPluginService(
       } = await startOtelBootstrap(config, runtimeMetadata, ctx.logger);
       sdk = otelSdk;
       sessionStore.refreshSessionsIndex();
+      const replayFinalizationStateFile = resolveReplayFinalizationStateFile(ctx.stateDir);
+      const persistedReplayFinalizationBySession = readReplayFinalizationState(replayFinalizationStateFile);
+      for (const [sessionKey, value] of persistedReplayFinalizationBySession.entries()) {
+        if (value.watermark) {
+          replayWatermarkBySession.set(sessionKey, value.watermark);
+        }
+        if (value.runId) {
+          finalizedReplayRunIdBySession.set(sessionKey, value.runId);
+        }
+      }
 
       const loadSessionSnapshot = (sessionKey: string | undefined) =>
         sessionStore?.loadSessionSnapshot(sessionKey);
@@ -162,6 +175,13 @@ export function createOtelPluginService(
           return;
         }
         replayWatermarkBySession.set(sessionKey, watermark);
+        if (snapshot?.runCompleted === true) {
+          const current = persistedReplayFinalizationBySession.get(sessionKey) ?? {};
+          current.watermark = watermark;
+          current.updatedAt = Date.now();
+          persistedReplayFinalizationBySession.set(sessionKey, current);
+          writeReplayFinalizationState(replayFinalizationStateFile, persistedReplayFinalizationBySession);
+        }
       };
 
       const markFinalizedReplayRunId = (
@@ -172,6 +192,11 @@ export function createOtelPluginService(
           return;
         }
         finalizedReplayRunIdBySession.set(sessionKey, runId);
+        const current = persistedReplayFinalizationBySession.get(sessionKey) ?? {};
+        current.runId = runId;
+        current.updatedAt = Date.now();
+        persistedReplayFinalizationBySession.set(sessionKey, current);
+        writeReplayFinalizationState(replayFinalizationStateFile, persistedReplayFinalizationBySession);
       };
 
       const isHeartbeatTranscriptSnapshot = (

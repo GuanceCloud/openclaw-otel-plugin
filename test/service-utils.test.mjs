@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   buildGenAiAgentTokenMetricAttrs,
@@ -18,13 +21,16 @@ import {
   buildSessionMetricAttrs,
   computeSessionMetricDelta,
   extractToolResultStatus,
+  readReplayFinalizationState,
   rememberRunId,
+  resolveReplayFinalizationStateFile,
   resolveIngressLifecycleWindows,
   resolveSessionSpanName,
   resolveSpanWindow,
   resolveSessionMetricTotals,
   stringAttrs,
   traceAttrs,
+  writeReplayFinalizationState,
 } from "../dist/src/service-utils.js";
 
 test("resolveSpanWindow backfills start time from event end time", () => {
@@ -98,6 +104,44 @@ test("buildRunScopeAttrs preserves the primary run_id and exposes the run_ids su
     run_id: "run-1",
     run_ids: "run-1,run-2,run-3,run-4",
   });
+});
+
+test("replay finalization state survives restart-style reloads", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-replay-state-"));
+  const stateFile = resolveReplayFinalizationStateFile(stateDir);
+  const entries = new Map([
+    ["agent:main:main", { watermark: "session-1|1|2|3", runId: "run-1", updatedAt: 200 }],
+    ["agent:main:chat", { watermark: "session-2|4|5|6", updatedAt: 100 }],
+  ]);
+
+  writeReplayFinalizationState(stateFile, entries);
+  const restored = readReplayFinalizationState(stateFile);
+
+  assert.equal(restored.get("agent:main:main")?.watermark, "session-1|1|2|3");
+  assert.equal(restored.get("agent:main:main")?.runId, "run-1");
+  assert.equal(restored.get("agent:main:chat")?.watermark, "session-2|4|5|6");
+  assert.equal(restored.get("agent:main:chat")?.runId, undefined);
+});
+
+test("replay finalization state keeps only the newest completed sessions", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-replay-state-prune-"));
+  const stateFile = resolveReplayFinalizationStateFile(stateDir);
+  const entries = new Map();
+  for (let index = 0; index < 2050; index += 1) {
+    entries.set(`agent:main:${index}`, {
+      watermark: `session-${index}`,
+      runId: `run-${index}`,
+      updatedAt: index,
+    });
+  }
+
+  writeReplayFinalizationState(stateFile, entries);
+  const restored = readReplayFinalizationState(stateFile);
+
+  assert.equal(restored.size, 2048);
+  assert.equal(restored.has("agent:main:0"), false);
+  assert.equal(restored.has("agent:main:1"), false);
+  assert.equal(restored.get("agent:main:2049")?.runId, "run-2049");
 });
 
 test("resolveIngressLifecycleWindows emits a queue window when processing starts much later", () => {

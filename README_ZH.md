@@ -122,7 +122,7 @@ bash /tmp/openclaw-otel-plugin-install.sh latest \
 rm -f /tmp/openclaw-otel-plugin-install.sh && \
 curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
   https://raw.githubusercontent.com/GuanceCloud/openclaw-otel-plugin/main/scripts/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh v0.6.0 --endpoint http://127.0.0.1:4318/otel
+bash /tmp/openclaw-otel-plugin-install.sh v0.6.1 --endpoint http://127.0.0.1:4318/otel
 ```
 
 如果只是先安装，稍后再补 endpoint：
@@ -137,19 +137,19 @@ bash /tmp/openclaw-otel-plugin-install.sh latest
 ### 方式二：安装本地打包产物
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.1.tar.gz
 ```
 
 安装本地包时也可以一并写入 endpoint：
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz --endpoint http://127.0.0.1:4318/otel
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.1.tar.gz --endpoint http://127.0.0.1:4318/otel
 ```
 
 本地包安装到观测云 GTrace：
 
 ```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.0.tar.gz \
+bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.1.tar.gz \
   --type gtrace \
   --endpoint https://llm-openway.guance.com \
   --x-token agent_xxx \
@@ -167,7 +167,7 @@ bash scripts/update.sh
 指定版本升级：
 
 ```bash
-bash scripts/update.sh v0.6.0
+bash scripts/update.sh v0.6.1
 ```
 
 如果只想安装文件、不立即重启 gateway：

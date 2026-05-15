@@ -51,6 +51,8 @@ test("skill file reads create a dedicated skill call span", () => {
   const rootSpan = createFakeSpan("root");
   const runSpan = createFakeSpan("run");
   const run = createRunState({ active: true }, 1000, 1000);
+  run.runId = "run-1";
+  run.runIds = new Set(["run-1"]);
   run.span = runSpan;
   run.ctx = { ctx: "run" };
 
@@ -111,6 +113,9 @@ test("skill file reads create a dedicated skill call span", () => {
   assert.ok(skillCallSpan);
   assert.ok(toolSpan);
   assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
+  assert.equal(skillSummarySpan.options.attributes.run_id, "run-1");
+  assert.equal(skillCallSpan.options.attributes.run_id, "run-1");
+  assert.equal(toolSpan.options.attributes.run_id, "run-1");
 
   manager.endToolSpan(
     { sessionKey: "s1", ts: 2200 },
@@ -134,6 +139,8 @@ test("tool events from skill file reads create skill spans through the event han
   const rootSpan = createFakeSpan("root");
   const runSpan = createFakeSpan("run");
   const run = createRunState({ active: true }, 1000, 1000);
+  run.runId = "run-transcript-tool";
+  run.runIds = new Set(["run-transcript-tool"]);
   run.span = runSpan;
   run.ctx = { ctx: "run" };
 
@@ -224,6 +231,8 @@ test("exec commands inside a skill directory create the matching skill span", ()
   const rootSpan = createFakeSpan("root");
   const runSpan = createFakeSpan("run");
   const run = createRunState({ active: true }, 1000, 1000);
+  run.runId = "run-transcript-tool";
+  run.runIds = new Set(["run-transcript-tool"]);
   run.span = runSpan;
   run.ctx = { ctx: "run" };
 
@@ -300,6 +309,8 @@ test("dashboard workspace paths infer the dashboard skill span", () => {
   const rootSpan = createFakeSpan("root");
   const runSpan = createFakeSpan("run");
   const run = createRunState({ active: true }, 1000, 1000);
+  run.runId = "run-transcript-tool";
+  run.runIds = new Set(["run-transcript-tool"]);
   run.span = runSpan;
   run.ctx = { ctx: "run" };
 
@@ -376,6 +387,8 @@ test("dashboard edit tools create a skill call span and preserve skill attrs", (
   const rootSpan = createFakeSpan("root");
   const runSpan = createFakeSpan("run");
   const run = createRunState({ active: true }, 1000, 1000);
+  run.runId = "run-transcript-tool";
+  run.runIds = new Set(["run-transcript-tool"]);
   run.span = runSpan;
   run.ctx = { ctx: "run" };
 
@@ -807,6 +820,8 @@ test("transcript tool calls can be replayed into tool spans", () => {
   const rootSpan = createFakeSpan("root");
   const runSpan = createFakeSpan("run");
   const run = createRunState({ active: true }, 1000, 1000);
+  run.runId = "run-transcript-tool";
+  run.runIds = new Set(["run-transcript-tool"]);
   run.span = runSpan;
   run.ctx = { ctx: "run" };
 
@@ -869,6 +884,7 @@ test("transcript tool calls can be replayed into tool spans", () => {
   assert.equal(toolSpan.ended, true);
   assert.equal(toolSpan.options.startTime.getTime(), 2000);
   assert.equal(toolSpan.endTime.getTime(), 2300);
+  assert.equal(toolSpan.options.attributes.run_id, "run-transcript-tool");
   assert.equal(run.usedToolNames.has("exec"), true);
 });
 
@@ -919,6 +935,8 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
       getRunCalls.push(createIfMissing);
       if (!run && createIfMissing) {
         run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+        run.runId = "run-synthetic";
+        run.runIds = new Set(["run-synthetic"]);
         run.span = createFakeSpan("agent_run");
         run.ctx = { ctx: "run" };
       }
@@ -971,7 +989,7 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
 
   const modelSpan = spans.find((span) => span.name === "llm");
   assert.ok(modelSpan);
-  assert.deepEqual(getRunCalls, [true]);
+  assert.deepEqual(getRunCalls, [true, false]);
   assert.equal(modelSpan.options.kind, "client");
   assert.equal(modelSpan.options.attributes["span.kind"], "model");
   assert.equal(modelSpan.options.attributes.usage_input_tokens, 12);
@@ -980,6 +998,7 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
   assert.equal(modelSpan.options.attributes.usage_cache_read_input_tokens, 5);
   assert.equal(modelSpan.options.attributes.usage_cache_write_input_tokens, 7);
   assert.equal(modelSpan.options.attributes.usage_cache_total_tokens, 12);
+  assert.equal(modelSpan.options.attributes.run_id, "run-synthetic");
   assert.equal(modelSpan.options.attributes["llm.input_tokens"], undefined);
   assert.equal(modelSpan.parentCtx.ctx, "run");
   assert.equal(modelSpan.status.code, "OK");
@@ -1056,6 +1075,8 @@ test("transcript replay backfills run start from transcript timestamps", () => {
     getRun(evt, createIfMissing = false) {
       if (!run && createIfMissing) {
         run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+        run.runId = "run-2";
+        run.runIds = new Set(["run-2"]);
         run.span = createFakeSpan("agent_run");
         run.ctx = { ctx: "run" };
       }
@@ -1154,6 +1175,8 @@ test("transcript model spans are replayed per assistant turn", () => {
     getRun(evt, createIfMissing = false) {
       if (!run && createIfMissing) {
         run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+        run.runId = "run-2";
+        run.runIds = new Set(["run-2"]);
         run.span = createFakeSpan("agent_run");
         run.ctx = { ctx: "run" };
       }
@@ -1240,6 +1263,7 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(modelSpans[0].options.attributes.usage_input_tokens, 11);
   assert.equal(modelSpans[0].options.attributes.usage_output_tokens, 7);
   assert.equal(modelSpans[0].options.attributes.usage_total_tokens, 18);
+  assert.equal(modelSpans[0].options.attributes.run_id, "run-2");
   assert.equal(modelSpans[1].options.startTime.getTime(), 2300);
   assert.equal(modelSpans[1].endTime.getTime(), 2600);
   assert.equal(modelSpans[1].options.attributes.input_preview, "{\"status\":\"ok\"}");
@@ -1248,6 +1272,7 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(modelSpans[1].options.attributes.usage_input_tokens, 13);
   assert.equal(modelSpans[1].options.attributes.usage_output_tokens, 5);
   assert.equal(modelSpans[1].options.attributes.usage_total_tokens, 18);
+  assert.equal(modelSpans[1].options.attributes.run_id, "run-2");
   assert.equal(run.span.attributes.usage_input_tokens, 24);
   assert.equal(run.span.attributes.usage_output_tokens, 12);
   assert.equal(run.span.attributes.usage_total_tokens, 36);

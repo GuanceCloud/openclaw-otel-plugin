@@ -29,7 +29,7 @@ trap cleanup EXIT
 usage() {
   cat <<'EOF'
 用法:
-  scripts/install.sh [latest|v0.6.0|0.6.0|/path/to/archive.tar.gz|https://...tar.gz] [--type TYPE] [--endpoint URL] [--x-token TOKEN] [--tag KEY=VALUE] [--no-config] [--no-restart]
+  scripts/install.sh [latest|v0.6.1|0.6.1|/path/to/archive.tar.gz|https://...tar.gz] [--type TYPE] [--endpoint URL] [--x-token TOKEN] [--tag KEY=VALUE] [--no-config] [--no-restart]
 
 环境变量:
   OPENCLAW_PLUGIN_DIR        安装目录，默认 ~/.openclaw/extensions/openclaw-otel-plugin

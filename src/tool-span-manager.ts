@@ -11,6 +11,7 @@ import {
   addEvent,
   buildGenAiAgentSkillMetricAttrs,
   buildGenAiAgentTokenMetricAttrs,
+  buildRunScopeAttrs,
   buildGenAiClientModelMetricAttrs,
   buildGenAiClientSkillMetricAttrs,
   buildGenAiClientToolMetricAttrs,
@@ -150,7 +151,15 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     },
   ) => {
     const snapshot = loadSessionSnapshot(evt.sessionKey);
+    const run = getRun(evt, false);
+    const root = getRoot(evt, false);
     return {
+      ...buildRunScopeAttrs(
+        evt.runId ?? run?.runId ?? root?.runId,
+        evt.runId,
+        run?.runIds,
+        root?.runIds,
+      ),
       session_id: evt.sessionId ?? snapshot?.sessionId,
       session_key: evt.sessionKey ?? snapshot?.sessionKey,
       channel: evt.channel ?? snapshot?.lastChannel,
@@ -851,6 +860,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           startTime: new Date(startTs),
           kind: SpanKind.CLIENT,
           attributes: traceAttrs(enrichWithTranscript(evt.sessionKey, {
+            ...buildSessionSpanAttrs(evt),
             __suppress_session_output_preview: true,
             __suppress_session_output_summary: true,
             session_update_time: endTs,
@@ -992,6 +1002,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         startTime: new Date(startTs),
         kind: SpanKind.CLIENT,
         attributes: traceAttrs(enrichWithTranscript(evt.sessionKey, {
+          ...buildSessionSpanAttrs(evt),
           __suppress_session_output_preview: true,
           __suppress_session_output_summary: true,
           session_update_time: modelEndTs,

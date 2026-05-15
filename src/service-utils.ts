@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { stripAnsiEscapeCodes } from "./trace-runtime.js";
 import type {
   ActiveRunSpan,
@@ -10,6 +11,8 @@ import type {
 
 const PREVIEW_LIMIT = 1200;
 const REASONING_PREVIEW_LIMIT = 360;
+const REPLAY_FINALIZATION_STATE_VERSION = 1;
+const REPLAY_FINALIZATION_STATE_MAX_SESSIONS = 2048;
 
 export const MIN_VISIBLE_CHILD_MS = 120;
 export const MIN_VISIBLE_MODEL_MS = 800;
@@ -162,6 +165,83 @@ export function buildTranscriptReplayEvent(
     ts: snapshot.lastAssistantTs,
     channel: snapshot.lastChannel,
   };
+}
+
+export function resolveReplayFinalizationStateFile(stateDir: string): string {
+  return path.join(stateDir, "plugins", "openclaw-otel-plugin", "replay-finalization-state.json");
+}
+
+export function readReplayFinalizationState(filePath: string): Map<string, {
+  watermark?: string;
+  runId?: string;
+  updatedAt?: number;
+}> {
+  const entries = new Map<string, {
+    watermark?: string;
+    runId?: string;
+    updatedAt?: number;
+  }>();
+  try {
+    if (!fs.existsSync(filePath)) {
+      return entries;
+    }
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      sessions?: Record<string, {
+        watermark?: unknown;
+        runId?: unknown;
+        updatedAt?: unknown;
+      }>;
+    };
+    for (const [sessionKey, value] of Object.entries(parsed.sessions ?? {})) {
+      const watermark = typeof value?.watermark === "string" && value.watermark.trim()
+        ? value.watermark
+        : undefined;
+      const runId = typeof value?.runId === "string" && value.runId.trim()
+        ? value.runId
+        : undefined;
+      const updatedAt = typeof value?.updatedAt === "number" && Number.isFinite(value.updatedAt)
+        ? value.updatedAt
+        : undefined;
+      if (!watermark && !runId) {
+        continue;
+      }
+      entries.set(sessionKey, { watermark, runId, updatedAt });
+    }
+  } catch {
+    return new Map();
+  }
+  return entries;
+}
+
+export function writeReplayFinalizationState(
+  filePath: string,
+  entries: Map<string, {
+    watermark?: string;
+    runId?: string;
+    updatedAt?: number;
+  }>,
+): void {
+  const normalizedSessions = Array.from(entries.entries())
+    .filter(([, value]) => Boolean(value?.watermark || value?.runId))
+    .sort((left, right) => (right[1].updatedAt ?? 0) - (left[1].updatedAt ?? 0))
+    .slice(0, REPLAY_FINALIZATION_STATE_MAX_SESSIONS);
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify({
+      version: REPLAY_FINALIZATION_STATE_VERSION,
+      sessions: Object.fromEntries(normalizedSessions.map(([sessionKey, value]) => [
+        sessionKey,
+        {
+          ...(value.watermark ? { watermark: value.watermark } : {}),
+          ...(value.runId ? { runId: value.runId } : {}),
+          ...(typeof value.updatedAt === "number" ? { updatedAt: value.updatedAt } : {}),
+        },
+      ])),
+    }, null, 2));
+  } catch {
+    // Best-effort persistence only; replay dedupe still works in-memory.
+  }
 }
 
 export function rememberRunId(
