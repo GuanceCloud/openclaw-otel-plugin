@@ -35,6 +35,45 @@ export function createRunAggregate(): RunAggregate {
   };
 }
 
+export function resolveUsageTokenTotals(
+  usage:
+    | {
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+      total?: number;
+      totalTokens?: number;
+    }
+    | undefined,
+): {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+} {
+  const inputTokens = typeof usage?.input === "number" ? usage.input : 0;
+  const outputTokens = typeof usage?.output === "number" ? usage.output : 0;
+  const cacheReadTokens = typeof usage?.cacheRead === "number" ? usage.cacheRead : 0;
+  const cacheWriteTokens = typeof usage?.cacheWrite === "number" ? usage.cacheWrite : 0;
+  const rawTotalTokens = typeof usage?.totalTokens === "number"
+    ? usage.totalTokens
+    : typeof usage?.total === "number"
+      ? usage.total
+      : 0;
+  const totalTokens = inputTokens > 0 || outputTokens > 0
+    ? inputTokens + outputTokens
+    : rawTotalTokens;
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    totalTokens,
+  };
+}
+
 export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.now()): ActiveRunSpan {
   return {
     span: null,
@@ -92,6 +131,16 @@ export function eventTime(ts: number): Date {
 
 export function endTimeFromStart(startTs: number, durationMs: number): Date {
   return new Date(startTs + Math.max(durationMs, 1));
+}
+
+export function isHeartbeatSessionSnapshot(snapshot: SessionSnapshot | undefined): boolean {
+  if (!snapshot) {
+    return false;
+  }
+  const lastTurn = snapshot.lastRunAssistantTurns?.at(-1);
+  const inputPreview = (lastTurn?.inputPreview ?? snapshot.lastUserText ?? "").trim();
+  const outputPreview = (lastTurn?.outputPreview ?? snapshot.lastAssistantText ?? "").trim();
+  return inputPreview === "[OpenClaw heartbeat poll]" || outputPreview === "HEARTBEAT_OK";
 }
 
 export function resolveOpenClawThinkingDurationMs(
@@ -489,10 +538,14 @@ function withCanonicalAliases(
     ? next.usage_cache_write_input_tokens
     : undefined;
   if (
+    next.__suppress_usage_cache_total_tokens !== true &&
     next.usage_cache_total_tokens === undefined
     && (cacheReadTokens !== undefined || cacheWriteTokens !== undefined)
   ) {
     next.usage_cache_total_tokens = (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0);
+  }
+  if (next.__suppress_usage_cache_total_tokens === true) {
+    delete next.usage_cache_total_tokens;
   }
   delete next["llm.provider"];
   delete next["llm.model"];
@@ -527,6 +580,7 @@ function withCanonicalAliases(
   mirrorAlias(next, "skill_type", "openclaw.skill.kind");
   mirrorAlias(next, "skill_source", "openclaw.skill.source");
   promoteAlias(next, "final_status", "openclaw.outcome", "openclaw.final_state");
+  delete next.__suppress_usage_cache_total_tokens;
   return next;
 }
 

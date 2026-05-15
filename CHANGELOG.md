@@ -7,7 +7,14 @@ Current work is recorded by calendar day. Historical entries before the current 
 ### Trace Replay And Run Scope
 
 - Persisted transcript replay finalization watermarks across restarts so completed historical sessions are not replayed into duplicate traces after the plugin or gateway restarts.
+- Fixed completed runtime sessions so they now persist replay finalization state too; later transcript updates or sweep replays no longer regenerate a second trace for the same session/run after the original trace has already closed.
+- Fixed transcript-derived cache token accounting so cumulative provider cache counters are normalized back into per-call `usage_cache_read_input_tokens` / `usage_cache_write_input_tokens`, and aggregate cache totals now sum those per-call deltas instead of replaying cumulative snapshots.
 - Fixed missing `run_id` / `run_ids` propagation on normal tool, skill, transcript tool, transcript model, and synthetic model spans so runtime and replay paths now carry the same run correlation tags.
+- Fixed `final_status` on `agent_run` / `openclaw_request` when a run only closes via `session.state=idle`, so completed runs no longer end with an empty terminal status if `message.processed` never arrived.
+- Normalized `llm` token usage to per-call `input` / `output` plus separate cache read/write fields.
+- Restored per-call `usage_total_tokens` on `llm` spans as `input + output`, and restored per-call `usage_cache_total_tokens` on `llm` spans as `cache read + cache write`.
+- Tightened `session.state` close handling so the current `run_id` is marked finalized even when the transcript snapshot has not yet observed `runCompleted=true`, preventing a late transcript replay from reopening the same run as a second trace.
+- Excluded internal OpenClaw heartbeat poll / `HEARTBEAT_OK` traffic from runtime request tracing, so heartbeat health checks no longer appear as duplicate user traces.
 
 ## 2026-05-14
 

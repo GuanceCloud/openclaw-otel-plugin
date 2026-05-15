@@ -962,7 +962,7 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
           output: 34,
           cacheRead: 5,
           cacheWrite: 7,
-          totalTokens: 46,
+          totalTokens: 4600,
         },
       };
     },
@@ -1206,7 +1206,7 @@ test("transcript model spans are replayed per assistant turn", () => {
             usage: {
               input: 11,
               output: 7,
-              totalTokens: 18,
+              totalTokens: 1800,
             },
             inputPreview: "first question",
             thinking: "first reasoning",
@@ -1222,7 +1222,7 @@ test("transcript model spans are replayed per assistant turn", () => {
             usage: {
               input: 13,
               output: 5,
-              totalTokens: 18,
+              totalTokens: 2400,
             },
             inputPreview: "{\"status\":\"ok\"}",
             thinking: "second reasoning",
@@ -1263,6 +1263,7 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(modelSpans[0].options.attributes.usage_input_tokens, 11);
   assert.equal(modelSpans[0].options.attributes.usage_output_tokens, 7);
   assert.equal(modelSpans[0].options.attributes.usage_total_tokens, 18);
+  assert.equal(modelSpans[0].options.attributes.usage_cache_total_tokens, 0);
   assert.equal(modelSpans[0].options.attributes.run_id, "run-2");
   assert.equal(modelSpans[1].options.startTime.getTime(), 2300);
   assert.equal(modelSpans[1].endTime.getTime(), 2600);
@@ -1272,10 +1273,12 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(modelSpans[1].options.attributes.usage_input_tokens, 13);
   assert.equal(modelSpans[1].options.attributes.usage_output_tokens, 5);
   assert.equal(modelSpans[1].options.attributes.usage_total_tokens, 18);
+  assert.equal(modelSpans[1].options.attributes.usage_cache_total_tokens, 0);
   assert.equal(modelSpans[1].options.attributes.run_id, "run-2");
   assert.equal(run.span.attributes.usage_input_tokens, 24);
   assert.equal(run.span.attributes.usage_output_tokens, 12);
   assert.equal(run.span.attributes.usage_total_tokens, 36);
+  assert.equal(run.span.attributes.usage_cache_total_tokens, 0);
   assert.equal(rootSpan.attributes.usage_input_tokens, 24);
   assert.equal(rootSpan.attributes.usage_output_tokens, 12);
   assert.equal(rootSpan.attributes.usage_total_tokens, 36);
@@ -1477,6 +1480,7 @@ test("transcript model replay skips turns already covered by runtime model usage
   assert.equal(modelSpans[0].options.attributes.usage_input_tokens, 13);
   assert.equal(modelSpans[0].options.attributes.usage_output_tokens, 5);
   assert.equal(modelSpans[0].options.attributes.usage_total_tokens, 18);
+  assert.equal(modelSpans[0].options.attributes.usage_cache_total_tokens, 0);
   assert.equal(run.aggregate.inputTokens, 24);
   assert.equal(run.aggregate.outputTokens, 12);
   assert.equal(run.aggregate.totalTokens, 36);

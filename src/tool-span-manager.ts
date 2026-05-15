@@ -27,6 +27,7 @@ import {
   MIN_VISIBLE_CHILD_MS,
   MIN_VISIBLE_MODEL_MS,
   redactSensitiveText,
+  resolveUsageTokenTotals,
   setError,
   skillCallSpanName,
   skillSpanName,
@@ -181,10 +182,11 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (!usage) {
       return;
     }
+    const usageTotals = resolveUsageTokenTotals(usage);
     const tokenMetrics = [
-      ["input", usage.input],
-      ["output", usage.output],
-      ["total", usage.totalTokens],
+      ["input", usageTotals.inputTokens],
+      ["output", usageTotals.outputTokens],
+      ["total", usageTotals.totalTokens],
     ] as const;
     for (const [tokenType, tokenValue] of tokenMetrics) {
       if (typeof tokenValue === "number" && tokenValue > 0) {
@@ -235,18 +237,13 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     provider: string | undefined,
     model: string | undefined,
   ) => {
-    if (!usage) {
-      return;
-    }
-    const inputTokens = typeof usage.input === "number" ? usage.input : 0;
-    const outputTokens = typeof usage.output === "number" ? usage.output : 0;
-    const cacheReadTokens = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
-    const cacheWriteTokens = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
-    const totalTokens = typeof usage.totalTokens === "number"
-      ? usage.totalTokens
-      : inputTokens > 0 || outputTokens > 0
-        ? inputTokens + outputTokens
-        : 0;
+    const {
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      totalTokens,
+    } = resolveUsageTokenTotals(usage);
     if (
       inputTokens <= 0 &&
       outputTokens <= 0 &&
@@ -276,11 +273,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       "openclaw.model.calls": run.aggregate.modelCalls,
       "openclaw.provider": run.aggregate.lastProvider,
       "openclaw.model": run.aggregate.lastModel,
-      "llm.input_tokens": run.aggregate.inputTokens,
-      "llm.output_tokens": run.aggregate.outputTokens,
-      "llm.total_tokens": run.aggregate.totalTokens,
-      "llm.provider": run.aggregate.lastProvider,
-      "llm.model": run.aggregate.lastModel,
     });
     run.span?.setAttributes(attrs);
     getRoot(evt, false)?.span.setAttributes(attrs);
@@ -854,6 +846,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       const rawEndTs = typeof turn.endedAt === "number" ? turn.endedAt : rawStartTs + 1;
       const startTs = Math.max(rawStartTs, run.mainStartTs);
       const endTs = Math.max(rawEndTs, startTs + 1);
+      const usageTotals = resolveUsageTokenTotals(turn.usage);
       const span = tracer.startSpan(
         "llm",
         {
@@ -875,14 +868,13 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
             "openclaw.model": turn.model ?? snapshot?.lastModel,
             "llm.provider": turn.provider ?? snapshot?.lastProvider,
             "llm.model": turn.model ?? snapshot?.lastModel,
-            "llm.input_tokens": turn.usage?.input,
-            "llm.output_tokens": turn.usage?.output,
-            "llm.total_tokens": turn.usage?.totalTokens,
-            "openclaw.tokens.input": turn.usage?.input,
-            "openclaw.tokens.output": turn.usage?.output,
-            "openclaw.tokens.cache_read": turn.usage?.cacheRead,
-            "openclaw.tokens.cache_write": turn.usage?.cacheWrite,
-            "openclaw.tokens.total": turn.usage?.totalTokens,
+            "llm.input_tokens": usageTotals.inputTokens,
+            "llm.output_tokens": usageTotals.outputTokens,
+            "openclaw.tokens.input": usageTotals.inputTokens,
+            "openclaw.tokens.output": usageTotals.outputTokens,
+            "openclaw.tokens.total": usageTotals.totalTokens,
+            "openclaw.tokens.cache_read": usageTotals.cacheReadTokens,
+            "openclaw.tokens.cache_write": usageTotals.cacheWriteTokens,
           })),
         },
         run.ctx,
@@ -927,11 +919,11 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         start_ts: startTs,
         end_ts: endTs,
         duration_ms: Math.max(endTs - startTs, 1),
-        usage_input_tokens: turn.usage?.input,
-        usage_output_tokens: turn.usage?.output,
-        usage_total_tokens: turn.usage?.totalTokens,
-        usage_cache_read_input_tokens: turn.usage?.cacheRead,
-        usage_cache_write_input_tokens: turn.usage?.cacheWrite,
+        usage_input_tokens: usageTotals.inputTokens,
+        usage_output_tokens: usageTotals.outputTokens,
+        usage_total_tokens: usageTotals.totalTokens,
+        usage_cache_read_input_tokens: usageTotals.cacheReadTokens,
+        usage_cache_write_input_tokens: usageTotals.cacheWriteTokens,
         input_preview: turn.inputPreview,
         output_preview: turn.outputPreview,
         output_kind: turn.outputKind,
@@ -982,6 +974,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       modelEndTs - replayStartTs,
       MIN_VISIBLE_MODEL_MS,
     );
+    const usageTotals = resolveUsageTokenTotals(snapshot.lastAssistantUsage);
     const minStartTs = Math.min(run.mainStartTs + MIN_VISIBLE_CHILD_MS * 2, modelEndTs - 1);
     const startTs = Math.max(modelEndTs - totalDuration, minStartTs);
     const lastTurn = snapshot.lastRunAssistantTurns?.at(-1);
@@ -1017,14 +1010,13 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           "openclaw.model": snapshot.lastModel,
           "llm.provider": snapshot.lastProvider,
           "llm.model": snapshot.lastModel,
-          "llm.input_tokens": snapshot.lastAssistantUsage?.input,
-          "llm.output_tokens": snapshot.lastAssistantUsage?.output,
-          "llm.total_tokens": snapshot.lastAssistantUsage?.totalTokens,
-          "openclaw.tokens.input": snapshot.lastAssistantUsage?.input,
-          "openclaw.tokens.output": snapshot.lastAssistantUsage?.output,
-          "openclaw.tokens.cache_read": snapshot.lastAssistantUsage?.cacheRead,
-          "openclaw.tokens.cache_write": snapshot.lastAssistantUsage?.cacheWrite,
-          "openclaw.tokens.total": snapshot.lastAssistantUsage?.totalTokens,
+          "llm.input_tokens": usageTotals.inputTokens,
+          "llm.output_tokens": usageTotals.outputTokens,
+          "openclaw.tokens.input": usageTotals.inputTokens,
+          "openclaw.tokens.output": usageTotals.outputTokens,
+          "openclaw.tokens.total": usageTotals.totalTokens,
+          "openclaw.tokens.cache_read": usageTotals.cacheReadTokens,
+          "openclaw.tokens.cache_write": usageTotals.cacheWriteTokens,
         })),
       },
       getActiveSkillCtx(run) ?? run.ctx,

@@ -307,7 +307,7 @@ test("message.processed keeps the active trace open for later transcript growth"
   assert.equal(run.pendingFinalOutcome, "completed");
 });
 
-test("message.processed prefers transcript replay and marks replay watermark", () => {
+test("message.processed prefers transcript replay and marks replay watermark for completed sessions", () => {
   let transcriptCalls = 0;
   let toolReplayCalls = 0;
   let syntheticCalls = 0;
@@ -319,6 +319,8 @@ test("message.processed prefers transcript replay and marks replay watermark", (
   const snapshot = {
     sessionFile: "session.jsonl",
     mtimeMs: 1,
+    runId: "run-123",
+    runCompleted: true,
     lastAssistantText: "final answer",
     lastRunAssistantTurns: [{ startedAt: 1, endedAt: 2 }],
   };
@@ -404,6 +406,95 @@ test("message.processed prefers transcript replay and marks replay watermark", (
   assert.equal(toolReplayCalls, 1);
   assert.equal(syntheticCalls, 0);
   assert.equal(watermarkMarked, 1);
+});
+
+test("message.processed marks finalized replay run_id for completed sessions", () => {
+  const finalizedRunIds = [];
+  const snapshot = {
+    sessionFile: "session.jsonl",
+    mtimeMs: 1,
+    runId: "run-123",
+    runCompleted: true,
+    lastAssistantText: "final answer",
+    lastRunAssistantTurns: [{ startedAt: 1, endedAt: 2 }],
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageProcessedCounter: { add() {} },
+      diagnosticsMessageDurationMs: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return { ctx: { ctx: "run" }, modelCtx: { ctx: "model" } };
+    },
+    ensureUserSpan() {
+      return { ctx: { ctx: "run" }, modelCtx: { ctx: "model" } };
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return snapshot;
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return { ctx: { ctx: "run" }, modelCtx: { ctx: "model" } };
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return true;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+    markReplayWatermark() {},
+    markFinalizedReplayRunId(sessionKey, runId) {
+      finalizedRunIds.push({ sessionKey, runId });
+    },
+  });
+
+  handler({
+    type: "message.processed",
+    sessionKey: "s1",
+    ts: 1000,
+    channel: "chat",
+    outcome: "completed",
+  });
+
+  assert.deepEqual(finalizedRunIds, [
+    { sessionKey: "s1", runId: "run-123" },
+  ]);
 });
 
 test("session.state processing requests lifecycle shell spans", () => {
@@ -883,6 +974,215 @@ test("session.state idle skips duplicate replay after the transcript has already
   assert.equal(clearRunCalls, 0);
 });
 
+test("session.state idle skips duplicate replay after the completed run_id has already been finalized", () => {
+  let transcriptCalls = 0;
+  let syntheticCalls = 0;
+  let lifecycleCalls = 0;
+  let endRunCalls = 0;
+  let endRootCalls = 0;
+  let clearRunCalls = 0;
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsSessionStateCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return undefined;
+    },
+    getRun() {
+      return undefined;
+    },
+    ensureUserSpan() {
+      return undefined;
+    },
+    syncRootFromRun() {},
+    endRun() {
+      endRunCalls += 1;
+    },
+    endRoot() {
+      endRootCalls += 1;
+    },
+    clearRun() {
+      clearRunCalls += 1;
+    },
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        runId: "run-123",
+        runCompleted: true,
+        lastAssistantText: "final answer",
+        lastRunAssistantTurns: [{ startedAt: 1, endedAt: 2 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      lifecycleCalls += 1;
+      return undefined;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      transcriptCalls += 1;
+      return true;
+    },
+    emitSyntheticModelSpan() {
+      syntheticCalls += 1;
+    },
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+    markReplayWatermark() {},
+    hasFinalizedReplayRunId(sessionKey, runId) {
+      return sessionKey === "s1" && runId === "run-123";
+    },
+  });
+
+  handler({
+    type: "session.state",
+    sessionKey: "s1",
+    ts: 1000,
+    state: "idle",
+  });
+
+  assert.equal(transcriptCalls, 0);
+  assert.equal(syntheticCalls, 0);
+  assert.equal(lifecycleCalls, 0);
+  assert.equal(endRunCalls, 0);
+  assert.equal(endRootCalls, 0);
+  assert.equal(clearRunCalls, 0);
+});
+
+test("session.state idle falls back to completed final_status when message.processed never arrived", () => {
+  const endRunCalls = [];
+  const endRootCalls = [];
+  const finalizedRunIds = [];
+  const run = {
+    runId: "run-123",
+    ctx: { ctx: "run" },
+    modelCtx: { ctx: "model" },
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsSessionStateCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return run;
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    syncRootFromRun() {},
+    endRun(_evt, attrs) {
+      endRunCalls.push(attrs);
+    },
+    endRoot(_evt, attrs) {
+      endRootCalls.push(attrs);
+    },
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        runCompleted: true,
+        lastAssistantText: "final answer",
+        lastRunAssistantTurns: [{ startedAt: 1, endedAt: 2 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return true;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+    markReplayWatermark() {},
+    markFinalizedReplayRunId(sessionKey, runId) {
+      finalizedRunIds.push({ sessionKey, runId });
+    },
+  });
+
+  handler({
+    type: "session.state",
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 1000,
+    state: "idle",
+  });
+
+  assert.equal(endRunCalls.length, 1);
+  assert.equal(endRootCalls.length, 1);
+  assert.equal(endRunCalls[0].final_status, "completed");
+  assert.equal(endRootCalls[0].final_status, "completed");
+  assert.equal(endRunCalls[0].state, "idle");
+  assert.equal(endRootCalls[0].state, "idle");
+  assert.deepEqual(finalizedRunIds, [
+    { sessionKey: "s1", runId: "run-123" },
+  ]);
+});
+
 test("model.usage emits llm span and preserves model context", () => {
   const childCalls = [];
   const run = {
@@ -965,7 +1265,7 @@ test("model.usage emits llm span and preserves model context", () => {
     channel: "chat",
     provider: "openai",
     model: "gpt-5",
-    usage: { input: 12, output: 34, total: 46 },
+    usage: { input: 12, output: 34, cacheRead: 6400, total: 6446 },
     durationMs: 400,
   });
 
@@ -973,6 +1273,9 @@ test("model.usage emits llm span and preserves model context", () => {
   assert.equal(childCalls[0].attrs["span.kind"], "model");
   assert.equal(childCalls[0].attrs["openclaw.model"], "gpt-5");
   assert.equal(childCalls[0].attrs["llm.model"], "gpt-5");
+  assert.equal(childCalls[0].attrs["openclaw.tokens.cache_read"], 6400);
+  assert.equal(childCalls[0].attrs["openclaw.tokens.total"], 46);
+  assert.equal(childCalls[0].attrs["llm.total_tokens"], undefined);
   assert.equal(childCalls[0].span.status.code, "OK");
   assert.equal(childCalls[0].span.ended, true);
   assert.equal(run.modelStartTs, 600);
@@ -1286,6 +1589,171 @@ test("message.queued reuses the current trace when execution has not started yet
   assert.equal(endRunCalls, 0);
   assert.equal(endRootCalls, 0);
   assert.equal(pendingRun.messageQueuedTs, 2000);
+});
+
+test("message.queued skips internal heartbeat requests", () => {
+  let beginCalls = 0;
+  let ensureUserCalls = 0;
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageQueuedCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {
+      beginCalls += 1;
+    },
+    getRoot() {
+      throw new Error("not expected");
+    },
+    getRun() {
+      return undefined;
+    },
+    ensureUserSpan() {
+      ensureUserCalls += 1;
+      return undefined;
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserText: "[OpenClaw heartbeat poll]",
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      throw new Error("not expected");
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "message.queued",
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 2000,
+    channel: "chat",
+    source: "feishu",
+  });
+
+  assert.equal(beginCalls, 0);
+  assert.equal(ensureUserCalls, 0);
+});
+
+test("message.processed skips internal heartbeat requests", () => {
+  let lifecycleCalls = 0;
+  let transcriptModelCalls = 0;
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageProcessedCounter: { add() {} },
+      diagnosticsMessageDurationMs: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return undefined;
+    },
+    getRun() {
+      return undefined;
+    },
+    ensureUserSpan() {
+      return undefined;
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastAssistantText: "HEARTBEAT_OK",
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      lifecycleCalls += 1;
+      return undefined;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      transcriptModelCalls += 1;
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "message.processed",
+    sessionKey: "s1",
+    ts: 1000,
+    channel: "chat",
+    messageId: 1,
+    chatId: 2,
+    outcome: "completed",
+    durationMs: 900,
+  });
+
+  assert.equal(lifecycleCalls, 0);
+  assert.equal(transcriptModelCalls, 0);
 });
 
 test("queue lane diagnostics only emit metrics and logs without standalone spans", () => {

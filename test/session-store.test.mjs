@@ -389,6 +389,123 @@ test("session store derives cumulative total tokens from input and output when t
   });
 });
 
+test("session store derives per-turn cache usage from cumulative transcript cache counters", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "s2-cache-cumulative.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s2cache: {
+        sessionFile,
+        sessionId: "session-2cache",
+      },
+    }),
+  );
+  const lines = [
+    {
+      type: "message",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "first" }],
+        timestamp: 1000,
+      },
+    },
+    {
+      type: "message",
+      message: {
+        role: "assistant",
+        timestamp: 1300,
+        usage: {
+          input: 11,
+          output: 7,
+          cacheRead: 21760,
+          cacheWrite: 0,
+          totalTokens: 18,
+        },
+      },
+    },
+    {
+      type: "message",
+      message: {
+        role: "assistant",
+        timestamp: 1600,
+        usage: {
+          input: 13,
+          output: 5,
+          cacheRead: 32000,
+          cacheWrite: 0,
+          totalTokens: 18,
+        },
+      },
+    },
+  ];
+  fs.writeFileSync(
+    sessionFile,
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+  );
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const snapshot = store.loadSessionSnapshot("s2cache");
+
+  assert.ok(snapshot);
+  assert.deepEqual(snapshot.sessionUsageTotals, {
+    input: 24,
+    output: 12,
+    cacheRead: 32000,
+    cacheWrite: 0,
+    totalTokens: 36,
+  });
+  assert.deepEqual(snapshot.lastRunAssistantTurns, [
+    {
+      startedAt: 1000,
+      endedAt: 1300,
+      provider: undefined,
+      model: undefined,
+      usage: {
+        input: 11,
+        output: 7,
+        cacheRead: 21760,
+        cacheWrite: 0,
+        totalTokens: 18,
+      },
+      inputPreview: "first",
+      thinking: undefined,
+      text: undefined,
+      outputPreview: undefined,
+      outputKind: undefined,
+    },
+    {
+      startedAt: 1300,
+      endedAt: 1600,
+      provider: undefined,
+      model: undefined,
+      usage: {
+        input: 13,
+        output: 5,
+        cacheRead: 10240,
+        cacheWrite: 0,
+        totalTokens: 18,
+      },
+      inputPreview: "first",
+      thinking: undefined,
+      text: undefined,
+      outputPreview: undefined,
+      outputKind: undefined,
+    },
+  ]);
+  assert.deepEqual(snapshot.lastAssistantUsage, {
+    input: 13,
+    output: 5,
+    cacheRead: 10240,
+    cacheWrite: undefined,
+    totalTokens: 18,
+  });
+});
+
 test("session store prefers line timestamps for assistant turns", () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
   const sessionsDir = path.join(stateDir, "agents", "main", "sessions");

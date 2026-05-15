@@ -28,6 +28,7 @@ import {
   createRunState,
   endSpanSafely,
   eventTime,
+  isHeartbeatSessionSnapshot,
   MIN_VISIBLE_CHILD_MS,
   MIN_VISIBLE_MODEL_MS,
   normalizeReasoningPreview,
@@ -40,6 +41,7 @@ import {
   resolveIngressLifecycleWindows,
   resolveSessionMetricTotals,
   resolveSpanWindow,
+  resolveUsageTokenTotals,
   sessionIdentity,
   stringAttrs,
   traceAttrs,
@@ -199,13 +201,15 @@ export function createOtelPluginService(
         writeReplayFinalizationState(replayFinalizationStateFile, persistedReplayFinalizationBySession);
       };
 
-      const isHeartbeatTranscriptSnapshot = (
+      const markReplayFinalization = (
+        sessionKey: string | undefined,
         snapshot: ReturnType<typeof loadSessionSnapshot>,
-      ): boolean => {
-        const lastTurn = snapshot?.lastRunAssistantTurns?.at(-1);
-        const inputPreview = (lastTurn?.inputPreview ?? snapshot?.lastUserText ?? "").trim();
-        const outputPreview = (lastTurn?.outputPreview ?? snapshot?.lastAssistantText ?? "").trim();
-        return inputPreview === "[OpenClaw heartbeat poll]" || outputPreview === "HEARTBEAT_OK";
+      ) => {
+        if (snapshot?.runCompleted !== true) {
+          return;
+        }
+        markReplayWatermark(sessionKey, snapshot);
+        markFinalizedReplayRunId(sessionKey, snapshot.runId);
       };
 
       const enrichWithTranscript = (
@@ -690,7 +694,7 @@ export function createOtelPluginService(
         if (!snapshot?.lastAssistantTs || (!snapshot.lastAssistantText && !snapshot.lastRunAssistantTurns?.length)) {
           return;
         }
-        if (isHeartbeatTranscriptSnapshot(snapshot)) {
+        if (isHeartbeatSessionSnapshot(snapshot)) {
           return;
         }
         const transcriptEvt = buildTranscriptReplayEvent(sessionKey, snapshot);
@@ -715,6 +719,7 @@ export function createOtelPluginService(
         if (snapshot.runCompleted !== true) {
           return;
         }
+        markReplayFinalization(sessionKey, snapshot);
         ensureRuntimeLifecycleSpans(transcriptEvt, {
           createIfMissing: true,
           emitEgress: true,
@@ -738,8 +743,6 @@ export function createOtelPluginService(
           "openclaw.outcome": "completed",
         }));
         clearRun(transcriptEvt);
-        markReplayWatermark(sessionKey, snapshot);
-        markFinalizedReplayRunId(sessionKey, snapshot.runId);
       }
 
       const reportSessionMetrics = () => {
@@ -1083,6 +1086,15 @@ export function createOtelPluginService(
         releaseRequestKey(sessionKey, requestKey);
       };
 
+      const resolveSnapshotUsageTotals = (snapshot: ReturnType<typeof loadSessionSnapshot>) => ({
+        inputTokens: snapshot?.sessionUsageTotals?.input ?? snapshot?.lastAssistantUsage?.input ?? 0,
+        outputTokens: snapshot?.sessionUsageTotals?.output ?? snapshot?.lastAssistantUsage?.output ?? 0,
+        cacheReadTokens: snapshot?.sessionUsageTotals?.cacheRead ?? snapshot?.lastAssistantUsage?.cacheRead ?? 0,
+        cacheWriteTokens: snapshot?.sessionUsageTotals?.cacheWrite ?? snapshot?.lastAssistantUsage?.cacheWrite ?? 0,
+        totalTokens: snapshot?.sessionUsageTotals?.totalTokens
+          ?? resolveUsageTokenTotals(snapshot?.lastAssistantUsage).totalTokens,
+      });
+
       const syncRootFromRun = (evt: { sessionKey?: string; sessionId?: string; runId?: string }) => {
         const sessionKey = resolveSessionKey(evt);
         const requestKey = resolveRequestKey(evt, false);
@@ -1095,25 +1107,20 @@ export function createOtelPluginService(
           return;
         }
         const snapshot = loadSessionSnapshot(sessionKey);
+        const snapshotUsageTotals = resolveSnapshotUsageTotals(snapshot);
         root.span.setAttributes(traceAttrs({
           ...buildRunScopeAttrs(root.runId ?? run.runId ?? resolveRunId(evt), root.runIds, run.runIds, resolveRunId(evt)),
           session_update_time: run.modelEndTs ?? run.mainEndTs ?? run.lastTouchedAt ?? Date.now(),
           "openclaw.tokens.input":
-            run.aggregate.inputTokens || snapshot?.lastAssistantUsage?.input || 0,
+            run.aggregate.inputTokens || snapshotUsageTotals.inputTokens,
           "openclaw.tokens.output":
-            run.aggregate.outputTokens || snapshot?.lastAssistantUsage?.output || 0,
+            run.aggregate.outputTokens || snapshotUsageTotals.outputTokens,
           "openclaw.tokens.cache_read":
-            run.aggregate.cacheReadTokens || snapshot?.lastAssistantUsage?.cacheRead || 0,
+            run.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens,
           "openclaw.tokens.cache_write":
-            run.aggregate.cacheWriteTokens || snapshot?.lastAssistantUsage?.cacheWrite || 0,
+            run.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens,
           "openclaw.tokens.total":
-            run.aggregate.totalTokens || snapshot?.lastAssistantUsage?.totalTokens || 0,
-          "llm.input_tokens":
-            run.aggregate.inputTokens || snapshot?.lastAssistantUsage?.input || 0,
-          "llm.output_tokens":
-            run.aggregate.outputTokens || snapshot?.lastAssistantUsage?.output || 0,
-          "llm.total_tokens":
-            run.aggregate.totalTokens || snapshot?.lastAssistantUsage?.totalTokens || 0,
+            run.aggregate.totalTokens || snapshotUsageTotals.totalTokens,
           "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
           "openclaw.skill.count": run.usedSkillNames.size,
           "openclaw.tools": Array.from(run.usedToolNames).join(", "),
@@ -1138,13 +1145,14 @@ export function createOtelPluginService(
           return;
         }
         const snapshot = loadSessionSnapshot(sessionKey);
+        const snapshotUsageTotals = resolveSnapshotUsageTotals(snapshot);
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
         const sessionInputTokens =
-          current.aggregate.inputTokens || snapshot?.lastAssistantUsage?.input || 0;
+          current.aggregate.inputTokens || snapshotUsageTotals.inputTokens;
         const sessionOutputTokens =
-          current.aggregate.outputTokens || snapshot?.lastAssistantUsage?.output || 0;
+          current.aggregate.outputTokens || snapshotUsageTotals.outputTokens;
         const sessionTotalTokens =
-          current.aggregate.totalTokens || snapshot?.lastAssistantUsage?.totalTokens || 0;
+          current.aggregate.totalTokens || snapshotUsageTotals.totalTokens;
         for (const skillName of snapshot?.invokedSkillNames ?? []) {
           if (!current.skillSpans.has(skillName)) {
             ensureSkillSpan(
@@ -1167,16 +1175,10 @@ export function createOtelPluginService(
           "openclaw.tokens.output":
             sessionOutputTokens,
           "openclaw.tokens.cache_read":
-            current.aggregate.cacheReadTokens || snapshot?.lastAssistantUsage?.cacheRead || 0,
+            current.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens,
           "openclaw.tokens.cache_write":
-            current.aggregate.cacheWriteTokens || snapshot?.lastAssistantUsage?.cacheWrite || 0,
+            current.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens,
           "openclaw.tokens.total":
-            sessionTotalTokens,
-          "llm.input_tokens":
-            sessionInputTokens,
-          "llm.output_tokens":
-            sessionOutputTokens,
-          "llm.total_tokens":
             sessionTotalTokens,
           "openclaw.skills": Array.from(current.usedSkillNames).join(", "),
           "openclaw.skill.count": current.usedSkillNames.size,
@@ -1297,12 +1299,13 @@ export function createOtelPluginService(
         if (!run || !root) {
           return;
         }
+        const usageTotals = resolveUsageTokenTotals(evt.usage);
 
-        run.aggregate.inputTokens += evt.usage.input ?? 0;
-        run.aggregate.outputTokens += evt.usage.output ?? 0;
-        run.aggregate.cacheReadTokens += evt.usage.cacheRead ?? 0;
-        run.aggregate.cacheWriteTokens += evt.usage.cacheWrite ?? 0;
-        run.aggregate.totalTokens += evt.usage.total ?? 0;
+        run.aggregate.inputTokens += usageTotals.inputTokens;
+        run.aggregate.outputTokens += usageTotals.outputTokens;
+        run.aggregate.cacheReadTokens += usageTotals.cacheReadTokens;
+        run.aggregate.cacheWriteTokens += usageTotals.cacheWriteTokens;
+        run.aggregate.totalTokens += usageTotals.totalTokens;
         run.aggregate.promptTokens += evt.usage.promptTokens ?? 0;
         run.aggregate.costUsd += evt.costUsd ?? 0;
         run.aggregate.modelCalls += 1;
@@ -1317,9 +1320,9 @@ export function createOtelPluginService(
             active: true,
             dirty: false,
           };
-          metricState.inputTokens += evt.usage.input ?? 0;
-          metricState.outputTokens += evt.usage.output ?? 0;
-          metricState.totalTokens += evt.usage.total ?? 0;
+          metricState.inputTokens += usageTotals.inputTokens;
+          metricState.outputTokens += usageTotals.outputTokens;
+          metricState.totalTokens += usageTotals.totalTokens;
           metricState.modelProvider = evt.provider ?? metricState.modelProvider;
           metricState.modelName = evt.model ?? metricState.modelName;
           metricState.active = true;
@@ -1344,11 +1347,6 @@ export function createOtelPluginService(
           "openclaw.tool.result_statuses": Array.from(run.usedToolResultStatuses).join(", "),
           "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
           "openclaw.skill.count": run.usedSkillNames.size,
-          "llm.provider": run.aggregate.lastProvider,
-          "llm.model": run.aggregate.lastModel,
-          "llm.input_tokens": run.aggregate.inputTokens,
-          "llm.output_tokens": run.aggregate.outputTokens,
-          "llm.total_tokens": run.aggregate.totalTokens,
         });
 
         const transcriptAttrs = traceAttrs(enrichWithTranscript(evt.sessionKey, summaryAttrs));
@@ -1433,6 +1431,8 @@ export function createOtelPluginService(
         annotateToolLoop,
         hasReplayWatermark,
         markReplayWatermark,
+        hasFinalizedReplayRunId,
+        markFinalizedReplayRunId,
       });
 
       unsubscribeDiagnostic = onDiagnosticEvent(handleDiagnosticEvent);

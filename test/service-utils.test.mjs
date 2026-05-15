@@ -23,6 +23,7 @@ import {
   extractToolResultStatus,
   readReplayFinalizationState,
   rememberRunId,
+  resolveUsageTokenTotals,
   resolveReplayFinalizationStateFile,
   resolveIngressLifecycleWindows,
   resolveSessionSpanName,
@@ -90,6 +91,25 @@ test("rememberRunId keeps the first run_id and accumulates later run ids", () =>
 
   assert.equal(state.runId, "run-1");
   assert.deepEqual(Array.from(state.runIds ?? []), ["run-1", "run-2"]);
+});
+
+test("resolveUsageTokenTotals keeps cache tokens separate from llm total tokens", () => {
+  assert.deepEqual(
+    resolveUsageTokenTotals({
+      input: 504,
+      output: 93,
+      cacheRead: 64640,
+      cacheWrite: 0,
+      totalTokens: 65237,
+    }),
+    {
+      inputTokens: 504,
+      outputTokens: 93,
+      cacheReadTokens: 64640,
+      cacheWriteTokens: 0,
+      totalTokens: 597,
+    },
+  );
 });
 
 test("buildRunScopeAttrs preserves the primary run_id and exposes the run_ids summary", () => {

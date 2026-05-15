@@ -417,6 +417,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       const currentRunAssistantTurns: TranscriptAssistantTurn[] = [];
       let currentRunCursorTs: number | undefined;
       let currentRunInputPreview: string | undefined;
+      let currentRunCacheReadRaw: number | undefined;
+      let currentRunCacheWriteRaw: number | undefined;
       for (const line of lines) {
         if (line.type === "session" && typeof line.cwd === "string" && !sessionCwd) {
           sessionCwd = line.cwd;
@@ -440,6 +442,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           currentRunAssistantTurns.length = 0;
           currentRunCursorTs = lastUserTs;
           currentRunInputPreview = normalizeUserInputPreview(userText);
+          currentRunCacheReadRaw = undefined;
+          currentRunCacheWriteRaw = undefined;
         }
         if (message.role === "assistant") {
           const assistantText = extractContentText(message.content, "text");
@@ -495,23 +499,34 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             ? clipValuePreview(assistantText)
             : summarizeToolCallOutput(turnToolCallNames);
           const turnUsage = message.usage && typeof message.usage === "object"
-            ? {
-              input: typeof (message.usage as Record<string, unknown>).input === "number"
-                ? (message.usage as Record<string, number>).input
-                : undefined,
-              output: typeof (message.usage as Record<string, unknown>).output === "number"
-                ? (message.usage as Record<string, number>).output
-                : undefined,
-              cacheRead: typeof (message.usage as Record<string, unknown>).cacheRead === "number"
-                ? (message.usage as Record<string, number>).cacheRead
-                : undefined,
-              cacheWrite: typeof (message.usage as Record<string, unknown>).cacheWrite === "number"
-                ? (message.usage as Record<string, number>).cacheWrite
-                : undefined,
-              totalTokens: typeof (message.usage as Record<string, unknown>).totalTokens === "number"
-                ? (message.usage as Record<string, number>).totalTokens
-                : undefined,
-            }
+            ? (() => {
+              const rawUsage = message.usage as Record<string, unknown>;
+              const input = typeof rawUsage.input === "number" ? rawUsage.input : undefined;
+              const output = typeof rawUsage.output === "number" ? rawUsage.output : undefined;
+              const rawCacheRead = typeof rawUsage.cacheRead === "number" ? rawUsage.cacheRead : undefined;
+              const rawCacheWrite = typeof rawUsage.cacheWrite === "number" ? rawUsage.cacheWrite : undefined;
+              const cacheRead = typeof rawCacheRead === "number"
+                ? typeof currentRunCacheReadRaw === "number" && rawCacheRead >= currentRunCacheReadRaw
+                  ? rawCacheRead - currentRunCacheReadRaw
+                  : rawCacheRead
+                : undefined;
+              const cacheWrite = typeof rawCacheWrite === "number"
+                ? typeof currentRunCacheWriteRaw === "number" && rawCacheWrite >= currentRunCacheWriteRaw
+                  ? rawCacheWrite - currentRunCacheWriteRaw
+                  : rawCacheWrite
+                : undefined;
+              currentRunCacheReadRaw = rawCacheRead;
+              currentRunCacheWriteRaw = rawCacheWrite;
+              return {
+                input,
+                output,
+                cacheRead,
+                cacheWrite,
+                totalTokens: typeof rawUsage.totalTokens === "number"
+                  ? rawUsage.totalTokens
+                  : undefined,
+              };
+            })()
             : undefined;
           currentRunAssistantTurns.push({
             startedAt: currentRunCursorTs ?? startedAt,
@@ -529,12 +544,11 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           });
           currentRunCursorTs = startedAt ?? currentRunCursorTs;
           if (message.usage && typeof message.usage === "object") {
-            const usage = message.usage as Record<string, unknown>;
-            const input = typeof usage.input === "number" ? usage.input : 0;
-            const output = typeof usage.output === "number" ? usage.output : 0;
-            const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
-            const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
-            const totalTokens = typeof usage.totalTokens === "number" ? usage.totalTokens : 0;
+            const input = turnUsage?.input ?? 0;
+            const output = turnUsage?.output ?? 0;
+            const cacheRead = turnUsage?.cacheRead ?? 0;
+            const cacheWrite = turnUsage?.cacheWrite ?? 0;
+            const totalTokens = turnUsage?.totalTokens ?? 0;
             const additiveTotalTokens = input > 0 || output > 0
               ? input + output
               : totalTokens;
