@@ -235,6 +235,8 @@ export function createOtelPluginService(
           : undefined;
         const dynamicAgentId = parsedSessionKey.sessionAgent;
         const dynamicAgentName = configuredAgent?.name ?? configuredAgent?.id ?? dynamicAgentId;
+        const resolvedAgentId = nextAttrs.agent_id ?? dynamicAgentId ?? runtimeMetadata?.agentId;
+        const resolvedAgentName = nextAttrs.agent_name ?? dynamicAgentName ?? runtimeMetadata?.agentName;
         const snapshot = loadSessionSnapshot(sessionKey);
         const staleSnapshotForCurrentRequest = Boolean(
           snapshot
@@ -247,8 +249,11 @@ export function createOtelPluginService(
         if (!snapshot || staleSnapshotForCurrentRequest) {
           return {
             ...nextAttrs,
-            agent_id: nextAttrs.agent_id ?? dynamicAgentId,
-            agent_name: nextAttrs.agent_name ?? dynamicAgentName,
+            agent_id: resolvedAgentId,
+            agent_name: resolvedAgentName,
+            agent_runtime: nextAttrs.agent_runtime ?? "openclaw",
+            agent_version: nextAttrs.agent_version ?? runtimeMetadata?.openclawVersion,
+            runtime_environment: nextAttrs.runtime_environment ?? runtimeMetadata?.runtimeEnvironment,
           };
         }
         const resolvedSessionId = snapshot.sessionId
@@ -256,8 +261,11 @@ export function createOtelPluginService(
           ?? (typeof nextAttrs["openclaw.sessionId"] === "string" ? nextAttrs["openclaw.sessionId"] : undefined);
         return {
           ...nextAttrs,
-          agent_id: nextAttrs.agent_id ?? dynamicAgentId,
-          agent_name: nextAttrs.agent_name ?? dynamicAgentName,
+          agent_id: resolvedAgentId,
+          agent_name: resolvedAgentName,
+          agent_runtime: nextAttrs.agent_runtime ?? "openclaw",
+          agent_version: nextAttrs.agent_version ?? runtimeMetadata?.openclawVersion,
+          runtime_environment: nextAttrs.runtime_environment ?? runtimeMetadata?.runtimeEnvironment,
           session_id: resolvedSessionId,
           "openclaw.sessionId": resolvedSessionId,
           "openclaw.session.file": snapshot.sessionFile,

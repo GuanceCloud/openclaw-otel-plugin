@@ -67,15 +67,11 @@ npm run pack:release
 
 辅助脚本：
 
-- 安装 release：[`scripts/install.sh`](./scripts/install.sh)
-- 升级 release：[`scripts/update.sh`](./scripts/update.sh)
 - 本地开发监听：`npm run dev`
 
 涉及打包、安装、升级的改动后，优先至少验证：
 
 ```bash
-bash scripts/install.sh --help
-bash scripts/update.sh --help
 npm run pack:release
 ```
 

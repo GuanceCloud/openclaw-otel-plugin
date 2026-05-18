@@ -89,106 +89,52 @@ Trace 说明：
 
 ## 安装
 
-推荐直接从观测云 OSS 安装预构建 release 包，不要求目标机器具备 Node.js 构建环境。
-安装脚本现在会自动把插件注册到 `~/.openclaw/openclaw.json`，并且可以在安装时顺手写入 OTLP endpoint。
+仓库内不再提供 `install.sh` 或 `update.sh`。
+如果使用 GTrace，推荐走 skill 安装；如果使用标准 OTLP 接收端，先按 [BUILDING.md](./BUILDING.md) 的源码安装流程完成安装，再手动配置 `~/.openclaw/openclaw.json`。
 
 构建、打包、源码安装和发布流程见 [BUILDING.md](./BUILDING.md)。
 
-### 方式一：快速安装
+### GTrace
 
-默认安装类型是观测云 GTrace，会自动写入观测云专用 OTLP 路径，并要求同时传入 `--endpoint` 和 `--x-token`。
+如果当前 Agent 环境已经安装了 `$openclaw-gtrace-install`，推荐直接通过 skill 完成快速安装。
 
-```bash
-rm -f /tmp/openclaw-otel-plugin-install.sh && \
-curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
-  https://static.guance.com/openclaw-otel-plugin/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh latest \
-  --endpoint https://llm-openway.guance.com \
-  --x-token agent_xxx \
-  --tag env=prod
+提示词模板：
+
+```text
+使用 $openclaw-gtrace-install 安装 OpenClaw OTEL 插件。
+
+参数：
+OSS_ENDPOINT=<你的 GTrace OSS 地址>
+DATAWAY_ENDPOINT=<你的 GTrace Dataway 地址>
+VERSION=latest
+X_TOKEN=<你的 token>
+TAGS=env=prod
+
+要求：
+- 不要输出 X_TOKEN 明文
+- 安装完成后执行验证
+- 如果失败，返回失败步骤、关键错误和下一步建议
 ```
 
-安装到标准 OTLP HTTP/protobuf 接收端：
+如果要安装指定版本，把 `VERSION` 改成 `v0.6.5` 或其他已发布版本。
 
-```bash
-rm -f /tmp/openclaw-otel-plugin-install.sh && \
-curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
-  https://static.guance.com/openclaw-otel-plugin/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh latest \
-  --type otlp \
-  --endpoint http://127.0.0.1:4318/otel
+如果只是先安装文件，稍后再补配置，追加：
+
+```text
+NO_CONFIG=true
 ```
 
-也可以安装指定版本：
+如果不想立即重启 gateway，追加：
 
-```bash
-rm -f /tmp/openclaw-otel-plugin-install.sh && \
-curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
-  https://static.guance.com/openclaw-otel-plugin/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh v0.6.4 \
-  --endpoint https://llm-openway.guance.com \
-  --x-token agent_xxx \
-  --tag env=prod
+```text
+NO_RESTART=true
 ```
 
-如果只是先安装文件，稍后再补配置：
-
-```bash
-rm -f /tmp/openclaw-otel-plugin-install.sh && \
-curl -fsSL -o /tmp/openclaw-otel-plugin-install.sh \
-  https://static.guance.com/openclaw-otel-plugin/install.sh && \
-bash /tmp/openclaw-otel-plugin-install.sh latest --no-config
-```
-
-### 方式二：安装本地打包产物
-
-```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.4.tar.gz
-```
-
-安装本地包时也可以一并写入 endpoint：
-
-```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.4.tar.gz \
-  --endpoint https://llm-openway.guance.com \
-  --x-token agent_xxx \
-  --tag env=prod
-```
-
-本地包安装到标准 OTLP HTTP/protobuf 接收端：
-
-```bash
-bash scripts/install.sh ./output/openclaw-otel-plugin-v0.6.4.tar.gz \
-  --type otlp \
-  --endpoint http://127.0.0.1:4318/otel
-```
-
-## 升级
-
-升级逻辑和安装一致，默认拉取 OSS 上的 latest 包并覆盖安装目录：
-
-```bash
-bash scripts/update.sh
-```
-
-指定版本升级：
-
-```bash
-bash scripts/update.sh v0.6.4
-```
-
-如果只想安装文件、不立即重启 gateway：
-
-```bash
-bash scripts/update.sh latest --no-restart
-```
-
-默认下载目录是 `https://static.guance.com/openclaw-otel-plugin`。只有测试其他 OSS 镜像时才需要通过 `OPENCLAW_PLUGIN_DOWNLOAD_BASE_URL` 覆盖。
+如果是标准 OTLP 接收端，请先完成源码安装，再参考下面的手动配置示例。
 
 ## 配置
 
-安装脚本默认等同于 `--type gtrace`，会自动写入观测云专用的 OTLP 路径和请求头。
-只有安装到标准 OTLP HTTP/protobuf 接收端时，才需要显式传入 `--type otlp`。
+下面的手动 JSON 示例使用标准 `OTLP HTTP/protobuf` 接收端。
 
 只有在下面这些场景才需要手动配置：
 
@@ -235,40 +181,11 @@ bash scripts/update.sh latest --no-restart
 }
 ```
 
-`--type gtrace` 自动写入示例：
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "openclaw-otel-plugin": {
-        "config": {
-          "endpoint": "https://llm-openway.guance.com",
-          "tracePath": "v1/write/otel-llm",
-          "metricsPath": "v1/write/otel-metrics",
-          "logsEnabled": false,
-          "logsPath": "v1/write/otel-logs",
-          "headers": {
-            "X-Token": "agent_xxx",
-            "to_headless": "true"
-          },
-          "resourceAttributes": {
-            "agent_runtime": "openclaw",
-            "env": "prod"
-          }
-        }
-      }
-    }
-  }
-}
-```
-
 ### 配置项说明
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `endpoint` | `http://127.0.0.1:4318/otel` | 接收端基础地址，结尾多余 `/` 会被自动去掉 |
-| `type` | `gtrace` | 安装配置类型。默认 `gtrace` 要求必须传入 `endpoint` 和 `X-Token`，并自动写入观测云专用 OTLP 路径；标准 OTLP 接收端使用 `otlp` |
 | `tracePath` | `v1/traces` | trace 写入路径，会追加到 `endpoint` 后面 |
 | `metricsPath` | `v1/metrics` | metrics 写入路径，会追加到 `endpoint` 后面 |
 | `logsEnabled` | `false` | 只有显式开启后才导出 OTEL logs |
@@ -276,11 +193,10 @@ bash scripts/update.sh latest --no-restart
 | `protocol` | `http/protobuf` | 当前唯一支持的协议 |
 | `serviceName` | `openclaw-otel-plugin` | 会作为 OTEL `service.name` 导出 |
 | `headers` | 未设置 | 对 traces、metrics、logs 统一附加的 HTTP Header |
-| `headers.X-Token` | 未设置 | 默认 `gtrace` 配置必填 |
 | `sampleRate` | 未设置 | 可选采样率，取值范围 `[0, 1]` |
 | `flushIntervalMs` | `30000` | metrics 周期导出间隔 |
 | `rootSpanTtlMs` | `600000` | root/run span 长时间无活动后自动收尾 |
-| `resourceAttributes` | `{ "agent_runtime": "openclaw" }` | 固定 OTEL resource attributes；每个 `--tag key=value` 都会合并到这里。`type=gtrace` 时会默认移除 `app_name` 和 `app_id` |
+| `resourceAttributes` | `{ "agent_runtime": "openclaw" }` | 固定 OTEL resource attributes；每个 `--tag key=value` 都会合并到这里 |
 
 兼容字段仍然支持：
 

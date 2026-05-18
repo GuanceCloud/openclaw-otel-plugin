@@ -361,7 +361,7 @@ test("dashboard workspace paths infer the dashboard skill span", () => {
       toolCallId: "call-dashboard",
       phase: "start",
       args: {
-        path: "/home/liurui/dashboard/guance/mysql_dashboard_complete.json",
+        path: "/home/liurui/dashboard/gtrace/mysql_dashboard_complete.json",
       },
     },
   });
@@ -439,7 +439,7 @@ test("dashboard edit tools create a skill call span and preserve skill attrs", (
       toolCallId: "call-dashboard-edit",
       phase: "start",
       args: {
-        path: "/home/liurui/dashboard/guance/gen_dba_pro.py",
+        path: "/home/liurui/dashboard/gtrace/gen_dba_pro.py",
         edits: [{ oldText: "a", newText: "b" }],
       },
     },

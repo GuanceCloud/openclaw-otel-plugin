@@ -2,14 +2,20 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-05-18
+
+### Documentation
+
+- Simplified README and README_ZH install guidance around GTrace skill installation and manual OTLP configuration.
+- Removed repository-managed `install.sh` / `update.sh` from the documented install and release workflow; the supported paths are now GTrace skill installation plus source/manual OTLP setup.
+
 ## 2026-05-15
 
 ### OSS Release Delivery
 
-- Switched installer default downloads from GitHub Release to Guance OSS at `https://static.guance.com/openclaw-otel-plugin`.
 - Changed `latest` installs to download the unversioned `openclaw-otel-plugin.tar.gz` package while keeping versioned installs on `openclaw-otel-plugin-vX.Y.Z.tar.gz`.
-- Added release output copies for `install.sh`, `update.sh`, the latest tarball, and matching `.sha256` files for OSS publication.
-- Made Guance GTrace the default installer profile, with `--type otlp` retained as the explicit standard OTLP receiver switch.
+- Added release output copies for the latest tarball and matching `.sha256` files for OSS publication.
+- Made GTrace the default installer profile, with `--type otlp` retained as the explicit standard OTLP receiver switch.
 
 ### Trace Replay And Run Scope
 
@@ -41,10 +47,10 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 ### Installation Flow
 
-- Fixed `scripts/install.sh` cleanup so successful installs no longer end with `tmp_dir: 未绑定的变量`.
+- Fixed installer cleanup so successful installs no longer end with `tmp_dir: 未绑定的变量`.
 - Bundled a CommonJS runtime entrypoint at `dist/index.cjs` for release/runtime use.
 - The installer now links the host `openclaw` package into the plugin directory under `node_modules/openclaw`, so release installs reuse the local OpenClaw runtime instead of bundling the full host package into the plugin artifact.
-- Added installer parameters for Guance GTrace:
+- Added installer parameters for GTrace:
   - `--type gtrace`
   - `--endpoint`
   - `--x-token`

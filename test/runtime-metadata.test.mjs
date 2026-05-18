@@ -93,3 +93,23 @@ test("resolveConfiguredAgents reads ids and names from openclaw.json", () => {
     { id: "coder", name: "coder", isDefault: false },
   ]);
 });
+
+test("resolveConfiguredAgents also reads ids and names from agents.entries", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-agent-config-entries-"));
+  fs.writeFileSync(
+    path.join(stateDir, "openclaw.json"),
+    JSON.stringify({
+      agents: {
+        entries: {
+          main: { name: "智能路由", default: true },
+          coder: { name: "coder" },
+        },
+      },
+    }),
+  );
+
+  assert.deepEqual(resolveConfiguredAgents(stateDir), [
+    { id: "main", name: "智能路由", isDefault: true },
+    { id: "coder", name: "coder", isDefault: false },
+  ]);
+});

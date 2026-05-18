@@ -83,9 +83,13 @@ export function resolveConfiguredAgents(stateDir: string): ConfiguredAgent[] {
           name?: unknown;
           default?: unknown;
         }>;
+        entries?: Record<string, {
+          name?: unknown;
+          default?: unknown;
+        }>;
       };
     };
-    return (parsed.agents?.list ?? [])
+    const listedAgents = (parsed.agents?.list ?? [])
       .map((agent) => {
         const id = typeof agent?.id === "string" ? agent.id.trim() : "";
         if (!id) {
@@ -97,6 +101,22 @@ export function resolveConfiguredAgents(stateDir: string): ConfiguredAgent[] {
           isDefault: agent?.default === true,
         };
       })
+      .filter(Boolean) as ConfiguredAgent[];
+    const entryAgents = Object.entries(parsed.agents?.entries ?? {})
+      .map(([id, agent]) => {
+        const trimmedId = typeof id === "string" ? id.trim() : "";
+        if (!trimmedId) {
+          return undefined;
+        }
+        return {
+          id: trimmedId,
+          name: typeof agent?.name === "string" && agent.name.trim() ? agent.name.trim() : undefined,
+          isDefault: agent?.default === true,
+        };
+      })
+      .filter(Boolean) as ConfiguredAgent[];
+    return uniqStrings([...listedAgents, ...entryAgents].map((agent) => agent.id))
+      .map((id) => [...listedAgents, ...entryAgents].find((agent) => agent.id === id))
       .filter(Boolean) as ConfiguredAgent[];
   } catch {
     return [];

@@ -44,7 +44,7 @@ npm run dev
 
 ```bash
 cd ~/.openclaw/extensions
-git clone https://github.com/GuanceCloud/openclaw-otel-plugin.git
+git clone <git-url>
 cd openclaw-otel-plugin
 npm install
 npm run build
@@ -62,12 +62,10 @@ npm run pack:release
 
 会生成到 `output/` 目录，例如：
 
-- `output/openclaw-otel-plugin-v0.6.4.tar.gz`
-- `output/openclaw-otel-plugin-v0.6.4.tar.gz.sha256`
+- `output/openclaw-otel-plugin-v0.6.5.tar.gz`
+- `output/openclaw-otel-plugin-v0.6.5.tar.gz.sha256`
 - `output/openclaw-otel-plugin.tar.gz`
 - `output/openclaw-otel-plugin.tar.gz.sha256`
-- `output/install.sh`
-- `output/update.sh`
 
 其中带版本包是不可变发布包，`openclaw-otel-plugin.tar.gz` 是 latest 包，每次发布可以覆盖。
 
@@ -79,8 +77,6 @@ npm run pack:release
 - `README.md`
 - `README_ZH.md`
 - `LICENSE`
-- `scripts/install.sh`
-- `scripts/update.sh`
 - `VERSION`
 - `RELEASE.json`
 
@@ -89,5 +85,5 @@ npm run pack:release
 1. 更新代码和文档。
 2. 运行 `npm test`。
 3. 运行 `npm run pack:release`。
-4. 提交版本变更并打 tag，例如 `v0.6.4`。
-5. 将 `output/` 下的 `install.sh`、`update.sh`、带版本包、latest 包以及对应 `.sha256` 上传到 OSS 的 `openclaw-otel-plugin/` 目录。
+4. 提交版本变更并打 tag，例如 `v0.6.5`。
+5. 将 `output/` 下的带版本包、latest 包以及对应 `.sha256` 上传到 OSS 的 `openclaw-otel-plugin/` 目录。
