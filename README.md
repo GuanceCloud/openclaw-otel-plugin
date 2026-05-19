@@ -89,8 +89,7 @@ Compatibility notes:
 
 ## Install
 
-The repository no longer ships `install.sh` or `update.sh`.
-Use the GTrace skill for managed installation, or follow the source-install path from [BUILDING.md](./BUILDING.md) and then configure `~/.openclaw/openclaw.json` manually for a standard OTLP receiver.
+Use the GTrace skill for managed installation. The release output still includes `install.sh` as the execution layer used by the skill, not as the primary user-facing entrypoint. For a standard OTLP receiver, follow the source-install path from [BUILDING.md](./BUILDING.md) and then configure `~/.openclaw/openclaw.json` manually.
 
 For build, packaging, source install, and release workflow, see [BUILDING.md](./BUILDING.md).
 

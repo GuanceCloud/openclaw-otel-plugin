@@ -2,6 +2,15 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-05-19
+
+### OSS Release Delivery
+
+- Restored `output/install.sh` and added `output/SKILL.md` to the release output so the OSS install entrypoint and installer stay versioned with the plugin release.
+- Updated the GTrace skill to pass its `OSS_ENDPOINT` through to the installer, so the installer downloads packages from the same OSS location as the skill.
+- Changed installer usage, log, and error messages to English.
+- Removed the hardcoded default download host from `install.sh`; callers must pass `OSS_ENDPOINT`.
+
 ## 2026-05-18
 
 ### Documentation

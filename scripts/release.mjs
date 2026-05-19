@@ -51,6 +51,21 @@ async function writeSha256(filePath) {
   return checksumPath;
 }
 
+async function copyReleaseSidecar(sourceRelativePath, targetFileName, mode) {
+  const sourcePath = path.join(repoRoot, sourceRelativePath);
+  const targetPath = path.join(outputDir, targetFileName);
+
+  if (!(await fileExists(sourcePath))) {
+    throw new Error(`${sourceRelativePath} 不存在，无法生成 ${targetFileName}`);
+  }
+
+  await fs.copyFile(sourcePath, targetPath);
+  if (mode !== undefined) {
+    await fs.chmod(targetPath, mode);
+  }
+  return targetPath;
+}
+
 async function main() {
   const packageJsonPath = path.join(repoRoot, "package.json");
   const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
@@ -74,6 +89,8 @@ async function main() {
   await fs.rm(`${archivePath}.sha256`, { force: true });
   await fs.rm(latestArchivePath, { force: true });
   await fs.rm(`${latestArchivePath}.sha256`, { force: true });
+  await fs.rm(path.join(outputDir, "install.sh"), { force: true });
+  await fs.rm(path.join(outputDir, "SKILL.md"), { force: true });
   await fs.mkdir(stagingDir, { recursive: true });
 
   const releaseFiles = [
@@ -103,11 +120,15 @@ async function main() {
   const checksumPath = await writeSha256(archivePath);
   await fs.copyFile(archivePath, latestArchivePath);
   const latestChecksumPath = await writeSha256(latestArchivePath);
+  const installScriptPath = await copyReleaseSidecar("scripts/install.sh", "install.sh", 0o755);
+  const skillPath = await copyReleaseSidecar("SKILL.md", "SKILL.md", 0o644);
 
   log(`artifact: ${path.relative(repoRoot, archivePath)}`);
   log(`checksum: ${path.relative(repoRoot, checksumPath)}`);
   log(`latest artifact: ${path.relative(repoRoot, latestArchivePath)}`);
   log(`latest checksum: ${path.relative(repoRoot, latestChecksumPath)}`);
+  log(`installer: ${path.relative(repoRoot, installScriptPath)}`);
+  log(`skill: ${path.relative(repoRoot, skillPath)}`);
 }
 
 main().catch((error) => {
