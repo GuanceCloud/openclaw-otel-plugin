@@ -186,6 +186,9 @@
 | `state` | 当前状态 |
 | `prev_state` | 前一状态 |
 | `reason` | 状态变化或结束原因 |
+| `request_type` | 请求大类，默认 `user_request`；内部控制流为 `internal_request` |
+| `request_category` | 请求细分类型；例如 `runtime_continue`、`heartbeat` |
+| `is_internal_request` | 是否内部请求，便于直接过滤内部控制流 |
 | `queue_depth` | 当前关联队列深度 |
 | `runtime_phase` | 当前 runtime 阶段 |
 | `final_status` | 最终状态，推荐用于和 metrics / 查询侧统一 |
@@ -201,6 +204,22 @@
 | `tool_meta_preview` | tool 元数据预览 |
 | `tool_result_preview` | tool 结果预览 |
 | `tool_result_status` | tool 结果状态 |
+
+### `request_type` 结果语义
+
+建议按以下语义使用：
+
+| 值 | 含义 |
+| --- | --- |
+| `user_request` | 普通用户发起的请求 |
+| `internal_request` | OpenClaw 内部自动触发的控制流请求 |
+
+补充说明：
+
+- 当前内部请求会进一步通过 `request_category` 区分，例如：
+  - `runtime_continue`
+  - `heartbeat`
+- 需要筛掉非用户可见链路时，优先使用 `is_internal_request = true` 或 `request_type = internal_request`
 
 ## Model 相关字段
 

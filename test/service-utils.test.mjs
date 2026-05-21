@@ -22,6 +22,7 @@ import {
   computeSessionMetricDelta,
   extractToolResultStatus,
   readReplayFinalizationState,
+  resolveRequestClassification,
   rememberRunId,
   resolveUsageTokenTotals,
   resolveReplayFinalizationStateFile,
@@ -108,6 +109,33 @@ test("resolveUsageTokenTotals keeps cache tokens separate from llm total tokens"
       cacheReadTokens: 64640,
       cacheWriteTokens: 0,
       totalTokens: 597,
+    },
+  );
+});
+
+test("resolveRequestClassification marks runtime continue prompts as internal requests", () => {
+  assert.deepEqual(
+    resolveRequestClassification({
+      lastUserText: "Continue the OpenClaw runtime event.",
+    }),
+    {
+      requestType: "internal_request",
+      requestCategory: "runtime_continue",
+      isInternalRequest: true,
+    },
+  );
+});
+
+test("resolveRequestClassification marks heartbeat probes as internal requests", () => {
+  assert.deepEqual(
+    resolveRequestClassification({
+      lastUserText: "[OpenClaw heartbeat poll]",
+      lastAssistantText: "HEARTBEAT_OK",
+    }),
+    {
+      requestType: "internal_request",
+      requestCategory: "heartbeat",
+      isInternalRequest: true,
     },
   );
 });

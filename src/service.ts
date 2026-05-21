@@ -39,6 +39,7 @@ import {
   rememberRunId,
   resolveReplayFinalizationStateFile,
   resolveIngressLifecycleWindows,
+  resolveRequestClassification,
   resolveSessionMetricTotals,
   resolveSpanWindow,
   resolveUsageTokenTotals,
@@ -238,6 +239,22 @@ export function createOtelPluginService(
         const resolvedAgentId = nextAttrs.agent_id ?? dynamicAgentId ?? runtimeMetadata?.agentId;
         const resolvedAgentName = nextAttrs.agent_name ?? dynamicAgentName ?? runtimeMetadata?.agentName;
         const snapshot = loadSessionSnapshot(sessionKey);
+        const requestClassification = resolveRequestClassification({
+          lastUserText: snapshot?.lastUserText,
+          lastAssistantText: snapshot?.lastAssistantText,
+          inputPreview:
+            typeof nextAttrs["openclaw.input.preview"] === "string"
+              ? nextAttrs["openclaw.input.preview"]
+              : typeof nextAttrs.input_preview === "string"
+                ? nextAttrs.input_preview
+                : undefined,
+          outputPreview:
+            typeof nextAttrs["openclaw.output.preview"] === "string"
+              ? nextAttrs["openclaw.output.preview"]
+              : typeof nextAttrs.output_preview === "string"
+                ? nextAttrs.output_preview
+                : undefined,
+        });
         const staleSnapshotForCurrentRequest = Boolean(
           snapshot
           && minSnapshotUserTs !== undefined
@@ -254,6 +271,9 @@ export function createOtelPluginService(
             agent_runtime: nextAttrs.agent_runtime ?? "openclaw",
             agent_version: nextAttrs.agent_version ?? runtimeMetadata?.openclawVersion,
             runtime_environment: nextAttrs.runtime_environment ?? runtimeMetadata?.runtimeEnvironment,
+            request_type: nextAttrs.request_type ?? requestClassification.requestType,
+            request_category: nextAttrs.request_category ?? requestClassification.requestCategory,
+            is_internal_request: nextAttrs.is_internal_request ?? requestClassification.isInternalRequest,
           };
         }
         const resolvedSessionId = snapshot.sessionId
@@ -266,6 +286,9 @@ export function createOtelPluginService(
           agent_runtime: nextAttrs.agent_runtime ?? "openclaw",
           agent_version: nextAttrs.agent_version ?? runtimeMetadata?.openclawVersion,
           runtime_environment: nextAttrs.runtime_environment ?? runtimeMetadata?.runtimeEnvironment,
+          request_type: nextAttrs.request_type ?? requestClassification.requestType,
+          request_category: nextAttrs.request_category ?? requestClassification.requestCategory,
+          is_internal_request: nextAttrs.is_internal_request ?? requestClassification.isInternalRequest,
           session_id: resolvedSessionId,
           "openclaw.sessionId": resolvedSessionId,
           "openclaw.session.file": snapshot.sessionFile,

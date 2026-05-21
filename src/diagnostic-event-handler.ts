@@ -252,6 +252,29 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     return snapshotActivityTs >= minRequestTs;
   };
 
+  const resolveSnapshotFinalOutcome = (snapshot: SessionSnapshot | undefined): string | undefined => {
+    const raw = typeof snapshot?.runFinalStatus === "string" ? snapshot.runFinalStatus.trim().toLowerCase() : "";
+    if (!raw) {
+      return snapshot?.runCompleted === true ? "completed" : undefined;
+    }
+    if (raw === "success" || raw === "completed") {
+      return "completed";
+    }
+    if (raw === "error" || raw === "failed" || raw === "failure") {
+      return "error";
+    }
+    if (raw === "cancelled" || raw === "canceled") {
+      return "cancelled";
+    }
+    if (raw === "timeout" || raw === "timed_out" || raw === "timed-out") {
+      return "timeout";
+    }
+    if (raw === "superseded" || raw === "superseded_by_next_message") {
+      return "superseded";
+    }
+    return raw;
+  };
+
   return (evt: DiagnosticEventPayload) => {
     cleanupExpiredRoots();
 
@@ -378,7 +401,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           getRun(evt, false)?.runId ?? snapshot?.runId,
         );
         const finalOutcome = getRun(evt, false)?.pendingFinalOutcome
-          ?? (snapshot?.runCompleted === true ? "completed" : evt.state);
+          ?? resolveSnapshotFinalOutcome(snapshot)
+          ?? evt.state;
         endRun(evt, stringAttrs({
           "openclaw.state": evt.state,
           "openclaw.outcome": finalOutcome,

@@ -2,6 +2,13 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-05-21
+
+### Trace Semantics
+
+- Added `request_type`, `request_category`, and `is_internal_request` trace tags so normal user requests can be distinguished from OpenClaw internal control flows such as `Continue the OpenClaw runtime event.` and heartbeat traffic.
+- Fixed `final_status` resolution for `agent_run` / `openclaw_request` close paths so trajectory-backed terminal outcomes such as `success` now map to canonical statuses like `completed` instead of falling back to `idle`.
+
 ## 2026-05-19
 
 ### OSS Release Delivery

@@ -18,6 +18,10 @@ export const MIN_VISIBLE_CHILD_MS = 120;
 export const MIN_VISIBLE_MODEL_MS = 800;
 export const MAX_OPENCLAW_THINKING_MS = 1500;
 
+const HEARTBEAT_REQUEST_TEXT = "[OpenClaw heartbeat poll]";
+const HEARTBEAT_RESPONSE_TEXT = "HEARTBEAT_OK";
+const RUNTIME_CONTINUE_REQUEST_TEXT = "Continue the OpenClaw runtime event.";
+
 export function redactSensitiveText(text: string): string {
   return text;
 }
@@ -134,13 +138,60 @@ export function endTimeFromStart(startTs: number, durationMs: number): Date {
 }
 
 export function isHeartbeatSessionSnapshot(snapshot: SessionSnapshot | undefined): boolean {
-  if (!snapshot) {
-    return false;
+  return resolveRequestClassification({
+    lastUserText: snapshot?.lastUserText,
+    lastAssistantText: snapshot?.lastAssistantText,
+    inputPreview: snapshot?.lastRunAssistantTurns?.at(-1)?.inputPreview,
+    outputPreview: snapshot?.lastRunAssistantTurns?.at(-1)?.outputPreview,
+  }).requestCategory === "heartbeat";
+}
+
+export function resolveRequestClassification(input: {
+  lastUserText?: string;
+  lastAssistantText?: string;
+  inputPreview?: string;
+  outputPreview?: string;
+}): {
+  requestType: "user_request" | "internal_request";
+  requestCategory?: "heartbeat" | "runtime_continue";
+  isInternalRequest: boolean;
+} {
+  const normalizedInputs = [
+    input.lastUserText,
+    input.inputPreview,
+  ]
+    .map((value) => normalizeUserInputPreview(value) ?? value?.trim())
+    .filter((value): value is string => Boolean(value));
+  const normalizedOutputs = [
+    input.lastAssistantText,
+    input.outputPreview,
+  ]
+    .map((value) => clipPreview(value) ?? value?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  if (
+    normalizedInputs.includes(HEARTBEAT_REQUEST_TEXT)
+    || normalizedOutputs.includes(HEARTBEAT_RESPONSE_TEXT)
+  ) {
+    return {
+      requestType: "internal_request",
+      requestCategory: "heartbeat",
+      isInternalRequest: true,
+    };
   }
-  const lastTurn = snapshot.lastRunAssistantTurns?.at(-1);
-  const inputPreview = (lastTurn?.inputPreview ?? snapshot.lastUserText ?? "").trim();
-  const outputPreview = (lastTurn?.outputPreview ?? snapshot.lastAssistantText ?? "").trim();
-  return inputPreview === "[OpenClaw heartbeat poll]" || outputPreview === "HEARTBEAT_OK";
+
+  if (normalizedInputs.includes(RUNTIME_CONTINUE_REQUEST_TEXT)) {
+    return {
+      requestType: "internal_request",
+      requestCategory: "runtime_continue",
+      isInternalRequest: true,
+    };
+  }
+
+  return {
+    requestType: "user_request",
+    isInternalRequest: false,
+  };
 }
 
 export function resolveOpenClawThinkingDurationMs(

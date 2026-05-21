@@ -177,13 +177,14 @@ function readSessionLatestRunId(sessionFile: string): string | undefined {
 
 function readSessionLatestRunState(
   sessionFile: string,
-): { runId?: string; runCompleted?: boolean; runTerminalType?: string } {
+): { runId?: string; runCompleted?: boolean; runTerminalType?: string; runFinalStatus?: string } {
   const trajectoryFile = resolveSessionTrajectoryFile(sessionFile);
   if (!trajectoryFile || !fs.existsSync(trajectoryFile)) {
     return {};
   }
   let latestRunId: string | undefined;
   let latestRunTerminalType: string | undefined;
+  let latestRunFinalStatus: string | undefined;
   try {
     for (const line of readJsonLines(trajectoryFile)) {
       const runId = typeof line?.runId === "string" ? line.runId.trim() : "";
@@ -192,6 +193,12 @@ function readSessionLatestRunState(
       }
       latestRunId = runId;
       latestRunTerminalType = typeof line?.type === "string" ? line.type : undefined;
+      const rawFinalStatus = typeof line?.data?.finalStatus === "string"
+        ? line.data.finalStatus.trim()
+        : typeof line?.data?.status === "string"
+          ? line.data.status.trim()
+          : "";
+      latestRunFinalStatus = rawFinalStatus || latestRunFinalStatus;
     }
   } catch {
     return {};
@@ -201,13 +208,14 @@ function readSessionLatestRunState(
     runId: latestRunId,
     runCompleted,
     runTerminalType: latestRunTerminalType,
+    runFinalStatus: latestRunFinalStatus,
   };
 }
 
 function readSessionRunState(
   sessionFile: string,
   targetRunId?: string,
-): { runId?: string; runCompleted?: boolean; runTerminalType?: string } {
+): { runId?: string; runCompleted?: boolean; runTerminalType?: string; runFinalStatus?: string } {
   if (!targetRunId) {
     return readSessionLatestRunState(sessionFile);
   }
@@ -218,6 +226,7 @@ function readSessionRunState(
   let sawRunId = false;
   let latestType: string | undefined;
   let runCompleted = false;
+  let runFinalStatus: string | undefined;
   try {
     for (const line of readJsonLines(trajectoryFile)) {
       const runId = typeof line?.runId === "string" ? line.runId.trim() : "";
@@ -229,6 +238,12 @@ function readSessionRunState(
       if (latestType === "trace.artifacts" || latestType === "session.ended") {
         runCompleted = true;
       }
+      const rawFinalStatus = typeof line?.data?.finalStatus === "string"
+        ? line.data.finalStatus.trim()
+        : typeof line?.data?.status === "string"
+          ? line.data.status.trim()
+          : "";
+      runFinalStatus = rawFinalStatus || runFinalStatus;
     }
   } catch {
     return {};
@@ -240,6 +255,7 @@ function readSessionRunState(
     runId: targetRunId,
     runCompleted,
     runTerminalType: latestType,
+    runFinalStatus,
   };
 }
 
@@ -630,6 +646,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         runId: latestRunState.runId ?? readSessionLatestRunId(sessionFile),
         runCompleted: latestRunState.runCompleted,
         runTerminalType: latestRunState.runTerminalType,
+        runFinalStatus: latestRunState.runFinalStatus,
         createdAt: readSessionCreatedAt(sessionFile),
         updatedAt: sessionMetaBySessionKey.get(sessionKey)?.updatedAt,
         chatType: sessionMetaBySessionKey.get(sessionKey)?.chatType,

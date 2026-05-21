@@ -681,4 +681,62 @@ test("session store refreshes snapshot when only trajectory changes", async () =
   assert.equal(after.runId, "run-1");
   assert.equal(after.runCompleted, true);
   assert.equal(after.runTerminalType, "trace.artifacts");
+  assert.equal(after.runFinalStatus, undefined);
+});
+
+test("session store reads final status from trace.artifacts and session.ended", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "s6.jsonl");
+  const trajectoryFile = path.join(sessionsDir, "s6.trajectory.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s6: {
+        sessionFile,
+        sessionId: "session-6",
+      },
+    }),
+  );
+  fs.writeFileSync(
+    trajectoryFile,
+    `${JSON.stringify({
+      type: "session.started",
+      runId: "run-6",
+      ts: "2026-05-14T12:05:46.000Z",
+    })}\n${JSON.stringify({
+      type: "trace.artifacts",
+      runId: "run-6",
+      ts: "2026-05-14T12:06:42.000Z",
+      data: { finalStatus: "success" },
+    })}\n${JSON.stringify({
+      type: "session.ended",
+      runId: "run-6",
+      ts: "2026-05-14T12:06:43.000Z",
+      data: { status: "success" },
+    })}\n`,
+  );
+  fs.writeFileSync(
+    sessionFile,
+    `${JSON.stringify({
+      type: "message",
+      timestamp: "2026-05-14T12:05:47.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+      },
+    })}\n`,
+  );
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const snapshot = store.loadSessionSnapshot("s6");
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.runId, "run-6");
+  assert.equal(snapshot.runCompleted, true);
+  assert.equal(snapshot.runTerminalType, "session.ended");
+  assert.equal(snapshot.runFinalStatus, "success");
 });

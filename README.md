@@ -115,7 +115,7 @@ Requirements:
 - if installation fails, return the failed step, the key error, and the next suggestion
 ```
 
-To install a specific version, change `VERSION` to `v0.6.5` or another published tag.
+To install a specific version, change `VERSION` to `v0.6.7` or another published tag.
 
 If you want to install files first and fill the config later, add:
 

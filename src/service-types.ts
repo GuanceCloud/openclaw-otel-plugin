@@ -199,6 +199,7 @@ export type SessionSnapshot = {
   runId?: string;
   runCompleted?: boolean;
   runTerminalType?: string;
+  runFinalStatus?: string;
   createdAt?: number;
   updatedAt?: number;
   chatType?: string;
@@ -243,7 +244,7 @@ export type SessionSnapshotStore = {
   loadSessionRunState(
     sessionKey: string | undefined,
     runId?: string,
-  ): { runId?: string; runCompleted?: boolean; runTerminalType?: string };
+  ): { runId?: string; runCompleted?: boolean; runTerminalType?: string; runFinalStatus?: string };
   resolveSessionKeyByFile(sessionFile: string): string | undefined;
   setLatestAssistantText(sessionKey: string, text: string): void;
   invalidateSessionFile(sessionFile: string): void;
