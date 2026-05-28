@@ -204,7 +204,8 @@
 | `is_registered_agent`、`register_source`、`register_id`、`register_status` | 注册中心/接入治理信息 |
 | `agent_namespace`、`agent_version` | 更适合平台注册信息或发布系统补齐 |
 | `tool_permission_scope`、`tool_risk_level`、`is_sensitive_tool`、`is_dangerous_tool` | 治理策略字段，不应由插件主观判断 |
-| `tool_category`、`tool_provider`、`tool_namespace` | 适合工具注册表 enrich |
+| `tool_category` | 适合工具注册表 enrich |
+| `tool_provider`、`tool_namespace`、`tool_mcp_name`、`tool_mcp_host` | 当前插件可对 MCP tool 做基础识别，并记录底层真实 MCP tool 名与 host；更细的治理语义仍适合工具注册表 enrich |
 | `permission_scope`、`role_id`、`role_name`、`policy_id`、`policy_name`、`is_privileged_identity` | 权限系统字段，插件拿不到可靠口径 |
 
 ## 5. 不建议当前阶段额外上报

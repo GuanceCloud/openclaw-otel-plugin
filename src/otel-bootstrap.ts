@@ -115,6 +115,21 @@ function collectTracePayloadSummary(
         end_time: hrTimeToUnixMs((item as { endTime?: unknown }).endTime),
         session_id: typeof attrs.session_id === "string" ? String(attrs.session_id) : undefined,
         session_key: typeof attrs.session_key === "string" ? String(attrs.session_key) : undefined,
+        agent_runtime: typeof attrs.agent_runtime === "string"
+          ? String(attrs.agent_runtime)
+          : typeof resourceAttrs.agent_runtime === "string"
+            ? String(resourceAttrs.agent_runtime)
+            : undefined,
+        agent_version: typeof attrs.agent_version === "string"
+          ? String(attrs.agent_version)
+          : typeof resourceAttrs.agent_version === "string"
+            ? String(resourceAttrs.agent_version)
+            : undefined,
+        runtime_environment: typeof attrs.runtime_environment === "string"
+          ? String(attrs.runtime_environment)
+          : typeof resourceAttrs.runtime_environment === "string"
+            ? String(resourceAttrs.runtime_environment)
+            : undefined,
       };
       return summary;
     })
@@ -225,6 +240,10 @@ export async function startOtelBootstrap(
 
   const resource = resourceFromAttributes(compactResourceAttrs({
     [ATTR_SERVICE_NAME]: config.serviceName,
+    agent_runtime:
+      typeof config.resourceAttributes?.agent_runtime === "string"
+        ? config.resourceAttributes.agent_runtime
+        : "openclaw",
     agent_version: runtimeMetadata?.openclawVersion,
     runtime_environment: runtimeMetadata?.runtimeEnvironment,
     agent_id: runtimeMetadata?.agentId,

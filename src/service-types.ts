@@ -38,6 +38,10 @@ export type ActiveToolSpan = {
   argKeys?: string;
   target?: string;
   command?: string;
+  provider?: string;
+  namespace?: string;
+  mcpToolName?: string;
+  mcpHost?: string;
 };
 
 export type RunAggregate = {
@@ -98,6 +102,7 @@ export type ActiveRunSpan = {
   thinkingSpanEmitted?: boolean;
   transcriptAssistantTurnsEmitted?: number;
   transcriptToolCallIds?: Set<string>;
+  observedToolCallIds?: Set<string>;
   pendingFinalOutcome?: string;
   finalAttrsApplied?: boolean;
   usedSkillNames: Set<string>;

@@ -220,6 +220,115 @@ test("tool events from skill file reads create skill spans through the event han
   assert.equal(run.skillInvocationSpans.size, 0);
 });
 
+test("tool lifecycle events no longer export redundant event_tool_* attributes", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  const runSpan = createFakeSpan("run");
+  const run = createRunState({ active: true }, 1000, 1000);
+  run.runId = "run-tool-events";
+  run.runIds = new Set(["run-tool-events"]);
+  run.span = runSpan;
+  run.ctx = { ctx: "run" };
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+      genAiAgentOperationCount: { add() {} },
+      genAiAgentOperationDuration: { record() {} },
+    },
+    getRun() {
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    loadSessionSnapshot() {
+      return undefined;
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "s1",
+    sessionId: "session-1",
+    ts: 2000,
+    stream: "tool",
+    data: {
+      name: "web_search",
+      toolCallId: "call-1",
+      phase: "start",
+      args: { query: "a股 午盘" },
+    },
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "s1",
+    sessionId: "session-1",
+    ts: 2100,
+    stream: "tool",
+    data: {
+      name: "web_search",
+      toolCallId: "call-1",
+      phase: "update",
+      partialResult: { summary: "中间结果" },
+    },
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "s1",
+    sessionId: "session-1",
+    ts: 2200,
+    stream: "tool",
+    data: {
+      name: "web_search",
+      toolCallId: "call-1",
+      phase: "result",
+      result: { status: "ok", items: [] },
+    },
+  });
+
+  const toolSpan = spans.find((span) => span.name === "tool:web_search");
+  assert.ok(toolSpan);
+  assert.equal(toolSpan.options.attributes.agent_runtime, "openclaw");
+  assert.deepEqual(
+    toolSpan.events.map((event) => event.eventName),
+    ["tool.update", "tool.result"],
+  );
+  for (const event of toolSpan.events) {
+    assert.equal(event.attrs, undefined);
+  }
+});
+
 test("exec commands inside a skill directory create the matching skill span", () => {
   const spans = [];
   const tracer = createFakeTracer(spans);
@@ -886,6 +995,107 @@ test("transcript tool calls can be replayed into tool spans", () => {
   assert.equal(toolSpan.endTime.getTime(), 2300);
   assert.equal(toolSpan.options.attributes.run_id, "run-transcript-tool");
   assert.equal(run.usedToolNames.has("exec"), true);
+});
+
+test("transcript replay skips tool calls that were already observed from runtime events", () => {
+  const spans = [];
+  const tracer = createFakeTracer(spans);
+  const trace = {
+    setSpan(ctx, span) {
+      return { ctx, span };
+    },
+  };
+  const rootSpan = createFakeSpan("root");
+  const runSpan = createFakeSpan("run");
+  const run = createRunState({ active: true }, 1000, 1000);
+  run.runId = "run-transcript-tool";
+  run.runIds = new Set(["run-transcript-tool"]);
+  run.span = runSpan;
+  run.ctx = { ctx: "run" };
+
+  const manager = createToolSpanManager({
+    tracer,
+    trace,
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {
+      skillActivationCounter: { add() {} },
+      toolCallCounter: { add() {} },
+      toolErrorCounter: { add() {} },
+      toolDuration: { record() {} },
+    },
+    getRun() {
+      return run;
+    },
+    getRoot() {
+      return { span: rootSpan, ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastRunToolCalls: [
+          {
+            callId: "call-1",
+            name: "exec",
+            args: { command: "cat /tmp/demo.txt" },
+            result: { status: "completed" },
+            meta: { status: "completed" },
+            startedAt: 2000,
+            endedAt: 2300,
+          },
+        ],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "s1",
+    ts: 2000,
+    stream: "tool",
+    data: {
+      name: "exec",
+      toolCallId: "call-1",
+      phase: "start",
+      args: { command: "cat /tmp/demo.txt" },
+    },
+  });
+
+  manager.handleAgentEvent({
+    sessionKey: "s1",
+    ts: 2300,
+    stream: "tool",
+    data: {
+      name: "exec",
+      toolCallId: "call-1",
+      phase: "result",
+      result: { status: "completed" },
+      meta: { status: "completed" },
+    },
+  });
+
+  manager.emitTranscriptToolSpans({ sessionKey: "s1", ts: 2400 });
+
+  const toolSpans = spans.filter((span) => span.name === "tool:exec");
+  assert.equal(toolSpans.length, 1);
+  assert.equal(run.transcriptToolCallIds?.has("call-1"), true);
+  assert.equal(run.observedToolCallIds?.has("call-1"), true);
 });
 
 test("synthetic model span creates a run when transcript metadata exists", () => {

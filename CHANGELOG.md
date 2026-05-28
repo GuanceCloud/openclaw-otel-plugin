@@ -2,6 +2,24 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-05-28
+
+### Trace Field Hygiene
+
+- Fixed `agent_runtime` propagation on trace spans and OTEL resources so request, run, model, tool, and runtime spans consistently emit `agent_runtime=openclaw` alongside `agent_version` and `runtime_environment`.
+- Removed redundant `event_tool_*` event attributes from tool lifecycle events to reduce empty-field pollution in downstream trace UIs while keeping the span-level tool attrs intact.
+- Prevented transcript fallback and runtime/tool replay edge cases from reopening duplicate traces or duplicating tool spans when the same `toolCallId` was already observed.
+
+## 2026-05-27
+
+### Runtime Trace Semantics
+
+- Enabled `output_summary` on `runtime_orchestration` and `channel_egress` spans while keeping `input_preview` and `output_preview` suppressed on runtime lifecycle spans.
+- Renamed the planning-oriented `runtime_orchestration` phase from `pre_model` to `agent_plan` so Agent planning intent is clearer without changing any span names.
+- Added `tool_provider` and `tool_namespace` on tool spans and tool operation metrics so MCP-backed tools can be queried without introducing a separate `mcp:*` span type.
+- Added `tool_mcp_name` and bundle-name MCP inference on `tool:*` spans so wrappers such as `owl__exec_tool` also expose the backing MCP server and concrete MCP tool name.
+- Added `tool_mcp_host` on MCP-backed tool spans and metrics, derived from configured `mcp.servers.<name>.url` and limited to the URL host only.
+
 ## 2026-05-21
 
 ### Trace Semantics

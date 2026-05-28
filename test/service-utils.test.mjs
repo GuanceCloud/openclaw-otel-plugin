@@ -14,6 +14,7 @@ import {
   buildGenAiClientModelMetricAttrs,
   buildGenAiClientSkillMetricAttrs,
   buildGenAiClientToolMetricAttrs,
+  buildToolAttrs,
   buildGenAiRuntimeMessageMetricAttrs,
   buildGenAiRuntimeQueueMetricAttrs,
   buildGenAiRuntimeSessionMetricAttrs,
@@ -149,6 +150,7 @@ test("buildRunScopeAttrs preserves the primary run_id and exposes the run_ids su
   );
 
   assert.deepEqual(attrs, {
+    agent_runtime: "openclaw",
     run_id: "run-1",
     run_ids: "run-1,run-2,run-3,run-4",
   });
@@ -233,6 +235,8 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
     "openclaw.tool.name": "read",
     "openclaw.tool.target": "/tmp/demo.txt",
     "openclaw.tool.command": "cat /tmp/demo.txt",
+    "openclaw.tool.provider": "mcp",
+    "openclaw.tool.namespace": "owl",
     "openclaw.tool.outcome": "completed",
     "openclaw.tool.phase": "result",
     "openclaw.tool.loop.level": "critical",
@@ -274,6 +278,8 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.tool_name, "read");
   assert.equal(attrs.tool_command, "cat /tmp/demo.txt");
   assert.equal(attrs.tool_target, "/tmp/demo.txt");
+  assert.equal(attrs.tool_provider, "mcp");
+  assert.equal(attrs.tool_namespace, "owl");
   assert.equal(attrs.tool_outcome, "completed");
   assert.equal(attrs.tool_phase, "result");
   assert.equal(attrs.tool_loop_level, "critical");
@@ -320,6 +326,16 @@ test("stringAttrs parses multi-agent session keys with agent name in the second 
   assert.equal(attrs["gen_ai.session_key"], undefined);
 });
 
+test("stringAttrs restores agent_runtime when upstream spreads an undefined value", () => {
+  const attrs = stringAttrs({
+    agent_runtime: undefined,
+    agent_version: "2026.5.7",
+  });
+
+  assert.equal(attrs.agent_runtime, "openclaw");
+  assert.equal(attrs.agent_version, "2026.5.7");
+});
+
 test("traceAttrs keeps canonical context fields while dropping redundant legacy context keys", () => {
   const attrs = traceAttrs({
     agent_id: "main",
@@ -335,6 +351,8 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
     tool_name: "read",
     tool_target: "/tmp/workspace/demo.txt",
     tool_command: "cat /tmp/workspace/demo.txt",
+    tool_provider: "mcp",
+    tool_namespace: "owl",
     tool_outcome: "completed",
     tool_phase: "result",
     tool_loop_level: "critical",
@@ -352,7 +370,7 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
     prevState: "queued",
     reason: "session.state",
     queueDepth: 2,
-    "runtime.phase": "pre_model",
+    "runtime.phase": "agent_plan",
     tools: "exec,process",
     tool_count: 2,
     skills: "dashboard",
@@ -398,6 +416,8 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   assert.equal(attrs.tool_name, "read");
   assert.equal(attrs.tool_target, "/tmp/workspace/demo.txt");
   assert.equal(attrs.tool_command, "cat /tmp/workspace/demo.txt");
+  assert.equal(attrs.tool_provider, "mcp");
+  assert.equal(attrs.tool_namespace, "owl");
   assert.equal(attrs.tool_outcome, "completed");
   assert.equal(attrs.tool_phase, "result");
   assert.equal(attrs.tool_loop_level, "critical");
@@ -416,7 +436,7 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   assert.equal(attrs.prev_state, "queued");
   assert.equal(attrs.reason, "session.state");
   assert.equal(attrs.queue_depth, 2);
-  assert.equal(attrs.runtime_phase, "pre_model");
+  assert.equal(attrs.runtime_phase, "agent_plan");
   assert.equal(attrs.tools, "exec,process");
   assert.equal(attrs.tool_count, 2);
   assert.equal(attrs.skills, "dashboard");
@@ -449,6 +469,8 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   assert.equal(attrs["tool.name"], undefined);
   assert.equal(attrs["tool.target"], undefined);
   assert.equal(attrs["tool.command"], undefined);
+  assert.equal(attrs["tool.provider"], undefined);
+  assert.equal(attrs["tool.namespace"], undefined);
   assert.equal(attrs["tool.phase"], undefined);
   assert.equal(attrs["tool.outcome"], undefined);
   assert.equal(attrs.session_create_time, undefined);
@@ -476,6 +498,44 @@ test("stringAttrs keeps zero-valued token aliases on summary spans", () => {
   assert.equal(attrs.usage_total_tokens, 0);
   assert.equal(attrs.usage_cache_read_input_tokens, 0);
   assert.equal(attrs.usage_cache_write_input_tokens, 0);
+});
+
+test("buildToolAttrs infers mcp provider and namespace from explicit metadata", () => {
+  const attrs = buildToolAttrs("apm.list", "call-1", {
+    args: { query: "slow requests" },
+    meta: {
+      mcp: {
+        serverName: "owl",
+      },
+    },
+  });
+
+  assert.equal(attrs["openclaw.tool.provider"], "mcp");
+  assert.equal(attrs["openclaw.tool.namespace"], "owl");
+});
+
+test("buildToolAttrs infers bundle mcp identity and underlying mcp tool name", () => {
+  const attrs = buildToolAttrs("owl__exec_tool", "call-1", {
+    args: {
+      tool_name: "owl.data.simple_query",
+      parameters: {
+        namespace: "T",
+      },
+    },
+  });
+
+  assert.equal(attrs["openclaw.tool.provider"], "mcp");
+  assert.equal(attrs["openclaw.tool.namespace"], "owl");
+  assert.equal(attrs["openclaw.tool.mcp_name"], "owl.data.simple_query");
+  assert.equal(attrs["openclaw.tool.mcp_host"], "owl-mcp.guance.com");
+  assert.equal(attrs["openclaw.tool.target"], "owl.data.simple_query");
+});
+
+test("buildToolAttrs infers mcp provider and namespace from dotted tool names", () => {
+  const attrs = buildToolAttrs("owl.apm.list", "call-1");
+
+  assert.equal(attrs["openclaw.tool.provider"], "mcp");
+  assert.equal(attrs["openclaw.tool.namespace"], "owl");
 });
 
 test("extractToolResultStatus only uses explicit status fields", () => {

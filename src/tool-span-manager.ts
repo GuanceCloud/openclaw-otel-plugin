@@ -155,6 +155,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     const run = getRun(evt, false);
     const root = getRoot(evt, false);
     return {
+      agent_runtime: "openclaw",
       ...buildRunScopeAttrs(
         evt.runId ?? run?.runId ?? root?.runId,
         evt.runId,
@@ -528,6 +529,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         "openclaw.tool.arg_keys": merged.argKeys,
         "openclaw.tool.target": merged.target,
         "openclaw.tool.command": merged.command,
+        "openclaw.tool.provider": merged.provider,
+        "openclaw.tool.namespace": merged.namespace,
+        "openclaw.tool.mcp_name": merged.mcpToolName,
+        "openclaw.tool.mcp_host": merged.mcpHost,
         ...attrs,
       }));
       syncToolSummaryAttrs(evt, run);
@@ -542,6 +547,18 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         : undefined,
       command: typeof attrs?.["openclaw.tool.command"] === "string"
         ? attrs["openclaw.tool.command"]
+        : undefined,
+      provider: typeof attrs?.["openclaw.tool.provider"] === "string"
+        ? attrs["openclaw.tool.provider"]
+        : undefined,
+      namespace: typeof attrs?.["openclaw.tool.namespace"] === "string"
+        ? attrs["openclaw.tool.namespace"]
+        : undefined,
+      mcpToolName: typeof attrs?.["openclaw.tool.mcp_name"] === "string"
+        ? attrs["openclaw.tool.mcp_name"]
+        : undefined,
+      mcpHost: typeof attrs?.["openclaw.tool.mcp_host"] === "string"
+        ? attrs["openclaw.tool.mcp_host"]
         : undefined,
     };
     const invocation = skillName
@@ -579,6 +596,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       argKeys: merged.argKeys,
       target: merged.target,
       command: merged.command,
+      provider: merged.provider,
+      namespace: merged.namespace,
+      mcpToolName: merged.mcpToolName,
+      mcpHost: merged.mcpHost,
     };
     run.toolSpans.set(normalizedToolCallId, toolState);
     syncToolSummaryAttrs(evt, run);
@@ -600,6 +621,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     tool.argKeys = merged.argKeys;
     tool.target = merged.target;
     tool.command = merged.command;
+    tool.provider = merged.provider;
+    tool.namespace = merged.namespace;
+    tool.mcpToolName = merged.mcpToolName;
+    tool.mcpHost = merged.mcpHost;
     if (merged.resultStatus) {
       const run = getRun(evt, false);
       if (run) {
@@ -617,18 +642,15 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         "openclaw.tool.arg_keys": tool.argKeys,
         "openclaw.tool.target": tool.target,
         "openclaw.tool.command": tool.command,
+        "openclaw.tool.provider": tool.provider,
+        "openclaw.tool.namespace": tool.namespace,
+        "openclaw.tool.mcp_name": tool.mcpToolName,
+        "openclaw.tool.mcp_host": tool.mcpHost,
       }));
-      addEvent(tool.span, "tool.update", {
-        event_tool_name: tool.name,
-        event_tool_call_id: tool.toolCallId,
-        event_tool_partial_result_preview: preview,
-      });
+      addEvent(tool.span, "tool.update");
       return;
     }
-    addEvent(tool.span, "tool.update", {
-      event_tool_name: tool.name,
-      event_tool_call_id: tool.toolCallId,
-    });
+    addEvent(tool.span, "tool.update");
   };
 
   const findActiveToolSpanByName = (evt: SessionEvent, toolName: string) => {
@@ -668,6 +690,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     tool.argKeys = merged.argKeys;
     tool.target = merged.target;
     tool.command = merged.command;
+    tool.provider = merged.provider;
+    tool.namespace = merged.namespace;
+    tool.mcpToolName = merged.mcpToolName;
+    tool.mcpHost = merged.mcpHost;
     if (merged.target) run.usedToolTargets.add(merged.target);
     if (merged.command) run.usedToolCommands.add(merged.command);
     if (merged.resultStatus) run.usedToolResultStatuses.add(merged.resultStatus);
@@ -684,14 +710,12 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       "openclaw.tool.arg_keys": tool.argKeys,
       "openclaw.tool.target": tool.target,
       "openclaw.tool.command": tool.command,
+      "openclaw.tool.provider": tool.provider,
+      "openclaw.tool.namespace": tool.namespace,
+      "openclaw.tool.mcp_name": tool.mcpToolName,
+      "openclaw.tool.mcp_host": tool.mcpHost,
     }));
-    addEvent(tool.span, "tool.result", traceAttrs({
-      event_tool_name: tool.name,
-      event_tool_call_id: tool.toolCallId,
-      event_tool_outcome: isError ? "error" : "completed",
-      event_tool_result_preview: resultPreview,
-      event_tool_result_status: extractToolResultStatus(payload?.result),
-    }));
+    addEvent(tool.span, "tool.result");
     const snapshot = loadSessionSnapshot(evt.sessionKey);
     const genAiToolMetricAttrs = buildGenAiClientToolMetricAttrs(
       tool,
@@ -736,16 +760,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       "openclaw.tool.loop.message": evt.message ? redactSensitiveText(evt.message) : undefined,
     });
     tool.span.setAttributes(loopAttrs);
-    addEvent(tool.span, "tool.loop", {
-      event_tool_name: evt.toolName,
-      event_tool_call_id: tool.toolCallId,
-      event_tool_loop_level: evt.level,
-      event_tool_loop_action: evt.action,
-      event_tool_loop_detector: evt.detector,
-      event_tool_loop_count: evt.count,
-      event_tool_loop_paired_tool: evt.pairedToolName,
-      event_tool_loop_message: evt.message ? redactSensitiveText(evt.message) : undefined,
-    });
+    addEvent(tool.span, "tool.loop");
     if (evt.level === "critical") {
       tool.hasError = true;
       setError(tool.span, SpanStatusCode.ERROR, evt.message ?? "tool loop detected");
@@ -834,7 +849,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           evt,
           run.orchestrationCursorTs,
           turn.startedAt,
-          "pre_model",
+          "agent_plan",
           {
             "openclaw.provider": turn.provider ?? snapshot?.lastProvider,
             "openclaw.model": turn.model ?? snapshot?.lastModel,
@@ -982,7 +997,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       evt,
       run.mainStartTs,
       startTs,
-      "pre_model",
+      "agent_plan",
       {
         "openclaw.provider": snapshot.lastProvider,
         "openclaw.model": snapshot.lastModel,
@@ -1076,8 +1091,14 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     }
     const emittedToolCallIds = run.transcriptToolCallIds ?? new Set<string>();
     run.transcriptToolCallIds = emittedToolCallIds;
+    const observedToolCallIds = run.observedToolCallIds ?? new Set<string>();
+    run.observedToolCallIds = observedToolCallIds;
     for (const toolCall of snapshot?.lastRunToolCalls ?? []) {
       if (emittedToolCallIds.has(toolCall.callId)) {
+        continue;
+      }
+      if (observedToolCallIds.has(toolCall.callId)) {
+        emittedToolCallIds.add(toolCall.callId);
         continue;
       }
       handleAgentEvent({
@@ -1086,6 +1107,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         runId: evt.runId,
         ts: toolCall.startedAt ?? evt.ts ?? Date.now(),
         stream: "tool",
+        source: "transcript",
         data: {
           name: toolCall.name,
           toolCallId: toolCall.callId,
@@ -1102,6 +1124,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         runId: evt.runId,
         ts: toolCall.endedAt ?? toolCall.startedAt ?? evt.ts ?? Date.now(),
         stream: "tool",
+        source: "transcript",
         data: {
           name: toolCall.name,
           toolCallId: toolCall.callId,
@@ -1120,6 +1143,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     const sessionId = typeof evt?.sessionId === "string" ? evt.sessionId : undefined;
     const runId = typeof evt?.runId === "string" ? evt.runId : undefined;
     const channel = typeof evt?.channel === "string" ? evt.channel : undefined;
+    const source = evt?.source === "transcript" ? "transcript" : "runtime";
     if (!sessionKey) {
       return;
     }
@@ -1145,6 +1169,12 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (!run || !toolName) {
       return;
     }
+    const toolCallId = typeof evt.data.toolCallId === "string" ? evt.data.toolCallId : undefined;
+    const observedToolCallIds = run.observedToolCallIds ?? new Set<string>();
+    run.observedToolCallIds = observedToolCallIds;
+    if (toolCallId && source !== "transcript") {
+      observedToolCallIds.add(toolCallId);
+    }
     run.usedToolNames.add(toolName);
     const summary = collectToolSummaryValues(toolName, {
       args: evt.data.args,
@@ -1152,7 +1182,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       result: evt.data.result,
       partialResult: evt.data.partialResult,
     });
-    const toolCallId = typeof evt.data.toolCallId === "string" ? evt.data.toolCallId : undefined;
     const skillName = resolveSkillName(
       { sessionKey, sessionId, ts: evt.ts ?? Date.now() },
       toolName,
@@ -1229,6 +1258,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         "openclaw.tool.arg_keys": tool.argKeys,
         "openclaw.tool.target": tool.target,
         "openclaw.tool.command": tool.command,
+        "openclaw.tool.provider": tool.provider,
+        "openclaw.tool.namespace": tool.namespace,
       }));
       if (tool.hasError) {
         tool.span.setStatus({ code: SpanStatusCode.ERROR, message: "tool error" });

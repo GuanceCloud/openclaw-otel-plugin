@@ -248,11 +248,22 @@
 | --- | --- |
 | `tool_call_id` | tool call 标识 |
 | `tool_name` | tool 名称 |
+| `tool_provider` | tool 来源类型，例如 `mcp` |
+| `tool_namespace` | tool 命名空间；对 MCP 调用通常表示 server 名 |
+| `tool_mcp_name` | 底层真实 MCP tool 名；例如 `owl.data.simple_query` |
+| `tool_mcp_host` | MCP server host；例如 `owl-mcp.guance.com` |
 | `tool_target` | tool 操作目标 |
 | `tool_command` | tool 执行命令 |
 | `tool_outcome` | tool 执行结果 |
 | `tool_phase` | tool 当前阶段 |
 | `tool_loop_level` | tool loop 检测等级 |
+
+补充说明：
+
+- `runtime_orchestration` / `channel_egress` 当前允许携带 `output_summary`
+- `runtime` 生命周期 span 仍默认不携带 `input_preview` / `output_preview`
+- 与 Agent 计划最相关的 runtime 编排窗口当前统一落在 `runtime_orchestration`，并使用 `runtime_phase=agent_plan` 表达，而不是新增独立 `agent_plan` span
+- MCP 调用当前不新增独立 span 类型；仍落在 `tool:*`，通过 `tool_provider=mcp` 与 `tool_namespace=<server>` 区分
 
 ## Skill 相关字段
 

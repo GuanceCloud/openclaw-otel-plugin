@@ -348,12 +348,43 @@ export function createOtelPluginService(
         createIfMissing = false,
       ) => {
         const sessionKey = resolveSessionKey(evt);
+        const resolvedRunId = resolveRunId(evt);
         if (!sessionKey) {
           return undefined;
         }
+        const findMatchingRequestKey = () => {
+          if (!resolvedRunId) {
+            return undefined;
+          }
+          for (const [requestKey, run] of activeRuns.entries()) {
+            if (run.sessionIdentity !== sessionKey) {
+              continue;
+            }
+            if (run.runId === resolvedRunId || run.runIds?.has(resolvedRunId)) {
+              return requestKey;
+            }
+          }
+          for (const [requestKey, root] of activeRoots.entries()) {
+            if (root.sessionIdentity !== sessionKey) {
+              continue;
+            }
+            if (root.runId === resolvedRunId || root.runIds?.has(resolvedRunId)) {
+              return requestKey;
+            }
+          }
+          return undefined;
+        };
         const activeRequestKey = activeRequestKeyBySession.get(sessionKey);
         if (activeRequestKey) {
+          const matchingRequestKey = findMatchingRequestKey();
+          if (matchingRequestKey) {
+            return matchingRequestKey;
+          }
           return activeRequestKey;
+        }
+        const matchingRequestKey = findMatchingRequestKey();
+        if (matchingRequestKey) {
+          return matchingRequestKey;
         }
         if (!createIfMissing) {
           return undefined;
@@ -438,7 +469,10 @@ export function createOtelPluginService(
             attributes: traceAttrs(enrichWithTranscript(sessionKey, {
               __suppress_session_input_preview: true,
               __suppress_session_output_preview: true,
-              __suppress_session_output_summary: true,
+              __suppress_session_output_summary:
+                phase === "channel_ingress"
+                || phase === "dispatch_queue"
+                || phase === "session_processing",
               ...buildRunScopeAttrs(
                 run?.runId ?? root?.runId ?? resolveRunId(evt),
                 run?.runIds,

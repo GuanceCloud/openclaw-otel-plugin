@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { stripAnsiEscapeCodes } from "./trace-runtime.js";
 import type {
@@ -95,6 +96,7 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
     thinkingSpanEmitted: false,
     transcriptAssistantTurnsEmitted: 0,
     transcriptToolCallIds: new Set<string>(),
+    observedToolCallIds: new Set<string>(),
     finalAttrsApplied: false,
     aggregate: createRunAggregate(),
     usedSkillNames: new Set<string>(),
@@ -372,6 +374,7 @@ export function buildRunScopeAttrs(
   primaryRunId?: string,
   ...runIdSources: Array<string | Iterable<string> | undefined>
 ): {
+  agent_runtime: string;
   run_id?: string;
   run_ids?: string;
 } {
@@ -400,6 +403,7 @@ export function buildRunScopeAttrs(
   }
   const resolvedPrimaryRunId = orderedRunIds[0];
   return {
+    agent_runtime: "openclaw",
     run_id: resolvedPrimaryRunId,
     run_ids: orderedRunIds.length > 0 ? orderedRunIds.join(",") : undefined,
   };
@@ -620,6 +624,10 @@ function withCanonicalAliases(
   promoteAlias(next, "reason", "openclaw.reason", "reason");
   promoteAlias(next, "queue_depth", "openclaw.queueDepth", "queueDepth", "queue_depth");
   promoteAlias(next, "runtime_phase", "openclaw.runtime.phase", "runtime.phase");
+  promoteAlias(next, "tool_provider", "openclaw.tool.provider", "tool.provider");
+  promoteAlias(next, "tool_namespace", "openclaw.tool.namespace", "tool.namespace");
+  promoteAlias(next, "tool_mcp_name", "openclaw.tool.mcp_name", "tool.mcp_name");
+  promoteAlias(next, "tool_mcp_host", "openclaw.tool.mcp_host", "tool.mcp_host");
   promoteAlias(next, "skill_count", "skill.count", "skill_count");
   promoteAlias(next, "session_create_at", "session_create_time", "gen_ai.session_create_time", "openclaw.session.createdAt");
   promoteAlias(next, "session_created_at", "session.createdAt", "openclaw.session.createdAt");
@@ -659,10 +667,10 @@ function stripOpenClawNamespace(
 export function stringAttrs(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean> {
-  const withGlobalRuntime = {
-    agent_runtime: "openclaw",
-    ...attrs,
-  };
+  const withGlobalRuntime = { ...attrs };
+  if (withGlobalRuntime.agent_runtime === undefined || withGlobalRuntime.agent_runtime === "") {
+    withGlobalRuntime.agent_runtime = "openclaw";
+  }
   return Object.fromEntries(
     Object.entries(stripOpenClawNamespace(withCanonicalAliases(withGlobalRuntime)))
       .filter(([key, value]) => key !== "trace_id" && value !== undefined && value !== "")
@@ -714,6 +722,10 @@ const LEGACY_TRACE_CONTEXT_KEYS = new Set([
   "gen_ai.tool_command",
   "gen_ai.tool_outcome",
   "gen_ai.tool_phase",
+  "gen_ai.tool_provider",
+  "gen_ai.tool_namespace",
+  "gen_ai.tool_mcp_name",
+  "gen_ai.tool_mcp_host",
   "gen_ai.tool_loop_level",
   "gen_ai.skill_call_id",
   "gen_ai.skill_name",
@@ -878,6 +890,201 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function readNestedString(record: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!record) {
+    return undefined;
+  }
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function readNestedRecord(
+  record: Record<string, unknown> | undefined,
+  keys: string[],
+): Record<string, unknown> | undefined {
+  if (!record) {
+    return undefined;
+  }
+  for (const key of keys) {
+    const value = record[key];
+    if (isRecord(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+let cachedMcpServerHosts: Map<string, string> | undefined;
+
+function resolveOpenClawConfigPath(): string {
+  const explicit = process.env.OPENCLAW_CONFIG_PATH?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const stateDir = process.env.OPENCLAW_STATE_DIR?.trim();
+  if (stateDir) {
+    return path.join(stateDir, "openclaw.json");
+  }
+  return path.join(os.homedir(), ".openclaw", "openclaw.json");
+}
+
+function loadConfiguredMcpServerHosts(): Map<string, string> {
+  if (cachedMcpServerHosts) {
+    return cachedMcpServerHosts;
+  }
+  const hosts = new Map<string, string>();
+  try {
+    const configPath = resolveOpenClawConfigPath();
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    const mcp = isRecord(parsed.mcp) ? parsed.mcp : undefined;
+    const servers = isRecord(mcp?.servers) ? mcp?.servers : undefined;
+    for (const [serverName, rawServer] of Object.entries(servers ?? {})) {
+      if (!isRecord(rawServer) || typeof rawServer.url !== "string" || !rawServer.url.trim()) {
+        continue;
+      }
+      try {
+        const url = new URL(rawServer.url);
+        if (url.host) {
+          hosts.set(serverName, url.host);
+        }
+      } catch {
+        // Ignore invalid configured MCP URLs.
+      }
+    }
+  } catch {
+    // Ignore missing or unreadable config; MCP host is optional enrichment.
+  }
+  cachedMcpServerHosts = hosts;
+  return hosts;
+}
+
+function inferMcpToolIdentity(
+  toolName: string,
+  args: unknown,
+  meta: unknown,
+  result: unknown,
+): {
+  provider?: string;
+  namespace?: string;
+} {
+  const argsRecord = isRecord(args) ? args : undefined;
+  const metaRecord = isRecord(meta) ? meta : undefined;
+  const resultRecord = isRecord(result) ? result : undefined;
+
+  const explicitNamespace =
+    readNestedString(metaRecord, ["tool_namespace", "toolNamespace", "server", "serverName", "namespace"])
+    ?? readNestedString(argsRecord, ["tool_namespace", "toolNamespace", "server", "serverName", "namespace"])
+    ?? readNestedString(resultRecord, ["tool_namespace", "toolNamespace", "server", "serverName", "namespace"])
+    ?? readNestedString(readNestedRecord(metaRecord, ["mcp"]), ["server", "serverName", "namespace"])
+    ?? readNestedString(readNestedRecord(argsRecord, ["mcp"]), ["server", "serverName", "namespace"])
+    ?? readNestedString(readNestedRecord(resultRecord, ["mcp"]), ["server", "serverName", "namespace"]);
+  const explicitProvider =
+    readNestedString(metaRecord, ["tool_provider", "toolProvider", "provider"])
+    ?? readNestedString(argsRecord, ["tool_provider", "toolProvider", "provider"])
+    ?? readNestedString(resultRecord, ["tool_provider", "toolProvider", "provider"])
+    ?? readNestedString(readNestedRecord(metaRecord, ["mcp"]), ["provider"])
+    ?? readNestedString(readNestedRecord(argsRecord, ["mcp"]), ["provider"])
+    ?? readNestedString(readNestedRecord(resultRecord, ["mcp"]), ["provider"]);
+
+  if ((explicitProvider && explicitProvider.toLowerCase() === "mcp") || explicitNamespace) {
+    return {
+      provider: "mcp",
+      namespace: explicitNamespace,
+    };
+  }
+
+  const normalizedToolName = toolName.trim();
+  const bundleMcpMatch = normalizedToolName.match(/^([a-z0-9][a-z0-9_-]{0,63})__([a-z0-9][\w.-]*)$/i);
+  if (bundleMcpMatch) {
+    return {
+      provider: "mcp",
+      namespace: bundleMcpMatch[1],
+    };
+  }
+  const mcpDoubleUnderscoreMatch = normalizedToolName.match(/^mcp__([^_]+)__(.+)$/i);
+  if (mcpDoubleUnderscoreMatch) {
+    return {
+      provider: "mcp",
+      namespace: mcpDoubleUnderscoreMatch[1],
+    };
+  }
+  const mcpDottedMatch = normalizedToolName.match(/^mcp\.([^.]+)\.(.+)$/i);
+  if (mcpDottedMatch) {
+    return {
+      provider: "mcp",
+      namespace: mcpDottedMatch[1],
+    };
+  }
+  const dottedMatch = normalizedToolName.match(/^([a-z0-9][a-z0-9_-]*)\.[a-z0-9][\w.-]*$/i);
+  if (dottedMatch) {
+    return {
+      provider: "mcp",
+      namespace: dottedMatch[1],
+    };
+  }
+
+  return {};
+}
+
+function extractMcpToolName(
+  toolName: string,
+  args: unknown,
+  meta: unknown,
+  result: unknown,
+): string | undefined {
+  const argsRecord = isRecord(args) ? args : undefined;
+  const metaRecord = isRecord(meta) ? meta : undefined;
+  const resultRecord = isRecord(result) ? result : undefined;
+  const explicitToolName =
+    readNestedString(metaRecord, ["mcp_tool_name", "mcpToolName"])
+    ?? readNestedString(argsRecord, ["mcp_tool_name", "mcpToolName", "tool_name", "toolName"])
+    ?? readNestedString(resultRecord, ["mcp_tool_name", "mcpToolName", "tool_name", "toolName"])
+    ?? readNestedString(readNestedRecord(metaRecord, ["mcp"]), ["tool", "toolName"])
+    ?? readNestedString(readNestedRecord(argsRecord, ["mcp"]), ["tool", "toolName"])
+    ?? readNestedString(readNestedRecord(resultRecord, ["mcp"]), ["tool", "toolName"]);
+  if (explicitToolName) {
+    return explicitToolName;
+  }
+
+  const normalizedToolName = toolName.trim();
+  const bundleMcpMatch = normalizedToolName.match(/^([a-z0-9][a-z0-9_-]{0,63})__([a-z0-9][\w.-]*)$/i);
+  if (bundleMcpMatch) {
+    return bundleMcpMatch[2];
+  }
+  return undefined;
+}
+
+function extractMcpToolHost(
+  toolName: string,
+  args: unknown,
+  meta: unknown,
+  result: unknown,
+): string | undefined {
+  const argsRecord = isRecord(args) ? args : undefined;
+  const metaRecord = isRecord(meta) ? meta : undefined;
+  const resultRecord = isRecord(result) ? result : undefined;
+  const explicitHost =
+    readNestedString(metaRecord, ["tool_mcp_host", "mcp_host", "host"])
+    ?? readNestedString(argsRecord, ["tool_mcp_host", "mcp_host", "host"])
+    ?? readNestedString(resultRecord, ["tool_mcp_host", "mcp_host", "host"])
+    ?? readNestedString(readNestedRecord(metaRecord, ["mcp"]), ["host"])
+    ?? readNestedString(readNestedRecord(argsRecord, ["mcp"]), ["host"])
+    ?? readNestedString(readNestedRecord(resultRecord, ["mcp"]), ["host"]);
+  if (explicitHost) {
+    return explicitHost;
+  }
+  const identity = inferMcpToolIdentity(toolName, args, meta, result);
+  if (!identity.namespace) {
+    return undefined;
+  }
+  return loadConfiguredMcpServerHosts().get(identity.namespace);
+}
+
 export function summarizeToolArgKeys(args: unknown): string | undefined {
   if (!isRecord(args)) {
     return undefined;
@@ -932,6 +1139,12 @@ export function extractToolTarget(toolName: string, args: unknown, meta: unknown
   const normalizedToolName = toolName.trim().toLowerCase();
   const argsRecord = isRecord(args) ? args : undefined;
   const metaPreview = clipValuePreview(meta);
+  const mcpIdentity = inferMcpToolIdentity(toolName, args, meta, undefined);
+  const mcpToolName = extractMcpToolName(toolName, args, meta, undefined);
+
+  if (mcpIdentity.provider === "mcp" && mcpToolName) {
+    return mcpToolName;
+  }
 
   if (normalizedToolName === "exec" && typeof argsRecord?.command === "string") {
     return extractExecTarget(argsRecord.command);
@@ -993,6 +1206,24 @@ export function buildToolAttrs(
     skillName?: string;
   },
 ): Record<string, string | number | boolean | undefined> {
+  const toolIdentity = inferMcpToolIdentity(
+    toolName,
+    options?.args,
+    options?.meta,
+    options?.result ?? options?.partialResult,
+  );
+  const mcpToolName = extractMcpToolName(
+    toolName,
+    options?.args,
+    options?.meta,
+    options?.result ?? options?.partialResult,
+  );
+  const mcpToolHost = extractMcpToolHost(
+    toolName,
+    options?.args,
+    options?.meta,
+    options?.result ?? options?.partialResult,
+  );
   return {
     "span.kind": "tool",
     "openclaw.tool.name": toolName,
@@ -1003,6 +1234,10 @@ export function buildToolAttrs(
     "openclaw.tool.arg_keys": summarizeToolArgKeys(options?.args),
     "openclaw.tool.target": extractToolTarget(toolName, options?.args, options?.meta),
     "openclaw.tool.command": extractToolCommand(toolName, options?.args),
+    "openclaw.tool.provider": toolIdentity.provider,
+    "openclaw.tool.namespace": toolIdentity.namespace,
+    "openclaw.tool.mcp_name": mcpToolName,
+    "openclaw.tool.mcp_host": mcpToolHost,
     "openclaw.tool.args.preview": clipValuePreview(options?.args),
     "openclaw.tool.meta.preview": clipValuePreview(options?.meta),
     "openclaw.tool.result.preview": clipValuePreview(options?.result),
@@ -1024,6 +1259,19 @@ export function collectToolSummaryValues(
     target: extractToolTarget(toolName, options?.args, options?.meta),
     command: extractToolCommand(toolName, options?.args),
     resultStatus: extractToolResultStatus(options?.result ?? options?.partialResult),
+    mcpToolName: extractMcpToolName(
+      toolName,
+      options?.args,
+      options?.meta,
+      options?.result ?? options?.partialResult,
+    ),
+    mcpToolHost: extractMcpToolHost(
+      toolName,
+      options?.args,
+      options?.meta,
+      options?.result ?? options?.partialResult,
+    ),
+    ...inferMcpToolIdentity(toolName, options?.args, options?.meta, options?.result ?? options?.partialResult),
   };
 }
 
@@ -1080,20 +1328,24 @@ export function buildGenAiAgentRequestMetricAttrs(
 }
 
 export function buildToolMetricAttrs(
-  tool: Pick<ActiveToolSpan, "name" | "skillName">,
+  tool: Pick<ActiveToolSpan, "name" | "skillName" | "provider" | "namespace" | "mcpToolName" | "mcpHost">,
   outcome?: string,
   resultStatus?: string,
 ) {
   return stringAttrs({
     "openclaw.tool_name": tool.name,
     "openclaw.skill_name": tool.skillName,
+    "openclaw.tool.provider": tool.provider,
+    "openclaw.tool.namespace": tool.namespace,
+    "openclaw.tool.mcp_name": tool.mcpToolName,
+    "openclaw.tool.mcp_host": tool.mcpHost,
     "openclaw.tool_outcome": outcome,
     "openclaw.tool_result_status": resultStatus,
   });
 }
 
 export function buildGenAiClientToolMetricAttrs(
-  tool: Pick<ActiveToolSpan, "name" | "skillName">,
+  tool: Pick<ActiveToolSpan, "name" | "skillName" | "provider" | "namespace" | "mcpToolName" | "mcpHost">,
   outcome?: string,
   resultStatus?: string,
   sessionId?: string,
@@ -1104,6 +1356,10 @@ export function buildGenAiClientToolMetricAttrs(
     session_id: sessionId,
     tool_name: tool.name,
     skill_name: tool.skillName,
+    tool_provider: tool.provider,
+    tool_namespace: tool.namespace,
+    tool_mcp_name: tool.mcpToolName,
+    tool_mcp_host: tool.mcpHost,
     model_name: modelName,
     outcome,
     tool_result_status: resultStatus,
@@ -1368,7 +1624,7 @@ export function buildGenAiRuntimeSessionMetricAttrs(
 }
 
 export function mergeToolIdentity(
-  tool: Pick<ActiveToolSpan, "name" | "argKeys" | "target" | "command">,
+  tool: Pick<ActiveToolSpan, "name" | "argKeys" | "target" | "command" | "provider" | "namespace" | "mcpToolName" | "mcpHost">,
   options?: { args?: unknown; meta?: unknown; result?: unknown; partialResult?: unknown },
 ) {
   const summary = collectToolSummaryValues(tool.name, options);
@@ -1376,6 +1632,10 @@ export function mergeToolIdentity(
     argKeys: tool.argKeys ?? summarizeToolArgKeys(options?.args),
     target: tool.target ?? summary.target,
     command: tool.command ?? summary.command,
+    provider: tool.provider ?? summary.provider,
+    namespace: tool.namespace ?? summary.namespace,
+    mcpToolName: tool.mcpToolName ?? summary.mcpToolName,
+    mcpHost: tool.mcpHost ?? summary.mcpToolHost,
     resultStatus: summary.resultStatus,
   };
 }

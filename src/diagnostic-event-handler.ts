@@ -595,7 +595,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             evt,
             run.orchestrationCursorTs,
             modelStartTs,
-            "pre_model",
+            "agent_plan",
             {
               "openclaw.provider": evt.provider,
               "openclaw.model": evt.model,
@@ -708,7 +708,13 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const replayAlreadyFinalized = hasReplayWatermark(evt.sessionKey, snapshot);
         const replayRunAlreadyFinalized = hasFinalizedReplayRunId(evt.sessionKey, snapshot?.runId);
         const replaySnapshotIsFresh = snapshotIsFreshForQueuedRequest(snapshot, activeRun);
-        if (((!replayAlreadyFinalized && !replayRunAlreadyFinalized) || hasActiveTrace) && replaySnapshotIsFresh) {
+        const replaySnapshotCompleted = snapshot?.runCompleted === true;
+        const shouldAttemptReplay = (
+          ((!replayAlreadyFinalized && !replayRunAlreadyFinalized) || hasActiveTrace)
+          && replaySnapshotIsFresh
+          && (hasActiveTrace || replaySnapshotCompleted)
+        );
+        if (shouldAttemptReplay) {
           const emittedTranscriptModelSpans = emitTranscriptModelSpans(evt);
           if (emittedTranscriptModelSpans) {
             emitTranscriptToolSpans(evt);

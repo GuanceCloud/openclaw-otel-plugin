@@ -514,6 +514,107 @@ test("message.processed skips stale transcript replay from an older request", ()
   assert.equal(run.pendingFinalOutcome, "completed");
 });
 
+test("message.processed does not synthesize replay traces for incomplete snapshots without an active trace", () => {
+  let transcriptCalls = 0;
+  let toolReplayCalls = 0;
+  let syntheticCalls = 0;
+  let lifecycleCalls = 0;
+  const snapshot = {
+    sessionFile: "session.jsonl",
+    mtimeMs: 1,
+    runId: "run-live",
+    runCompleted: false,
+    lastUserTs: 2_000,
+    lastAssistantTs: 2_500,
+    lastAssistantText: "partial answer",
+    lastRunAssistantTurns: [],
+    lastRunToolCalls: [],
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageProcessedCounter: { add() {} },
+      diagnosticsMessageDurationMs: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return undefined;
+    },
+    getRun() {
+      return undefined;
+    },
+    ensureUserSpan() {
+      return undefined;
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return snapshot;
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      lifecycleCalls += 1;
+      return { ctx: { ctx: "run" }, modelCtx: { ctx: "model" } };
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      transcriptCalls += 1;
+      return false;
+    },
+    emitSyntheticModelSpan() {
+      syntheticCalls += 1;
+    },
+    emitTranscriptToolSpans() {
+      toolReplayCalls += 1;
+    },
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+    hasFinalizedReplayRunId() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "message.processed",
+    sessionKey: "s1",
+    ts: 3_000,
+    channel: "chat",
+    outcome: "completed",
+  });
+
+  assert.equal(transcriptCalls, 0);
+  assert.equal(toolReplayCalls, 0);
+  assert.equal(syntheticCalls, 0);
+  assert.equal(lifecycleCalls, 1);
+});
+
 test("message.processed marks finalized replay run_id for completed sessions", () => {
   const finalizedRunIds = [];
   const snapshot = {
