@@ -90,7 +90,6 @@ async function main() {
   await fs.rm(latestArchivePath, { force: true });
   await fs.rm(`${latestArchivePath}.sha256`, { force: true });
   await fs.rm(path.join(outputDir, "install.sh"), { force: true });
-  await fs.rm(path.join(outputDir, "SKILL.md"), { force: true });
   await fs.mkdir(stagingDir, { recursive: true });
 
   const releaseFiles = [
@@ -121,14 +120,12 @@ async function main() {
   await fs.copyFile(archivePath, latestArchivePath);
   const latestChecksumPath = await writeSha256(latestArchivePath);
   const installScriptPath = await copyReleaseSidecar("scripts/install.sh", "install.sh", 0o755);
-  const skillPath = await copyReleaseSidecar("SKILL.md", "SKILL.md", 0o644);
 
   log(`artifact: ${path.relative(repoRoot, archivePath)}`);
   log(`checksum: ${path.relative(repoRoot, checksumPath)}`);
   log(`latest artifact: ${path.relative(repoRoot, latestArchivePath)}`);
   log(`latest checksum: ${path.relative(repoRoot, latestChecksumPath)}`);
   log(`installer: ${path.relative(repoRoot, installScriptPath)}`);
-  log(`skill: ${path.relative(repoRoot, skillPath)}`);
 }
 
 main().catch((error) => {
