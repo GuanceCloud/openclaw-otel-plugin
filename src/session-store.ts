@@ -69,6 +69,23 @@ function parseMessageTimestamp(value: unknown): number | undefined {
   return undefined;
 }
 
+function resolveMessageRunId(message: Record<string, unknown>): string | undefined {
+  const directRunId = typeof message.runId === "string" ? message.runId.trim() : "";
+  if (directRunId) {
+    return directRunId;
+  }
+  const idempotencyKey = typeof message.idempotencyKey === "string" ? message.idempotencyKey.trim() : "";
+  if (!idempotencyKey) {
+    return undefined;
+  }
+  const suffix = ":user";
+  if (idempotencyKey.endsWith(suffix)) {
+    const runId = idempotencyKey.slice(0, -suffix.length).trim();
+    return runId || undefined;
+  }
+  return undefined;
+}
+
 export function resolveConfiguredAgents(stateDir: string): ConfiguredAgent[] {
   const configPath = path.join(stateDir, "openclaw.json");
   try {
@@ -275,10 +292,14 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
   const transcriptSnapshotBySession = new Map<string, SessionSnapshot>();
   const latestAssistantTextBySession = new Map<string, string>();
   const sessionFileBySessionKey = new Map<string, string>();
+  const sessionKeyBySessionId = new Map<string, string>();
+  const configuredAgentsById = new Map(resolveConfiguredAgents(stateDir).map((agent) => [agent.id, agent]));
   const sessionSkillsBySessionKey = new Map<string, SkillCatalogEntry[]>();
   const sessionModelBySessionKey = new Map<string, { provider?: string; model?: string }>();
   const sessionMetaBySessionKey = new Map<string, {
     sessionId?: string;
+    agentId?: string;
+    agentName?: string;
     updatedAt?: number;
     chatType?: string;
     lastChannel?: string;
@@ -342,6 +363,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
   const refreshSessionsIndex = () => {
     try {
       sessionFileBySessionKey.clear();
+      sessionKeyBySessionId.clear();
       sessionSkillsBySessionKey.clear();
       sessionModelBySessionKey.clear();
       sessionMetaBySessionKey.clear();
@@ -359,9 +381,16 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             model?: string;
             skillsSnapshot?: { resolvedSkills?: Array<{ name?: string; description?: string }> };
           }>;
+          const agentDir = getAgentNameFromSessionsIndexPath(sessionsIndexPath);
+          const configuredAgent = agentDir ? configuredAgentsById.get(agentDir) : undefined;
+          const sessionAgentId = configuredAgent?.id ?? agentDir;
+          const sessionAgentName = configuredAgent?.name ?? configuredAgent?.id ?? agentDir;
           for (const [sessionKey, sessionState] of Object.entries(parsed)) {
             if (typeof sessionState?.sessionFile === "string" && sessionState.sessionFile.trim()) {
               sessionFileBySessionKey.set(sessionKey, sessionState.sessionFile);
+            }
+            if (typeof sessionState?.sessionId === "string" && sessionState.sessionId.trim()) {
+              sessionKeyBySessionId.set(sessionState.sessionId, sessionKey);
             }
             if (Array.isArray(sessionState?.skillsSnapshot?.resolvedSkills)) {
               const skillEntries = sessionState.skillsSnapshot.resolvedSkills
@@ -382,6 +411,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             });
             sessionMetaBySessionKey.set(sessionKey, {
               sessionId: typeof sessionState?.sessionId === "string" ? sessionState.sessionId : undefined,
+              agentId: sessionAgentId,
+              agentName: sessionAgentName,
               updatedAt: typeof sessionState?.updatedAt === "number" ? sessionState.updatedAt : undefined,
               chatType: typeof sessionState?.chatType === "string" ? sessionState.chatType : undefined,
               lastChannel: typeof sessionState?.lastChannel === "string" ? sessionState.lastChannel : undefined,
@@ -453,6 +484,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       const currentRunAssistantTurns: TranscriptAssistantTurn[] = [];
       let currentRunCursorTs: number | undefined;
       let currentRunInputPreview: string | undefined;
+      let currentRunMessageRunId: string | undefined;
       let currentRunCacheReadRaw: number | undefined;
       let currentRunCacheWriteRaw: number | undefined;
       for (const line of lines) {
@@ -472,6 +504,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           lastUserText = userText ?? lastUserText;
           lastUserTs = resolveEnvelopeTimestamp(line.timestamp, message.timestamp) ?? lastUserTs;
           traceCount += 1;
+          currentRunMessageRunId = resolveMessageRunId(message);
           currentRunInvokedSkillNames.clear();
           currentRunToolCallSkillNamesById = {};
           currentRunToolCalls.clear();
@@ -639,14 +672,23 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         mentionedSkillNames.add(skillName);
       }
       const latestRunState = readSessionLatestRunState(sessionFile);
+      const resolvedRunId = currentRunMessageRunId ?? latestRunState.runId ?? readSessionLatestRunId(sessionFile);
+      const resolvedRunState = (
+        resolvedRunId
+        && resolvedRunId !== latestRunState.runId
+      )
+        ? readSessionRunState(sessionFile, resolvedRunId)
+        : latestRunState;
       const snapshot: SessionSnapshot = {
         sessionFile,
         sessionKey,
         sessionId: sessionMetaBySessionKey.get(sessionKey)?.sessionId,
-        runId: latestRunState.runId ?? readSessionLatestRunId(sessionFile),
-        runCompleted: latestRunState.runCompleted,
-        runTerminalType: latestRunState.runTerminalType,
-        runFinalStatus: latestRunState.runFinalStatus,
+        agentId: sessionMetaBySessionKey.get(sessionKey)?.agentId,
+        agentName: sessionMetaBySessionKey.get(sessionKey)?.agentName,
+        runId: resolvedRunId,
+        runCompleted: resolvedRunState.runCompleted,
+        runTerminalType: resolvedRunState.runTerminalType,
+        runFinalStatus: resolvedRunState.runFinalStatus,
         createdAt: readSessionCreatedAt(sessionFile),
         updatedAt: sessionMetaBySessionKey.get(sessionKey)?.updatedAt,
         chatType: sessionMetaBySessionKey.get(sessionKey)?.chatType,
@@ -683,6 +725,18 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
   return {
     refreshSessionsIndex,
     loadSessionSnapshot,
+    resolveSessionKeyById(sessionId: string) {
+      const normalizedSessionId = sessionId.trim();
+      if (!normalizedSessionId) {
+        return undefined;
+      }
+      const existing = sessionKeyBySessionId.get(normalizedSessionId);
+      if (existing) {
+        return existing;
+      }
+      refreshSessionsIndex();
+      return sessionKeyBySessionId.get(normalizedSessionId);
+    },
     resolveSessionKeyByFile(sessionFile: string) {
       for (const [sessionKey, currentSessionFile] of sessionFileBySessionKey.entries()) {
         if (currentSessionFile === sessionFile) {
@@ -729,6 +783,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       transcriptSnapshotBySession.clear();
       latestAssistantTextBySession.clear();
       sessionFileBySessionKey.clear();
+      sessionKeyBySessionId.clear();
       sessionSkillsBySessionKey.clear();
       sessionModelBySessionKey.clear();
       sessionMetaBySessionKey.clear();

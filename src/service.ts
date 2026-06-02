@@ -29,6 +29,7 @@ import {
   endSpanSafely,
   eventTime,
   isHeartbeatSessionSnapshot,
+  loadSnapshotForEvent,
   MIN_VISIBLE_CHILD_MS,
   MIN_VISIBLE_MODEL_MS,
   normalizeReasoningPreview,
@@ -37,6 +38,7 @@ import {
   redactSensitiveText,
   readReplayFinalizationState,
   rememberRunId,
+  resolveAgentIdentity,
   resolveReplayFinalizationStateFile,
   resolveIngressLifecycleWindows,
   resolveRequestClassification,
@@ -124,6 +126,18 @@ export function createOtelPluginService(
 
       const loadSessionSnapshot = (sessionKey: string | undefined) =>
         sessionStore?.loadSessionSnapshot(sessionKey);
+
+      const resolveSpanAgentIdentity = (
+        sessionKey: string | undefined,
+        snapshot: ReturnType<typeof loadSessionSnapshot> | undefined,
+        attrs?: Record<string, string | number | boolean | undefined>,
+      ) => resolveAgentIdentity({
+        sessionKey,
+        snapshot,
+        attrs,
+        configuredAgentById,
+        runtimeMetadata,
+      });
 
       const buildReplayWatermark = (
         snapshot: ReturnType<typeof loadSessionSnapshot>,
@@ -230,15 +244,12 @@ export function createOtelPluginService(
         delete nextAttrs.__suppress_session_output_preview;
         delete nextAttrs.__suppress_session_output_summary;
         delete nextAttrs.__min_snapshot_user_ts;
-        const parsedSessionKey = parseSessionKey(sessionKey);
-        const configuredAgent = parsedSessionKey.sessionAgent
-          ? configuredAgentById.get(parsedSessionKey.sessionAgent)
-          : undefined;
-        const dynamicAgentId = parsedSessionKey.sessionAgent;
-        const dynamicAgentName = configuredAgent?.name ?? configuredAgent?.id ?? dynamicAgentId;
-        const resolvedAgentId = nextAttrs.agent_id ?? dynamicAgentId ?? runtimeMetadata?.agentId;
-        const resolvedAgentName = nextAttrs.agent_name ?? dynamicAgentName ?? runtimeMetadata?.agentName;
         const snapshot = loadSessionSnapshot(sessionKey);
+        const { agentId: resolvedAgentId, agentName: resolvedAgentName } = resolveSpanAgentIdentity(
+          sessionKey,
+          snapshot,
+          nextAttrs,
+        );
         const requestClassification = resolveRequestClassification({
           lastUserText: snapshot?.lastUserText,
           lastAssistantText: snapshot?.lastAssistantText,
@@ -268,9 +279,6 @@ export function createOtelPluginService(
             ...nextAttrs,
             agent_id: resolvedAgentId,
             agent_name: resolvedAgentName,
-            agent_runtime: nextAttrs.agent_runtime ?? "openclaw",
-            agent_version: nextAttrs.agent_version ?? runtimeMetadata?.openclawVersion,
-            runtime_environment: nextAttrs.runtime_environment ?? runtimeMetadata?.runtimeEnvironment,
             request_type: nextAttrs.request_type ?? requestClassification.requestType,
             request_category: nextAttrs.request_category ?? requestClassification.requestCategory,
             is_internal_request: nextAttrs.is_internal_request ?? requestClassification.isInternalRequest,
@@ -283,9 +291,6 @@ export function createOtelPluginService(
           ...nextAttrs,
           agent_id: resolvedAgentId,
           agent_name: resolvedAgentName,
-          agent_runtime: nextAttrs.agent_runtime ?? "openclaw",
-          agent_version: nextAttrs.agent_version ?? runtimeMetadata?.openclawVersion,
-          runtime_environment: nextAttrs.runtime_environment ?? runtimeMetadata?.runtimeEnvironment,
           request_type: nextAttrs.request_type ?? requestClassification.requestType,
           request_category: nextAttrs.request_category ?? requestClassification.requestCategory,
           is_internal_request: nextAttrs.is_internal_request ?? requestClassification.isInternalRequest,
@@ -319,8 +324,15 @@ export function createOtelPluginService(
       const eventTimestamp = (evt: { ts?: number }): Date =>
         typeof evt.ts === "number" ? eventTime(evt.ts) : new Date();
 
-      const resolveSessionKey = (evt: { sessionKey?: string; sessionId?: string }) =>
-        sessionIdentity(evt);
+      const resolveSessionKey = (evt: { sessionKey?: string; sessionId?: string }) => {
+        if (typeof evt.sessionKey === "string" && evt.sessionKey.trim()) {
+          return evt.sessionKey.trim();
+        }
+        if (typeof evt.sessionId === "string" && evt.sessionId.trim()) {
+          return sessionStore?.resolveSessionKeyById(evt.sessionId.trim()) ?? evt.sessionId.trim();
+        }
+        return sessionIdentity(evt);
+      };
 
       const resolveRunId = (evt: { runId?: string }) =>
         typeof evt.runId === "string" && evt.runId.trim() ? evt.runId.trim() : undefined;
@@ -1088,7 +1100,7 @@ export function createOtelPluginService(
         if (rememberRunId(root, resolvedRunId)) {
           root.span.setAttributes(traceRunScopeAttrs(root.runId, root.runIds));
         }
-        const snapshot = loadSessionSnapshot(evt.sessionKey);
+        const snapshot = loadSnapshotForEvent(evt, loadSessionSnapshot, resolveSessionKey);
         root.span.setAttributes(traceAttrs({
           session_update_time: evt.ts,
           "openclaw.input.preview": normalizeUserInputPreview(snapshot?.lastUserText),
@@ -1458,6 +1470,7 @@ export function createOtelPluginService(
         getRoot,
         ensureUserSpan,
         loadSessionSnapshot,
+        resolveAgentIdentity: resolveSpanAgentIdentity,
         enrichWithTranscript,
         createChildSpan,
         eventTimestamp,
@@ -1508,6 +1521,7 @@ export function createOtelPluginService(
         clearRun,
         updateAggregateTokens,
         loadSessionSnapshot,
+        resolveSessionKey,
         enrichWithTranscript,
         createChildSpan,
         emitDiagnosticLog,

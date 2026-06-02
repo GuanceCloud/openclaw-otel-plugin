@@ -22,6 +22,8 @@ import {
   buildSessionMetricAttrs,
   computeSessionMetricDelta,
   extractToolResultStatus,
+  loadSnapshotForEvent,
+  resolveAgentIdentity,
   readReplayFinalizationState,
   resolveRequestClassification,
   rememberRunId,
@@ -141,6 +143,80 @@ test("resolveRequestClassification marks heartbeat probes as internal requests",
   );
 });
 
+test("loadSnapshotForEvent resolves snapshots through sessionId when sessionKey is absent", () => {
+  const calls = [];
+  const snapshot = { sessionId: "sid-1", lastUserText: "delete folder" };
+
+  const resolved = loadSnapshotForEvent(
+    { sessionId: "sid-1" },
+    (sessionKey) => {
+      calls.push(sessionKey);
+      return sessionKey === "agent:main:dashboard:test-user" ? snapshot : undefined;
+    },
+    (evt) => evt.sessionId === "sid-1" ? "agent:main:dashboard:test-user" : undefined,
+  );
+
+  assert.equal(resolved, snapshot);
+  assert.deepEqual(calls, ["agent:main:dashboard:test-user"]);
+});
+
+test("resolveAgentIdentity uses configured names and runtime fallback with one priority chain", () => {
+  assert.deepEqual(
+    resolveAgentIdentity({
+      sessionKey: "agent:main:dashboard:user-1",
+      snapshot: {
+        agentId: "snapshot-agent",
+        agentName: "Snapshot Agent",
+      },
+      configuredAgentById: new Map([
+        ["main", { id: "main", name: "Dashboard Agent" }],
+      ]),
+      runtimeMetadata: {
+        agentId: "runtime-agent",
+        agentName: "Runtime Agent",
+      },
+    }),
+    {
+      agentId: "main",
+      agentName: "Dashboard Agent",
+    },
+  );
+
+  assert.deepEqual(
+    resolveAgentIdentity({
+      snapshot: {
+        agentId: "snapshot-agent",
+        agentName: "Snapshot Agent",
+      },
+      runtimeMetadata: {
+        agentId: "runtime-agent",
+        agentName: "Runtime Agent",
+      },
+    }),
+    {
+      agentId: "snapshot-agent",
+      agentName: "Snapshot Agent",
+    },
+  );
+
+  assert.deepEqual(
+    resolveAgentIdentity({
+      runtimeMetadata: {
+        agentId: "runtime-agent",
+        agentName: "Runtime Agent",
+      },
+      attrs: {
+        agent_id: "explicit-agent",
+        agent_name: "Explicit Agent",
+      },
+    }),
+    {
+      agentId: "explicit-agent",
+      agentName: "Explicit Agent",
+    },
+  );
+});
+
 test("buildRunScopeAttrs preserves the primary run_id and exposes the run_ids summary", () => {
   const attrs = buildRunScopeAttrs(
     "run-1",
@@ -150,7 +226,6 @@ test("buildRunScopeAttrs preserves the primary run_id and exposes the run_ids su
   );
 
   assert.deepEqual(attrs, {
-    agent_runtime: "openclaw",
     run_id: "run-1",
     run_ids: "run-1,run-2,run-3,run-4",
   });
@@ -399,7 +474,7 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
     "session.file": "/tmp/session.jsonl",
   });
 
-  assert.equal(attrs.agent_runtime, "openclaw");
+  assert.equal(attrs.agent_runtime, undefined);
   assert.equal(attrs.agent_id, "main");
   assert.equal(attrs.agent_name, "main");
   assert.equal(attrs.session_id, "session-1");
@@ -430,8 +505,8 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   assert.equal(attrs["skill.kind"], undefined);
   assert.equal(attrs["skill.source"], undefined);
   assert.equal(attrs.final_status, "completed");
-  assert.equal(attrs.agent_version, "2026.5.7");
-  assert.equal(attrs.runtime_environment, "main");
+  assert.equal(attrs.agent_version, undefined);
+  assert.equal(attrs.runtime_environment, undefined);
   assert.equal(attrs.state, "processing");
   assert.equal(attrs.prev_state, "queued");
   assert.equal(attrs.reason, "session.state");

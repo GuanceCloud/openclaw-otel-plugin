@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { resolveOtelPluginConfig } from "../dist/src/config.js";
+import { buildOtelResourceAttrs } from "../dist/src/otel-bootstrap.js";
 
 test("resolveOtelPluginConfig keeps openclaw as the default agent runtime resource attribute", () => {
   const config = resolveOtelPluginConfig({});
@@ -121,4 +122,33 @@ test("resolveOtelPluginConfig keeps trace payload debug off by default and accep
 
   assert.equal(disabledConfig.tracePayloadDebugEnabled, false);
   assert.equal(enabledConfig.tracePayloadDebugEnabled, true);
+});
+
+test("buildOtelResourceAttrs keeps agent identity on spans only", () => {
+  const config = resolveOtelPluginConfig({
+    serviceName: "openclaw-otel-plugin",
+    resourceAttributes: {
+      team: "platform",
+      agent_runtime: "openclaw",
+      agent_id: "configured-agent-id",
+      agent_name: "configured-agent-name",
+    },
+  });
+
+  const attrs = buildOtelResourceAttrs(config, {
+    runtimeEnvironment: "main",
+    openclawVersion: "2026.5.28",
+    agentId: "runtime-agent-id",
+    agentName: "runtime-agent-name",
+  });
+
+  assert.deepEqual(attrs, {
+    "service.name": "openclaw-otel-plugin",
+    agent_runtime: "openclaw",
+    agent_version: "2026.5.28",
+    runtime_environment: "main",
+    team: "platform",
+  });
+  assert.equal(attrs.agent_id, undefined);
+  assert.equal(attrs.agent_name, undefined);
 });

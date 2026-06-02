@@ -31,6 +31,31 @@ function compactResourceAttrs(
   ) as Record<string, string | number | boolean>;
 }
 
+const SPAN_ONLY_RESOURCE_ATTR_KEYS = new Set([
+  "agent_id",
+  "agent_name",
+]);
+
+export function buildOtelResourceAttrs(
+  config: Pick<OtelPluginConfig, "serviceName" | "resourceAttributes">,
+  runtimeMetadata?: RuntimeMetadata,
+): Record<string, string | number | boolean> {
+  const filteredConfiguredResourceAttrs = Object.fromEntries(
+    Object.entries(config.resourceAttributes ?? {}).filter(([key]) => !SPAN_ONLY_RESOURCE_ATTR_KEYS.has(key)),
+  ) as Record<string, string | number | boolean>;
+
+  return compactResourceAttrs({
+    [ATTR_SERVICE_NAME]: config.serviceName,
+    agent_runtime:
+      typeof filteredConfiguredResourceAttrs.agent_runtime === "string"
+        ? filteredConfiguredResourceAttrs.agent_runtime
+        : "openclaw",
+    agent_version: runtimeMetadata?.openclawVersion,
+    runtime_environment: runtimeMetadata?.runtimeEnvironment,
+    ...filteredConfiguredResourceAttrs,
+  });
+}
+
 function formatExportError(error: unknown): string {
   if (!error) {
     return "unknown";
@@ -115,6 +140,16 @@ function collectTracePayloadSummary(
         end_time: hrTimeToUnixMs((item as { endTime?: unknown }).endTime),
         session_id: typeof attrs.session_id === "string" ? String(attrs.session_id) : undefined,
         session_key: typeof attrs.session_key === "string" ? String(attrs.session_key) : undefined,
+        agent_id: typeof attrs.agent_id === "string"
+          ? String(attrs.agent_id)
+          : typeof resourceAttrs.agent_id === "string"
+            ? String(resourceAttrs.agent_id)
+            : undefined,
+        agent_name: typeof attrs.agent_name === "string"
+          ? String(attrs.agent_name)
+          : typeof resourceAttrs.agent_name === "string"
+            ? String(resourceAttrs.agent_name)
+            : undefined,
         agent_runtime: typeof attrs.agent_runtime === "string"
           ? String(attrs.agent_runtime)
           : typeof resourceAttrs.agent_runtime === "string"
@@ -238,18 +273,7 @@ export async function startOtelBootstrap(
       })
     : undefined;
 
-  const resource = resourceFromAttributes(compactResourceAttrs({
-    [ATTR_SERVICE_NAME]: config.serviceName,
-    agent_runtime:
-      typeof config.resourceAttributes?.agent_runtime === "string"
-        ? config.resourceAttributes.agent_runtime
-        : "openclaw",
-    agent_version: runtimeMetadata?.openclawVersion,
-    runtime_environment: runtimeMetadata?.runtimeEnvironment,
-    agent_id: runtimeMetadata?.agentId,
-    agent_name: runtimeMetadata?.agentName,
-    ...(config.resourceAttributes ?? {}),
-  }));
+  const resource = resourceFromAttributes(buildOtelResourceAttrs(config, runtimeMetadata));
 
   const sdk = new NodeSDK({
     serviceName: config.serviceName,

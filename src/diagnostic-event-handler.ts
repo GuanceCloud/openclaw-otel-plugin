@@ -13,8 +13,10 @@ import {
   endTimeFromStart,
   eventTime,
   isHeartbeatSessionSnapshot,
+  loadSnapshotForEvent,
   MIN_VISIBLE_CHILD_MS,
   redactSensitiveText,
+  resolveRequestClassification,
   resolveUsageTokenTotals,
   setError,
   stringAttrs,
@@ -71,6 +73,7 @@ type DiagnosticEventHandlerDeps = {
   clearRun(evt: SessionEvent): void;
   updateAggregateTokens(evt: Extract<DiagnosticEventPayload, { type: "model.usage" }>): void;
   loadSessionSnapshot(sessionKey: string | undefined): SessionSnapshot | undefined;
+  resolveSessionKey?: (evt: SessionEvent) => string | undefined;
   enrichWithTranscript(
     sessionKey: string | undefined,
     attrs: Record<string, string | number | boolean | undefined>,
@@ -148,6 +151,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     clearRun,
     updateAggregateTokens,
     loadSessionSnapshot,
+    resolveSessionKey,
     enrichWithTranscript,
     createChildSpan,
     emitDiagnosticLog,
@@ -275,6 +279,9 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     return raw;
   };
 
+  const resolveSnapshotForEvent = (evt: SessionEvent): SessionSnapshot | undefined =>
+    loadSnapshotForEvent(evt, loadSessionSnapshot, resolveSessionKey);
+
   return (evt: DiagnosticEventPayload) => {
     cleanupExpiredRoots();
 
@@ -284,7 +291,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           ? getRun(evt, false)
           : undefined;
         const processingSnapshot = evt.state === "processing"
-          ? loadSessionSnapshot(evt.sessionKey)
+          ? resolveSnapshotForEvent(evt)
           : undefined;
         if (isHeartbeatSessionSnapshot(processingSnapshot)) {
           break;
@@ -361,7 +368,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           }
         }
         if (shouldCloseForSessionState(evt.state)) {
-          const snapshot = loadSessionSnapshot(evt.sessionKey);
+          const snapshot = resolveSnapshotForEvent(evt);
           if (isHeartbeatSessionSnapshot(snapshot)) {
             break;
           }
@@ -434,10 +441,17 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         break;
       }
       case "message.queued": {
-        const snapshot = loadSessionSnapshot(evt.sessionKey);
-        if (isHeartbeatSessionSnapshot(snapshot)) {
+        const snapshot = resolveSnapshotForEvent(evt);
+        const requestClassification = resolveRequestClassification({
+          lastUserText: snapshot?.lastUserText,
+          lastAssistantText: snapshot?.lastAssistantText,
+          inputPreview: snapshot?.lastRunAssistantTurns?.at(-1)?.inputPreview,
+          outputPreview: snapshot?.lastRunAssistantTurns?.at(-1)?.outputPreview,
+        });
+        if (requestClassification.requestCategory === "heartbeat") {
           break;
         }
+        const isRuntimeContinueRequest = requestClassification.requestCategory === "runtime_continue";
         const activeRun = getRun(evt, false);
         const hasStartedExecution = Boolean(
           activeRun
@@ -449,10 +463,13 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           ),
         );
         if (
+          !isRuntimeContinueRequest
+          && (
           activeRun
           && hasStartedExecution
           && typeof evt.ts === "number"
           && evt.ts > activeRun.mainStartTs
+          )
         ) {
           const finalOutcome = activeRun.pendingFinalOutcome;
           endRun(
@@ -473,7 +490,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           );
           clearRun(evt);
         }
-        if (!activeRun || hasStartedExecution) {
+        if (!isRuntimeContinueRequest && (!activeRun || hasStartedExecution)) {
           beginRequestTrace(evt);
         }
         const queuedAttrs = {
@@ -493,7 +510,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             buildGenAiRuntimeMessageMetricAttrs(evt.channel, evt.sessionId),
           );
         }
-        const root = getRoot(evt, true);
+        const root = getRoot(evt, !isRuntimeContinueRequest);
         if (root) {
           addEvent(root.span, "message.queued");
         }
@@ -502,7 +519,9 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           severityNumber: SeverityNumber.INFO,
           severityText: "INFO",
         });
-        const run = ensureUserSpan(evt);
+        const run = isRuntimeContinueRequest
+          ? activeRun
+          : ensureUserSpan(evt);
         if (run && typeof evt.ts === "number") {
           run.messageQueuedTs = typeof run.messageQueuedTs === "number"
             ? Math.min(run.messageQueuedTs, evt.ts)
@@ -511,7 +530,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         break;
       }
       case "model.usage": {
-        const snapshot = loadSessionSnapshot(evt.sessionKey);
+        const snapshot = resolveSnapshotForEvent(evt);
         const resolvedSessionId = evt.sessionId ?? snapshot?.sessionId;
         const modelStartTs = typeof evt.ts === "number" && typeof evt.durationMs === "number"
           ? evt.ts - Math.max(evt.durationMs, 1)
@@ -672,7 +691,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         break;
       }
       case "message.processed": {
-        const snapshot = loadSessionSnapshot(evt.sessionKey);
+        const snapshot = resolveSnapshotForEvent(evt);
         if (isHeartbeatSessionSnapshot(snapshot)) {
           break;
         }

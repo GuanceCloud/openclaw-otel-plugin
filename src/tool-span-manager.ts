@@ -27,6 +27,7 @@ import {
   MIN_VISIBLE_CHILD_MS,
   MIN_VISIBLE_MODEL_MS,
   redactSensitiveText,
+  resolveAgentIdentity,
   resolveUsageTokenTotals,
   setError,
   skillCallSpanName,
@@ -78,6 +79,14 @@ type ToolSpanManagerDeps = {
   getRoot(evt: SessionEvent, createIfMissing?: boolean): { span: any } | undefined;
   ensureUserSpan(evt: UserSpanEvent): ActiveRunSpan | undefined;
   loadSessionSnapshot(sessionKey: string | undefined): SessionSnapshot | undefined;
+  resolveAgentIdentity?: (
+    sessionKey: string | undefined,
+    snapshot: SessionSnapshot | undefined,
+    attrs?: Record<string, string | number | boolean | undefined>,
+  ) => {
+    agentId?: string;
+    agentName?: string;
+  };
   enrichWithTranscript(
     sessionKey: string | undefined,
     attrs: Record<string, string | number | boolean | undefined>,
@@ -130,6 +139,11 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     getRoot,
     ensureUserSpan,
     loadSessionSnapshot,
+    resolveAgentIdentity: resolveAgentIdentityFromDeps = (sessionKey, snapshot, attrs) => resolveAgentIdentity({
+      sessionKey,
+      snapshot,
+      attrs,
+    }),
     enrichWithTranscript,
     createChildSpan,
     eventTimestamp,
@@ -154,8 +168,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     const snapshot = loadSessionSnapshot(evt.sessionKey);
     const run = getRun(evt, false);
     const root = getRoot(evt, false);
+    const { agentId, agentName } = resolveAgentIdentityFromDeps(evt.sessionKey, snapshot);
     return {
-      agent_runtime: "openclaw",
+      agent_id: agentId,
+      agent_name: agentName,
       ...buildRunScopeAttrs(
         evt.runId ?? run?.runId ?? root?.runId,
         evt.runId,

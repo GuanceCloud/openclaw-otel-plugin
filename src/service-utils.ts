@@ -6,6 +6,7 @@ import type {
   ActiveRunSpan,
   ActiveToolSpan,
   RunAggregate,
+  RuntimeMetadata,
   SessionSnapshot,
   SkillCatalogEntry,
 } from "./service-types.js";
@@ -137,6 +138,59 @@ export function eventTime(ts: number): Date {
 
 export function endTimeFromStart(startTs: number, durationMs: number): Date {
   return new Date(startTs + Math.max(durationMs, 1));
+}
+
+export function loadSnapshotForEvent(
+  evt: { sessionKey?: string; sessionId?: string },
+  loadSessionSnapshot: (sessionKey: string | undefined) => SessionSnapshot | undefined,
+  resolveSessionKey?: (evt: { sessionKey?: string; sessionId?: string }) => string | undefined,
+): SessionSnapshot | undefined {
+  const directSessionKey = typeof evt.sessionKey === "string" && evt.sessionKey.trim()
+    ? evt.sessionKey.trim()
+    : undefined;
+  if (directSessionKey) {
+    return loadSessionSnapshot(directSessionKey);
+  }
+  const resolvedSessionKey = resolveSessionKey?.(evt);
+  if (typeof resolvedSessionKey === "string" && resolvedSessionKey.trim()) {
+    return loadSessionSnapshot(resolvedSessionKey.trim());
+  }
+  return undefined;
+}
+
+export function resolveAgentIdentity(options: {
+  sessionKey?: string;
+  snapshot?: Pick<SessionSnapshot, "agentId" | "agentName">;
+  attrs?: Record<string, string | number | boolean | undefined>;
+  configuredAgentById?: Map<string, { id?: string; name?: string }>;
+  runtimeMetadata?: RuntimeMetadata;
+}): {
+  agentId?: string;
+  agentName?: string;
+} {
+  const sessionKey = typeof options.sessionKey === "string" && options.sessionKey.trim()
+    ? options.sessionKey.trim()
+    : undefined;
+  const parsedSessionKey = parseSessionKey(sessionKey);
+  const configuredAgent = parsedSessionKey.sessionAgent
+    ? options.configuredAgentById?.get(parsedSessionKey.sessionAgent)
+    : undefined;
+  const explicitAgentId = typeof options.attrs?.agent_id === "string" && options.attrs.agent_id.trim()
+    ? options.attrs.agent_id.trim()
+    : undefined;
+  const explicitAgentName = typeof options.attrs?.agent_name === "string" && options.attrs.agent_name.trim()
+    ? options.attrs.agent_name.trim()
+    : undefined;
+  const dynamicAgentId = parsedSessionKey.sessionAgent ?? options.snapshot?.agentId;
+  const dynamicAgentName = configuredAgent?.name
+    ?? configuredAgent?.id
+    ?? options.snapshot?.agentName
+    ?? dynamicAgentId;
+
+  return {
+    agentId: explicitAgentId ?? dynamicAgentId ?? options.runtimeMetadata?.agentId,
+    agentName: explicitAgentName ?? dynamicAgentName ?? options.runtimeMetadata?.agentName,
+  };
 }
 
 export function isHeartbeatSessionSnapshot(snapshot: SessionSnapshot | undefined): boolean {
@@ -374,7 +428,6 @@ export function buildRunScopeAttrs(
   primaryRunId?: string,
   ...runIdSources: Array<string | Iterable<string> | undefined>
 ): {
-  agent_runtime: string;
   run_id?: string;
   run_ids?: string;
 } {
@@ -403,7 +456,6 @@ export function buildRunScopeAttrs(
   }
   const resolvedPrimaryRunId = orderedRunIds[0];
   return {
-    agent_runtime: "openclaw",
     run_id: resolvedPrimaryRunId,
     run_ids: orderedRunIds.length > 0 ? orderedRunIds.join(",") : undefined,
   };
@@ -758,12 +810,20 @@ const LEGACY_TRACE_CONTEXT_KEYS = new Set([
   "gen_ai.session_file",
 ]);
 
+const RESOURCE_ONLY_TRACE_ATTR_KEYS = new Set([
+  "agent_runtime",
+  "agent_version",
+  "runtime_environment",
+]);
+
 export function traceAttrs(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean> {
   const normalized = stringAttrs(attrs);
   return Object.fromEntries(
-    Object.entries(normalized).filter(([key]) => !LEGACY_TRACE_CONTEXT_KEYS.has(key)),
+    Object.entries(normalized).filter(
+      ([key]) => !LEGACY_TRACE_CONTEXT_KEYS.has(key) && !RESOURCE_ONLY_TRACE_ATTR_KEYS.has(key),
+    ),
   ) as Record<string, string | number | boolean>;
 }
 
@@ -1791,6 +1851,20 @@ export function extractMentionedSkillNames(
 }
 
 export function extractContentText(content: unknown, kind: "text" | "thinking"): string | undefined {
+  if (typeof content === "string") {
+    return kind === "text" ? content.trim() || undefined : undefined;
+  }
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    const record = content as Record<string, unknown>;
+    const directValue = typeof record[kind] === "string" ? record[kind].trim() : "";
+    if (directValue) {
+      return directValue;
+    }
+    if (kind === "text" && typeof record.text === "string" && record.text.trim()) {
+      return record.text.trim();
+    }
+    return undefined;
+  }
   if (!Array.isArray(content)) {
     return undefined;
   }

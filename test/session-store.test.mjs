@@ -740,3 +740,149 @@ test("session store reads final status from trace.artifacts and session.ended", 
   assert.equal(snapshot.runTerminalType, "session.ended");
   assert.equal(snapshot.runFinalStatus, "success");
 });
+
+test("session store resolves sessionKey from sessionId", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      "agent:main:webchat:direct:user-1": {
+        sessionFile: path.join(sessionsDir, "sid-lookup.jsonl"),
+        sessionId: "session-lookup-1",
+      },
+    }),
+  );
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+
+  assert.equal(
+    store.resolveSessionKeyById("session-lookup-1"),
+    "agent:main:webchat:direct:user-1",
+  );
+});
+
+test("session store exposes agent identity from the owning sessions index", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(stateDir, "openclaw.json"),
+    JSON.stringify({
+      agents: {
+        list: [
+          { id: "main", name: "智能路由", default: true },
+        ],
+      },
+    }),
+  );
+  const sessionFile = path.join(sessionsDir, "session.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      "90772953-e853-4bb0-b143-c252d1cb25aa": {
+        sessionFile,
+        sessionId: "90772953-e853-4bb0-b143-c252d1cb25aa",
+      },
+    }),
+  );
+  fs.writeFileSync(sessionFile, "");
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const snapshot = store.loadSessionSnapshot("90772953-e853-4bb0-b143-c252d1cb25aa");
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.agentId, "main");
+  assert.equal(snapshot.agentName, "智能路由");
+});
+
+test("session store reads string user content and derives runId from idempotencyKey", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "session-string-user.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s7: {
+        sessionFile,
+        sessionId: "session-7",
+      },
+    }),
+  );
+
+  const lines = [
+    {
+      type: "message",
+      timestamp: "2026-06-02T10:48:20.753Z",
+      message: {
+        role: "user",
+        content: "删除 `/home/liurui/dashboard/owl-reports` 目录。",
+        timestamp: 1780397292980,
+        idempotencyKey: "run-from-idempotency:user",
+      },
+    },
+    {
+      type: "message",
+      timestamp: "2026-06-02T10:48:22.634Z",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "call-1",
+            name: "exec",
+            arguments: {
+              command: "ls -la /home/liurui/dashboard/owl-reports",
+            },
+          },
+        ],
+        provider: "deepseek",
+        model: "deepseek-chat",
+        usage: {
+          input: 157,
+          output: 68,
+          totalTokens: 225,
+        },
+        timestamp: 1780397301266,
+      },
+    },
+  ];
+  fs.writeFileSync(
+    sessionFile,
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+  );
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const snapshot = store.loadSessionSnapshot("s7");
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.runId, "run-from-idempotency");
+  assert.equal(snapshot.lastUserText, "删除 `/home/liurui/dashboard/owl-reports` 目录。");
+  assert.deepEqual(snapshot.lastRunAssistantTurns, [
+    {
+      startedAt: Date.parse("2026-06-02T10:48:20.753Z"),
+      endedAt: Date.parse("2026-06-02T10:48:22.634Z"),
+      provider: "deepseek",
+      model: "deepseek-chat",
+      usage: {
+        input: 157,
+        output: 68,
+        cacheRead: undefined,
+        cacheWrite: undefined,
+        totalTokens: 225,
+      },
+      inputPreview: "删除 `/home/liurui/dashboard/owl-reports` 目录。",
+      thinking: undefined,
+      text: undefined,
+      outputPreview: "toolCall:exec",
+      outputKind: "tool_call",
+    },
+  ]);
+});

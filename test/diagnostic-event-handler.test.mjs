@@ -1975,6 +1975,192 @@ test("message.queued skips internal heartbeat requests", () => {
   assert.equal(ensureUserCalls, 0);
 });
 
+test("message.queued skips internal heartbeat requests when only sessionId is present", () => {
+  let beginCalls = 0;
+  let ensureUserCalls = 0;
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageQueuedCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {
+      beginCalls += 1;
+    },
+    getRoot() {
+      throw new Error("not expected");
+    },
+    getRun() {
+      return undefined;
+    },
+    ensureUserSpan() {
+      ensureUserCalls += 1;
+      return undefined;
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot(sessionKey) {
+      if (sessionKey === "agent:main:dashboard:resolved-user") {
+        return {
+          sessionFile: "session.jsonl",
+          mtimeMs: 1,
+          lastUserText: "[OpenClaw heartbeat poll]",
+        };
+      }
+      return undefined;
+    },
+    resolveSessionKey(evt) {
+      return evt.sessionId === "sid-1" ? "agent:main:dashboard:resolved-user" : undefined;
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      throw new Error("not expected");
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "message.queued",
+    sessionId: "sid-1",
+    ts: 2000,
+    channel: "chat",
+    source: "feishu",
+  });
+
+  assert.equal(beginCalls, 0);
+  assert.equal(ensureUserCalls, 0);
+});
+
+test("message.queued keeps runtime continue requests on the active trace", () => {
+  const activeRun = {
+    ctx: { ctx: "active-run" },
+    mainStartTs: 1000,
+    modelSpanEmitted: true,
+    aggregate: { modelCalls: 1 },
+    usedToolNames: new Set(["exec"]),
+    messageQueuedTs: undefined,
+  };
+  let beginCalls = 0;
+  let ensureUserCalls = 0;
+  let endRunCalls = 0;
+  let endRootCalls = 0;
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageQueuedCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {
+      beginCalls += 1;
+    },
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return activeRun;
+    },
+    ensureUserSpan() {
+      ensureUserCalls += 1;
+      return activeRun;
+    },
+    syncRootFromRun() {},
+    endRun() {
+      endRunCalls += 1;
+    },
+    endRoot() {
+      endRootCalls += 1;
+    },
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserText: "Continue the OpenClaw runtime event.",
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return undefined;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "message.queued",
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 2000,
+    channel: "chat",
+    source: "runtime",
+  });
+
+  assert.equal(beginCalls, 0);
+  assert.equal(ensureUserCalls, 0);
+  assert.equal(endRunCalls, 0);
+  assert.equal(endRootCalls, 0);
+  assert.equal(activeRun.messageQueuedTs, 2000);
+});
+
 test("message.processed skips internal heartbeat requests", () => {
   let lifecycleCalls = 0;
   let transcriptModelCalls = 0;

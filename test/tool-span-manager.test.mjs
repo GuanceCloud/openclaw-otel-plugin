@@ -79,6 +79,12 @@ test("skill file reads create a dedicated skill call span", () => {
     loadSessionSnapshot() {
       return undefined;
     },
+    resolveAgentIdentity() {
+      return {
+        agentId: "main",
+        agentName: "Dashboard Agent",
+      };
+    },
     enrichWithTranscript(_sessionKey, attrs) {
       return attrs;
     },
@@ -116,6 +122,9 @@ test("skill file reads create a dedicated skill call span", () => {
   assert.equal(skillSummarySpan.options.attributes.run_id, "run-1");
   assert.equal(skillCallSpan.options.attributes.run_id, "run-1");
   assert.equal(toolSpan.options.attributes.run_id, "run-1");
+  assert.equal(skillSummarySpan.options.attributes.agent_id, "main");
+  assert.equal(skillCallSpan.options.attributes.agent_name, "Dashboard Agent");
+  assert.equal(toolSpan.options.attributes.agent_id, "main");
 
   manager.endToolSpan(
     { sessionKey: "s1", ts: 2200 },
@@ -319,7 +328,7 @@ test("tool lifecycle events no longer export redundant event_tool_* attributes",
 
   const toolSpan = spans.find((span) => span.name === "tool:web_search");
   assert.ok(toolSpan);
-  assert.equal(toolSpan.options.attributes.agent_runtime, "openclaw");
+  assert.equal(toolSpan.options.attributes.agent_runtime, undefined);
   assert.deepEqual(
     toolSpan.events.map((event) => event.eventName),
     ["tool.update", "tool.result"],
