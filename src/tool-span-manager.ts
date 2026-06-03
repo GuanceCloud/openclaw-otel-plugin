@@ -20,7 +20,6 @@ import {
   clipValuePreview,
   collectToolSummaryValues,
   endSpanSafely,
-  extractToolResultStatus,
   inferSkillNameFromTool,
   inferSkillNameFromToolIdentity,
   mergeToolIdentity,
@@ -522,7 +521,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     const summary = collectToolSummaryValues(normalizedToolName);
     if (summary.target) run.usedToolTargets.add(summary.target);
     if (summary.command) run.usedToolCommands.add(summary.command);
-    if (summary.resultStatus) run.usedToolResultStatuses.add(summary.resultStatus);
     const skillName = resolveSkillName(
       evt,
       normalizedToolName,
@@ -641,13 +639,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     tool.namespace = merged.namespace;
     tool.mcpToolName = merged.mcpToolName;
     tool.mcpHost = merged.mcpHost;
-    if (merged.resultStatus) {
-      const run = getRun(evt, false);
-      if (run) {
-        run.usedToolResultStatuses.add(merged.resultStatus);
-        syncToolSummaryAttrs(evt, run);
-      }
-    }
     if (preview) {
       tool.span.setAttributes(traceAttrs({
         ...buildSessionSpanAttrs(evt),
@@ -712,7 +703,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     tool.mcpHost = merged.mcpHost;
     if (merged.target) run.usedToolTargets.add(merged.target);
     if (merged.command) run.usedToolCommands.add(merged.command);
-    if (merged.resultStatus) run.usedToolResultStatuses.add(merged.resultStatus);
+    const finalResultStatus = isError ? "error" : "completed";
+    run.usedToolResultStatuses.add(finalResultStatus);
     syncToolSummaryAttrs(evt, run);
     tool.hasError = isError;
     tool.span.setAttributes(traceAttrs({
@@ -735,8 +727,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     const snapshot = loadSessionSnapshot(evt.sessionKey);
     const genAiToolMetricAttrs = buildGenAiClientToolMetricAttrs(
       tool,
-      isError ? "error" : "completed",
-      merged.resultStatus,
+      finalResultStatus,
       evt.sessionId,
       run.aggregate.lastModel ?? snapshot?.lastModel,
     );
@@ -1207,7 +1198,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     );
     if (summary.target) run.usedToolTargets.add(summary.target);
     if (summary.command) run.usedToolCommands.add(summary.command);
-    if (summary.resultStatus) run.usedToolResultStatuses.add(summary.resultStatus);
     if (skillName) {
       ensureSkillSpan({ sessionKey, sessionId, channel, ts: evt.ts ?? Date.now() }, skillName, "runtime");
       if (toolCallId) {

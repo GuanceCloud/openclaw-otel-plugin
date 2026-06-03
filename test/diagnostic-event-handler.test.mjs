@@ -1485,6 +1485,102 @@ test("session.state idle prefers trajectory final status over idle", () => {
   assert.equal(endRootCalls[0].final_status, "completed");
 });
 
+test("session.state idle leaves final_status empty when no business outcome is available", () => {
+  const endRunCalls = [];
+  const endRootCalls = [];
+  const run = {
+    runId: "run-123",
+    ctx: { ctx: "run" },
+    modelCtx: { ctx: "model" },
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsSessionStateCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return run;
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    syncRootFromRun() {},
+    endRun(_evt, attrs) {
+      endRunCalls.push(attrs);
+    },
+    endRoot(_evt, attrs) {
+      endRootCalls.push(attrs);
+    },
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        runCompleted: false,
+        lastAssistantText: "final answer",
+        lastRunAssistantTurns: [{ startedAt: 1, endedAt: 2 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return true;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+    markReplayWatermark() {},
+    markFinalizedReplayRunId() {},
+  });
+
+  handler({
+    type: "session.state",
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 1000,
+    state: "idle",
+  });
+
+  assert.equal(endRunCalls[0].final_status, undefined);
+  assert.equal(endRootCalls[0].final_status, undefined);
+  assert.equal(endRunCalls[0].state, "idle");
+  assert.equal(endRootCalls[0].state, "idle");
+});
+
 test("model.usage emits llm span and preserves model context", () => {
   const childCalls = [];
   const run = {

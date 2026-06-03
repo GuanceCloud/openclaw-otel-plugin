@@ -466,6 +466,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       let lastAssistantText: string | undefined;
       let lastAssistantTs: number | undefined;
       let lastAssistantThinking: string | undefined;
+      let lastAssistantStopReason: string | undefined;
       let lastProvider: string | undefined;
       let lastModel: string | undefined;
       let sessionCwd: string | undefined;
@@ -520,6 +521,10 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           const turnToolCallNames: string[] = [];
           lastAssistantText = assistantText ?? lastAssistantText;
           lastAssistantThinking = assistantThinking ?? lastAssistantThinking;
+          lastAssistantStopReason =
+            typeof message.stopReason === "string" && message.stopReason.trim()
+              ? message.stopReason.trim()
+              : lastAssistantStopReason;
           lastProvider = typeof message.provider === "string" ? message.provider : lastProvider;
           lastModel = typeof message.model === "string" ? message.model : lastModel;
           const startedAt = resolveEnvelopeTimestamp(line.timestamp, message.timestamp);
@@ -679,6 +684,11 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       )
         ? readSessionRunState(sessionFile, resolvedRunId)
         : latestRunState;
+      const inferredRunCompleted = resolvedRunState.runCompleted !== true && lastAssistantStopReason === "stop";
+      const inferredRunTerminalType = inferredRunCompleted ? "assistant.stop" : resolvedRunState.runTerminalType;
+      const inferredRunFinalStatus = inferredRunCompleted
+        ? (resolvedRunState.runFinalStatus || "success")
+        : resolvedRunState.runFinalStatus;
       const snapshot: SessionSnapshot = {
         sessionFile,
         sessionKey,
@@ -686,9 +696,9 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         agentId: sessionMetaBySessionKey.get(sessionKey)?.agentId,
         agentName: sessionMetaBySessionKey.get(sessionKey)?.agentName,
         runId: resolvedRunId,
-        runCompleted: resolvedRunState.runCompleted,
-        runTerminalType: resolvedRunState.runTerminalType,
-        runFinalStatus: resolvedRunState.runFinalStatus,
+        runCompleted: resolvedRunState.runCompleted === true || inferredRunCompleted,
+        runTerminalType: inferredRunTerminalType,
+        runFinalStatus: inferredRunFinalStatus,
         createdAt: readSessionCreatedAt(sessionFile),
         updatedAt: sessionMetaBySessionKey.get(sessionKey)?.updatedAt,
         chatType: sessionMetaBySessionKey.get(sessionKey)?.chatType,

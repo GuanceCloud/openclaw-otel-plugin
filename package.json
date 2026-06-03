@@ -1,6 +1,6 @@
 {
   "name": "openclaw-otel-plugin",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "private": true,
   "type": "module",
   "scripts": {

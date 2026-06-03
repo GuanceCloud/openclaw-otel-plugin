@@ -680,6 +680,9 @@ function withCanonicalAliases(
   promoteAlias(next, "tool_namespace", "openclaw.tool.namespace", "tool.namespace");
   promoteAlias(next, "tool_mcp_name", "openclaw.tool.mcp_name", "tool.mcp_name");
   promoteAlias(next, "tool_mcp_host", "openclaw.tool.mcp_host", "tool.mcp_host");
+  promoteAlias(next, "tool_result_status", "tool_outcome", "openclaw.tool.result_status", "openclaw.tool.outcome", "tool.outcome");
+  delete next.tool_outcome;
+  delete next["openclaw.tool.outcome"];
   promoteAlias(next, "skill_count", "skill.count", "skill_count");
   promoteAlias(next, "session_create_at", "session_create_time", "gen_ai.session_create_time", "openclaw.session.createdAt");
   promoteAlias(next, "session_created_at", "session.createdAt", "openclaw.session.createdAt");
@@ -690,7 +693,7 @@ function withCanonicalAliases(
   mirrorAlias(next, "skill_name", "openclaw.skill.name");
   mirrorAlias(next, "skill_type", "openclaw.skill.kind");
   mirrorAlias(next, "skill_source", "openclaw.skill.source");
-  promoteAlias(next, "final_status", "openclaw.outcome", "openclaw.final_state");
+  promoteAlias(next, "final_status", "openclaw.outcome");
   delete next.__suppress_usage_cache_total_tokens;
   return next;
 }
@@ -1240,19 +1243,6 @@ export function extractToolCommand(toolName: string, args: unknown): string | un
   return undefined;
 }
 
-export function extractToolResultStatus(result: unknown): string | undefined {
-  if (!isRecord(result)) {
-    return undefined;
-  }
-  if (isRecord(result.details) && typeof result.details.status === "string") {
-    return result.details.status;
-  }
-  if (typeof result.status === "string") {
-    return result.status;
-  }
-  return undefined;
-}
-
 export function buildToolAttrs(
   toolName: string,
   toolCallId: string,
@@ -1290,7 +1280,7 @@ export function buildToolAttrs(
     "openclaw.tool.call_id": toolCallId,
     "openclaw.skill.name": options?.skillName,
     "openclaw.tool.phase": options?.phase,
-    "openclaw.tool.outcome": options?.outcome,
+    "openclaw.tool.result_status": options?.outcome,
     "openclaw.tool.arg_keys": summarizeToolArgKeys(options?.args),
     "openclaw.tool.target": extractToolTarget(toolName, options?.args, options?.meta),
     "openclaw.tool.command": extractToolCommand(toolName, options?.args),
@@ -1302,7 +1292,6 @@ export function buildToolAttrs(
     "openclaw.tool.meta.preview": clipValuePreview(options?.meta),
     "openclaw.tool.result.preview": clipValuePreview(options?.result),
     "openclaw.tool.partial_result.preview": clipValuePreview(options?.partialResult),
-    "openclaw.tool.result_status": extractToolResultStatus(options?.result ?? options?.partialResult),
   };
 }
 
@@ -1318,7 +1307,6 @@ export function collectToolSummaryValues(
   return {
     target: extractToolTarget(toolName, options?.args, options?.meta),
     command: extractToolCommand(toolName, options?.args),
-    resultStatus: extractToolResultStatus(options?.result ?? options?.partialResult),
     mcpToolName: extractMcpToolName(
       toolName,
       options?.args,
@@ -1389,7 +1377,6 @@ export function buildGenAiAgentRequestMetricAttrs(
 
 export function buildToolMetricAttrs(
   tool: Pick<ActiveToolSpan, "name" | "skillName" | "provider" | "namespace" | "mcpToolName" | "mcpHost">,
-  outcome?: string,
   resultStatus?: string,
 ) {
   return stringAttrs({
@@ -1399,14 +1386,12 @@ export function buildToolMetricAttrs(
     "openclaw.tool.namespace": tool.namespace,
     "openclaw.tool.mcp_name": tool.mcpToolName,
     "openclaw.tool.mcp_host": tool.mcpHost,
-    "openclaw.tool_outcome": outcome,
     "openclaw.tool_result_status": resultStatus,
   });
 }
 
 export function buildGenAiClientToolMetricAttrs(
   tool: Pick<ActiveToolSpan, "name" | "skillName" | "provider" | "namespace" | "mcpToolName" | "mcpHost">,
-  outcome?: string,
   resultStatus?: string,
   sessionId?: string,
   modelName?: string,
@@ -1421,7 +1406,7 @@ export function buildGenAiClientToolMetricAttrs(
     tool_mcp_name: tool.mcpToolName,
     tool_mcp_host: tool.mcpHost,
     model_name: modelName,
-    outcome,
+    outcome: resultStatus,
     tool_result_status: resultStatus,
   });
 }
@@ -1696,7 +1681,6 @@ export function mergeToolIdentity(
     namespace: tool.namespace ?? summary.namespace,
     mcpToolName: tool.mcpToolName ?? summary.mcpToolName,
     mcpHost: tool.mcpHost ?? summary.mcpToolHost,
-    resultStatus: summary.resultStatus,
   };
 }
 

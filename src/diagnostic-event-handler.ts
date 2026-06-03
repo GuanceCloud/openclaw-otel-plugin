@@ -408,19 +408,18 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           getRun(evt, false)?.runId ?? snapshot?.runId,
         );
         const finalOutcome = getRun(evt, false)?.pendingFinalOutcome
-          ?? resolveSnapshotFinalOutcome(snapshot)
-          ?? evt.state;
+          ?? resolveSnapshotFinalOutcome(snapshot);
         endRun(evt, stringAttrs({
           "openclaw.state": evt.state,
           "openclaw.outcome": finalOutcome,
-            "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
-          }));
-          endRoot(evt, stringAttrs({
-            "openclaw.state": evt.state,
-            "openclaw.outcome": finalOutcome,
-            "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
-          }));
-          clearRun(evt);
+          "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
+        }));
+        endRoot(evt, stringAttrs({
+          "openclaw.state": evt.state,
+          "openclaw.outcome": finalOutcome,
+          "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
+        }));
+        clearRun(evt);
         }
         break;
       }

@@ -741,6 +741,62 @@ test("session store reads final status from trace.artifacts and session.ended", 
   assert.equal(snapshot.runFinalStatus, "success");
 });
 
+test("session store infers completed run from final assistant stopReason", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "s7.jsonl");
+  const trajectoryFile = path.join(sessionsDir, "s7.trajectory.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s7: {
+        sessionFile,
+        sessionId: "session-7",
+      },
+    }),
+  );
+  fs.writeFileSync(
+    trajectoryFile,
+    `${JSON.stringify({
+      type: "session.started",
+      runId: "run-7",
+      ts: "2026-05-14T12:05:46.000Z",
+    })}\n`,
+  );
+  fs.writeFileSync(
+    sessionFile,
+    `${JSON.stringify({
+      type: "message",
+      timestamp: "2026-05-14T12:05:47.000Z",
+      message: {
+        role: "user",
+        content: "hello",
+        idempotencyKey: "run-7:user",
+      },
+    })}\n${JSON.stringify({
+      type: "message",
+      timestamp: "2026-05-14T12:05:49.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "world" }],
+        stopReason: "stop",
+      },
+    })}\n`,
+  );
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const snapshot = store.loadSessionSnapshot("s7");
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.runId, "run-7");
+  assert.equal(snapshot.runCompleted, true);
+  assert.equal(snapshot.runTerminalType, "assistant.stop");
+  assert.equal(snapshot.runFinalStatus, "success");
+});
+
 test("session store resolves sessionKey from sessionId", () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
   const sessionsDir = path.join(stateDir, "agents", "main", "sessions");

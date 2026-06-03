@@ -1319,13 +1319,29 @@ export function createOtelPluginService(
         releaseRequestKey(sessionKey, requestKey);
       };
 
+      const concludeActiveRequest = (
+        evt: { sessionKey?: string; sessionId?: string; runId?: string; ts?: number },
+        attrs: Record<string, string | number | boolean>,
+      ) => {
+        endRun(evt, attrs);
+        endRoot(evt, attrs);
+        clearRun(evt);
+      };
+
       const cleanupExpiredRoots = () => {
         const now = Date.now();
-        for (const [requestKey, current] of activeRoots.entries()) {
+        for (const [requestKey, current] of Array.from(activeRoots.entries())) {
+          if (activeRuns.has(requestKey)) {
+            continue;
+          }
           if (now - current.lastTouchedAt < config.rootSpanTtlMs) {
             continue;
           }
           addEvent(current.span, "session.timeout", { "openclaw.root.ttl_ms": config.rootSpanTtlMs });
+          current.span.setAttributes(traceAttrs(normalizeTerminalSpanAttrs(stringAttrs({
+            "openclaw.outcome": "interrupted",
+            "openclaw.reason": "session.timeout",
+          }))));
           endSpanSafely(current.span);
           const metricState = current.sessionIdentity
             ? sessionMetricTokenState.get(current.sessionIdentity)
@@ -1336,16 +1352,29 @@ export function createOtelPluginService(
           activeRoots.delete(requestKey);
           releaseRequestKey(current.sessionIdentity, requestKey);
         }
-        for (const [requestKey, current] of activeRuns.entries()) {
+        for (const [requestKey, current] of Array.from(activeRuns.entries())) {
           if (now - current.lastTouchedAt < config.rootSpanTtlMs) {
             continue;
           }
-          if (current.span) {
-            addEvent(current.span, "run.timeout", { "openclaw.root.ttl_ms": config.rootSpanTtlMs });
-          } else if (current.userSpan) {
-            addEvent(current.userSpan, "run.timeout", { "openclaw.root.ttl_ms": config.rootSpanTtlMs });
+          const terminalAttrs = stringAttrs({
+            "openclaw.outcome": "interrupted",
+            "openclaw.reason": "session.timeout",
+          });
+          const concludeEvt = {
+            sessionKey: current.sessionIdentity,
+            runId: current.runId,
+            ts: now,
+          };
+          if (current.sessionIdentity) {
+            concludeActiveRequest(concludeEvt, terminalAttrs);
+          } else {
+            if (current.span) {
+              addEvent(current.span, "run.timeout", { "openclaw.root.ttl_ms": config.rootSpanTtlMs });
+            } else if (current.userSpan) {
+              addEvent(current.userSpan, "run.timeout", { "openclaw.root.ttl_ms": config.rootSpanTtlMs });
+            }
+            finalizeRunSpans(current);
           }
-          finalizeRunSpans(current);
           const metricState = current.sessionIdentity
             ? sessionMetricTokenState.get(current.sessionIdentity)
             : undefined;
@@ -1573,14 +1602,32 @@ export function createOtelPluginService(
         clearInterval(sessionMetricsInterval);
         sessionMetricsInterval = null;
       }
-      for (const current of activeRuns.values()) {
+      for (const current of Array.from(activeRuns.values())) {
+        if (current.sessionIdentity) {
+          concludeActiveRequest(
+            {
+              sessionKey: current.sessionIdentity,
+              runId: current.runId,
+              ts: Date.now(),
+            },
+            stringAttrs({
+              "openclaw.outcome": "interrupted",
+              "openclaw.reason": "runtime.stop",
+            }),
+          );
+          continue;
+        }
         toolSpanManager.finalizeToolAndSkillSpans(current);
         endSpanSafely(current.modelSpan);
         endSpanSafely(current.span);
         endSpanSafely(current.userSpan);
       }
       activeRuns.clear();
-      for (const { span } of activeRoots.values()) {
+      for (const { span } of Array.from(activeRoots.values())) {
+        span.setAttributes(traceAttrs(normalizeTerminalSpanAttrs(stringAttrs({
+          "openclaw.outcome": "interrupted",
+          "openclaw.reason": "runtime.stop",
+        }))));
         endSpanSafely(span);
       }
       activeRoots.clear();

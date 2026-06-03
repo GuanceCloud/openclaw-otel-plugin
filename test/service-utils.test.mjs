@@ -21,7 +21,6 @@ import {
   buildGenAiRuntimeWebhookMetricAttrs,
   buildSessionMetricAttrs,
   computeSessionMetricDelta,
-  extractToolResultStatus,
   loadSnapshotForEvent,
   resolveAgentIdentity,
   readReplayFinalizationState,
@@ -355,7 +354,8 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.tool_target, "/tmp/demo.txt");
   assert.equal(attrs.tool_provider, "mcp");
   assert.equal(attrs.tool_namespace, "owl");
-  assert.equal(attrs.tool_outcome, "completed");
+  assert.equal(attrs.tool_result_status, "completed");
+  assert.equal(attrs.tool_outcome, undefined);
   assert.equal(attrs.tool_phase, "result");
   assert.equal(attrs.tool_loop_level, "critical");
   assert.equal(attrs.skill_call_id, "skill-call-1");
@@ -493,7 +493,8 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   assert.equal(attrs.tool_command, "cat /tmp/workspace/demo.txt");
   assert.equal(attrs.tool_provider, "mcp");
   assert.equal(attrs.tool_namespace, "owl");
-  assert.equal(attrs.tool_outcome, "completed");
+  assert.equal(attrs.tool_result_status, "completed");
+  assert.equal(attrs.tool_outcome, undefined);
   assert.equal(attrs.tool_phase, "result");
   assert.equal(attrs.tool_loop_level, "critical");
   assert.equal(attrs.skill_call_id, "skill-call-1");
@@ -559,6 +560,16 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   assert.equal(attrs["openclaw.session.updatedAt"], undefined);
 });
 
+test("final_status no longer falls back to final_state", () => {
+  const attrs = stringAttrs({
+    "openclaw.final_state": "idle",
+    "openclaw.state": "idle",
+  });
+
+  assert.equal(attrs.final_status, undefined);
+  assert.equal(attrs.state, "idle");
+});
+
 test("stringAttrs keeps zero-valued token aliases on summary spans", () => {
   const attrs = stringAttrs({
     "openclaw.tokens.input": 0,
@@ -613,11 +624,13 @@ test("buildToolAttrs infers mcp provider and namespace from dotted tool names", 
   assert.equal(attrs["openclaw.tool.namespace"], "owl");
 });
 
-test("extractToolResultStatus only uses explicit status fields", () => {
-  assert.equal(extractToolResultStatus({ details: { status: "blocked" } }), "blocked");
-  assert.equal(extractToolResultStatus({ status: "timeout" }), "timeout");
-  assert.equal(extractToolResultStatus({ outcome: "error" }), undefined);
-  assert.equal(extractToolResultStatus({}), undefined);
+test("buildToolAttrs uses final result status instead of result payload fields", () => {
+  const attrs = buildToolAttrs("web_search", "call-1", {
+    outcome: "completed",
+    result: { status: "timeout", details: { status: "blocked" } },
+  });
+
+  assert.equal(attrs["openclaw.tool.result_status"], "completed");
 });
 
 test("resolveSessionMetricTotals reads cumulative values from a session snapshot", () => {
@@ -708,7 +721,6 @@ test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
   const attrs = buildGenAiClientToolMetricAttrs(
     { name: "exec", skillName: "dashboard" },
     "completed",
-    "success",
     "session-1",
     "gpt-5",
   );
@@ -717,7 +729,7 @@ test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
   assert.equal(attrs.tool_name, "exec");
   assert.equal(attrs.skill_name, "dashboard");
   assert.equal(attrs.model_name, "gpt-5");
-  assert.equal(attrs.tool_result_status, "success");
+  assert.equal(attrs.tool_result_status, "completed");
   assert.equal(attrs.session_id, "session-1");
 });
 
