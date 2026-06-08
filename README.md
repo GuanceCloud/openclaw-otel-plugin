@@ -210,8 +210,6 @@ Runtime metadata may contribute:
 
 - `agent_version`
 - `runtime_environment`
-- `agent_id`
-- `agent_name`
 
 ## Dataway Example
 

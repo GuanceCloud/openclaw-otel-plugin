@@ -2,6 +2,28 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-06-05
+
+### Trace Replay Correctness
+
+- Prevented transcript replay from writing a previous request's assistant snapshot into a newer active trace when the session has already queued the next user message, fixing cross-request output mixing inside the same `session_id`.
+- Stopped stale transcript update / sweep replay from reopening or duplicating traces when the replay snapshot clearly belongs to an older request window.
+- Added an internal per-session request sequence/history so diagnostics events without a stable upstream request key are matched by queued-request lineage and message timing instead of always falling through to the latest active trace.
+- Tightened `message.processed` / terminal `session.state` handling so stale completed snapshots no longer close the wrong active trace or attach old output previews to it.
+- Removed transcript replay finalization decisions that still depended on `run_id`, so a lagging trajectory `runId` can no longer suppress a newer request window inside the same session.
+- Allowed completed transcript snapshots to reconstruct a missing request trace even when no active runtime trace survived, fixing follow-up requests in the same session that previously produced no exported trace after the first round.
+- Added trajectory backlog replay for completed runs so multiple follow-up requests completed between periodic sweeps are reconstructed one by one instead of collapsing to only the latest transcript snapshot.
+- Persisted per-session trajectory replay source sequence and expanded periodic sweeps to recently updated sessions, preventing missed follow-up traces when transcript update callbacks or diagnostics terminal events are absent.
+- Suppressed duplicate exports for the same completed request when transcript/live finalization wins before trajectory terminal lines are flushed, so the later trajectory backlog only advances replay position instead of emitting a second trace.
+- Corrected trajectory terminal-source tracking so only `trace.artifacts` / `session.ended` advance replay position; non-terminal `model.completed` lines no longer clear duplicate suppression early and re-emit the same request trace.
+- Buffered ended spans by `trace_id` until the request root span closes, so long or stalled requests no longer get split into multiple OTLP trace exports that can appear as duplicate partial traces in downstream UIs.
+- Expanded queued-request rotation detection to treat runtime processing / egress lifecycle progress and terminal outcomes as proof that the previous request has already started, so same-session follow-up messages no longer reuse the prior trace when transcript replay is late or incomplete.
+- Propagated late-arriving request `runId` values into buffered runtime lifecycle spans, so `channel_ingress`, `session_processing`, and related spans carry the same `run_id` as the request, agent, and model spans even when the identity is only known after those spans ended.
+- Stripped stale transcript snapshot `runId` values from processing backfill metadata and made explicit event `runId` win over older primary IDs, preventing same-session follow-up traces from exporting root / lifecycle spans with the previous request's `run_id`.
+- Kept active traces closing on terminal `message.processed` / `session.state` events even when the latest transcript snapshot is stale, so stale replay protection no longer leaves buffered roots unexported.
+- Stopped auto-emitting `agent_id` and `agent_name` on trace/span attributes and trace debug summaries; explicit `resourceAttributes` / `globalTags` values are still preserved as user-supplied resource tags.
+- Normalized trajectory-backed terminal statuses before emitting `final_status`, so upstream `success` values now appear as canonical `completed` in reconstructed traces and request metrics.
+
 ## 2026-05-28
 
 ### Trace Field Hygiene

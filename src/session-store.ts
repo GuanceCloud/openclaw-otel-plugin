@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  CompletedTrajectoryRun,
   RuntimeMetadata,
+  RunUsageTotals,
   SessionSnapshot,
   SessionSnapshotStore,
+  SessionRunState,
   SkillCatalogEntry,
   TranscriptAssistantTurn,
   TranscriptToolCall,
@@ -147,6 +150,10 @@ function resolveEnvelopeTimestamp(
   return parseMessageTimestamp(lineTimestamp) ?? parseMessageTimestamp(messageTimestamp);
 }
 
+function isTrajectoryTerminalType(value: unknown): boolean {
+  return value === "trace.artifacts" || value === "session.ended";
+}
+
 function resolveSessionTrajectoryFile(sessionFile: string): string | undefined {
   if (!sessionFile.endsWith(".jsonl")) {
     return undefined;
@@ -194,7 +201,7 @@ function readSessionLatestRunId(sessionFile: string): string | undefined {
 
 function readSessionLatestRunState(
   sessionFile: string,
-): { runId?: string; runCompleted?: boolean; runTerminalType?: string; runFinalStatus?: string } {
+): SessionRunState {
   const trajectoryFile = resolveSessionTrajectoryFile(sessionFile);
   if (!trajectoryFile || !fs.existsSync(trajectoryFile)) {
     return {};
@@ -202,6 +209,7 @@ function readSessionLatestRunState(
   let latestRunId: string | undefined;
   let latestRunTerminalType: string | undefined;
   let latestRunFinalStatus: string | undefined;
+  let latestTerminalSourceSeq: number | undefined;
   try {
     for (const line of readJsonLines(trajectoryFile)) {
       const runId = typeof line?.runId === "string" ? line.runId.trim() : "";
@@ -210,6 +218,13 @@ function readSessionLatestRunState(
       }
       latestRunId = runId;
       latestRunTerminalType = typeof line?.type === "string" ? line.type : undefined;
+      if (
+        isTrajectoryTerminalType(line?.type)
+        && typeof line?.sourceSeq === "number"
+        && Number.isFinite(line.sourceSeq)
+      ) {
+        latestTerminalSourceSeq = line.sourceSeq;
+      }
       const rawFinalStatus = typeof line?.data?.finalStatus === "string"
         ? line.data.finalStatus.trim()
         : typeof line?.data?.status === "string"
@@ -220,19 +235,20 @@ function readSessionLatestRunState(
   } catch {
     return {};
   }
-  const runCompleted = latestRunTerminalType === "trace.artifacts" || latestRunTerminalType === "session.ended";
+  const runCompleted = isTrajectoryTerminalType(latestRunTerminalType);
   return {
     runId: latestRunId,
     runCompleted,
     runTerminalType: latestRunTerminalType,
     runFinalStatus: latestRunFinalStatus,
+    terminalSourceSeq: latestTerminalSourceSeq,
   };
 }
 
 function readSessionRunState(
   sessionFile: string,
   targetRunId?: string,
-): { runId?: string; runCompleted?: boolean; runTerminalType?: string; runFinalStatus?: string } {
+): SessionRunState {
   if (!targetRunId) {
     return readSessionLatestRunState(sessionFile);
   }
@@ -244,6 +260,7 @@ function readSessionRunState(
   let latestType: string | undefined;
   let runCompleted = false;
   let runFinalStatus: string | undefined;
+  let terminalSourceSeq: number | undefined;
   try {
     for (const line of readJsonLines(trajectoryFile)) {
       const runId = typeof line?.runId === "string" ? line.runId.trim() : "";
@@ -252,7 +269,14 @@ function readSessionRunState(
       }
       sawRunId = true;
       latestType = typeof line?.type === "string" ? line.type : latestType;
-      if (latestType === "trace.artifacts" || latestType === "session.ended") {
+      if (
+        isTrajectoryTerminalType(line?.type)
+        && typeof line?.sourceSeq === "number"
+        && Number.isFinite(line.sourceSeq)
+      ) {
+        terminalSourceSeq = line.sourceSeq;
+      }
+      if (isTrajectoryTerminalType(latestType)) {
         runCompleted = true;
       }
       const rawFinalStatus = typeof line?.data?.finalStatus === "string"
@@ -273,7 +297,157 @@ function readSessionRunState(
     runCompleted,
     runTerminalType: latestType,
     runFinalStatus,
+    terminalSourceSeq,
   };
+}
+
+function resolveTrajectoryUsage(raw: unknown): RunUsageTotals | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const record = raw as Record<string, unknown>;
+  const usage: RunUsageTotals = {
+    input: typeof record.input === "number" ? record.input : undefined,
+    output: typeof record.output === "number" ? record.output : undefined,
+    cacheRead: typeof record.cacheRead === "number" ? record.cacheRead : undefined,
+    cacheWrite: typeof record.cacheWrite === "number" ? record.cacheWrite : undefined,
+    total: typeof record.total === "number"
+      ? record.total
+      : typeof record.totalTokens === "number"
+        ? record.totalTokens
+        : undefined,
+  };
+  return Object.values(usage).some((value) => typeof value === "number") ? usage : undefined;
+}
+
+function resolveLastMessageSnapshot(messagesSnapshot: unknown): {
+  userText?: string;
+  userTs?: number;
+  assistantText?: string;
+  assistantTs?: number;
+} {
+  if (!Array.isArray(messagesSnapshot)) {
+    return {};
+  }
+  let userText: string | undefined;
+  let userTs: number | undefined;
+  let assistantText: string | undefined;
+  let assistantTs: number | undefined;
+  for (const message of messagesSnapshot) {
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    const record = message as Record<string, unknown>;
+    const role = typeof record.role === "string" ? record.role : undefined;
+    const timestamp = parseMessageTimestamp(record.timestamp);
+    if (role === "user") {
+      userText = extractContentText(record.content, "text") ?? userText;
+      userTs = timestamp ?? userTs;
+      continue;
+    }
+    if (role === "assistant") {
+      assistantText = extractContentText(record.content, "text") ?? assistantText;
+      assistantTs = timestamp ?? assistantTs;
+    }
+  }
+  return {
+    userText,
+    userTs,
+    assistantText,
+    assistantTs,
+  };
+}
+
+function findLastString(values: unknown): string | undefined {
+  if (!Array.isArray(values)) {
+    return undefined;
+  }
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = values[index];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readCompletedTrajectoryRuns(
+  sessionKey: string,
+  sessionFile: string,
+  sessionId: string | undefined,
+  afterSourceSeqExclusive = 0,
+): CompletedTrajectoryRun[] {
+  const trajectoryFile = resolveSessionTrajectoryFile(sessionFile);
+  if (!trajectoryFile || !fs.existsSync(trajectoryFile)) {
+    return [];
+  }
+  const runs = new Map<string, CompletedTrajectoryRun>();
+  try {
+    for (const line of readJsonLines(trajectoryFile)) {
+      const runId = typeof line?.runId === "string" ? line.runId.trim() : "";
+      if (!runId) {
+        continue;
+      }
+      const record = runs.get(runId) ?? {
+        sessionKey,
+        sessionFile,
+        sessionId,
+        runId,
+        sourceSeq: -1,
+      };
+      const lineTs = parseMessageTimestamp(line?.ts);
+      if (line?.type === "session.started") {
+        record.startedAt = lineTs ?? record.startedAt;
+        record.provider = typeof line?.provider === "string" ? line.provider : record.provider;
+        record.model = typeof line?.modelId === "string" ? line.modelId : record.model;
+      } else if (line?.type === "model.completed") {
+        const conversation = resolveLastMessageSnapshot(line?.data?.messagesSnapshot);
+        record.provider = typeof line?.provider === "string" ? line.provider : record.provider;
+        record.model = typeof line?.modelId === "string" ? line.modelId : record.model;
+        record.completedAt = lineTs ?? record.completedAt;
+        record.finalPromptText = typeof line?.data?.finalPromptText === "string"
+          ? line.data.finalPromptText
+          : record.finalPromptText;
+        record.userText = conversation.userText ?? record.userText;
+        record.userTs = conversation.userTs ?? record.userTs;
+        record.assistantText = findLastString(line?.data?.assistantTexts)
+          ?? conversation.assistantText
+          ?? record.assistantText;
+        record.assistantTs = conversation.assistantTs ?? record.assistantTs;
+        record.usage = resolveTrajectoryUsage(line?.data?.usage) ?? record.usage;
+      } else if (line?.type === "trace.artifacts" || line?.type === "session.ended") {
+        const sourceSeq = typeof line?.sourceSeq === "number" && Number.isFinite(line.sourceSeq)
+          ? line.sourceSeq
+          : typeof line?.seq === "number" && Number.isFinite(line.seq)
+            ? line.seq
+            : undefined;
+        if (typeof sourceSeq === "number" && sourceSeq >= record.sourceSeq) {
+          record.sourceSeq = sourceSeq;
+          record.completedAt = lineTs ?? record.completedAt;
+          record.provider = typeof line?.provider === "string" ? line.provider : record.provider;
+          record.model = typeof line?.modelId === "string" ? line.modelId : record.model;
+          record.finalStatus = typeof line?.data?.finalStatus === "string"
+            ? line.data.finalStatus
+            : typeof line?.data?.status === "string"
+              ? line.data.status
+              : record.finalStatus;
+          record.finalPromptText = typeof line?.data?.finalPromptText === "string"
+            ? line.data.finalPromptText
+            : record.finalPromptText;
+          if (!record.assistantText) {
+            record.assistantText = findLastString(line?.data?.assistantTexts);
+          }
+          record.usage = resolveTrajectoryUsage(line?.data?.usage) ?? record.usage;
+        }
+      }
+      runs.set(runId, record);
+    }
+  } catch {
+    return [];
+  }
+  return Array.from(runs.values())
+    .filter((run) => run.sourceSeq > afterSourceSeqExclusive)
+    .sort((left, right) => left.sourceSeq - right.sourceSeq);
 }
 
 function readTrajectoryMtimeMs(sessionFile: string): number | undefined {
@@ -466,7 +640,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       let lastAssistantText: string | undefined;
       let lastAssistantTs: number | undefined;
       let lastAssistantThinking: string | undefined;
-      let lastAssistantStopReason: string | undefined;
+      let currentRunLastAssistantStopReason: string | undefined;
       let lastProvider: string | undefined;
       let lastModel: string | undefined;
       let sessionCwd: string | undefined;
@@ -514,20 +688,21 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           currentRunInputPreview = normalizeUserInputPreview(userText);
           currentRunCacheReadRaw = undefined;
           currentRunCacheWriteRaw = undefined;
+          currentRunLastAssistantStopReason = undefined;
         }
         if (message.role === "assistant") {
           const assistantText = extractContentText(message.content, "text");
           const assistantThinking = extractContentText(message.content, "thinking");
           const turnToolCallNames: string[] = [];
+          const startedAt = resolveEnvelopeTimestamp(line.timestamp, message.timestamp);
           lastAssistantText = assistantText ?? lastAssistantText;
           lastAssistantThinking = assistantThinking ?? lastAssistantThinking;
-          lastAssistantStopReason =
+          currentRunLastAssistantStopReason =
             typeof message.stopReason === "string" && message.stopReason.trim()
               ? message.stopReason.trim()
-              : lastAssistantStopReason;
+              : currentRunLastAssistantStopReason;
           lastProvider = typeof message.provider === "string" ? message.provider : lastProvider;
           lastModel = typeof message.model === "string" ? message.model : lastModel;
-          const startedAt = resolveEnvelopeTimestamp(line.timestamp, message.timestamp);
           lastAssistantTs = startedAt ?? lastAssistantTs;
           if (Array.isArray(message.content)) {
             for (const item of message.content) {
@@ -684,7 +859,11 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       )
         ? readSessionRunState(sessionFile, resolvedRunId)
         : latestRunState;
-      const inferredRunCompleted = resolvedRunState.runCompleted !== true && lastAssistantStopReason === "stop";
+      const inferredRunCompleted = (
+        resolvedRunState.runCompleted !== true
+        && currentRunAssistantTurns.length > 0
+        && currentRunLastAssistantStopReason === "stop"
+      );
       const inferredRunTerminalType = inferredRunCompleted ? "assistant.stop" : resolvedRunState.runTerminalType;
       const inferredRunFinalStatus = inferredRunCompleted
         ? (resolvedRunState.runFinalStatus || "success")
@@ -788,6 +967,33 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         return {};
       }
       return readSessionRunState(sessionFile, runId);
+    },
+    listRecentSessionKeys(sinceUpdatedAt?: number) {
+      if (typeof sinceUpdatedAt !== "number" || !Number.isFinite(sinceUpdatedAt)) {
+        return Array.from(sessionMetaBySessionKey.keys());
+      }
+      return Array.from(sessionMetaBySessionKey.entries())
+        .filter(([, meta]) => typeof meta.updatedAt === "number" && meta.updatedAt > sinceUpdatedAt)
+        .map(([sessionKey]) => sessionKey);
+    },
+    listCompletedTrajectoryRuns(sessionKey: string | undefined, afterSourceSeqExclusive = 0) {
+      if (!sessionKey) {
+        return [];
+      }
+      let sessionFile = sessionFileBySessionKey.get(sessionKey);
+      if (!sessionFile) {
+        refreshSessionsIndex();
+        sessionFile = sessionFileBySessionKey.get(sessionKey);
+      }
+      if (!sessionFile) {
+        return [];
+      }
+      return readCompletedTrajectoryRuns(
+        sessionKey,
+        sessionFile,
+        sessionMetaBySessionKey.get(sessionKey)?.sessionId,
+        afterSourceSeqExclusive,
+      );
     },
     clear() {
       transcriptSnapshotBySession.clear();

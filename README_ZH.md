@@ -210,8 +210,6 @@ resource attributes 合并顺序：
 
 - `agent_version`
 - `runtime_environment`
-- `agent_id`
-- `agent_name`
 
 ## Dataway 配置示例
 

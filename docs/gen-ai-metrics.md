@@ -20,7 +20,7 @@
 
 - 所有 duration / wait / age 相关直方图仍使用 `ms`
 - 当前不展开历史兼容关系，不讨论旧指标映射
-- Resource 级属性也统一使用 canonical tag，例如 `agent_id`、`agent_name`、`agent_runtime`
+- Resource 级属性也统一使用 canonical tag，例如 `agent_runtime`、`agent_version`、`runtime_environment`
 - 平台里如果还能看到 `gen_ai_agent_*`，通常来自历史指标点，不代表当前实现仍会继续上报
 - 旧 `openclaw.*` 指标兼容双写已移除；如果平台里还能看到，通常来自历史指标点
 

@@ -8,17 +8,19 @@ import { createDiagnosticEventHandler } from "./diagnostic-event-handler.js";
 import { startOtelBootstrap } from "./otel-bootstrap.js";
 import {
   createSessionSnapshotStore,
-  resolveConfiguredAgents,
   resolveRuntimeMetadata,
 } from "./session-store.js";
 import type {
   ActiveRootSpan,
   ActiveRunSpan,
+  CompletedTrajectoryRun,
   RuntimeLike,
   SessionSnapshotStore,
 } from "./service-types.js";
 import {
   addEvent,
+  buildGenAiAgentTokenMetricAttrs,
+  buildGenAiClientModelMetricAttrs,
   buildGenAiAgentSessionMetricAttrs,
   buildGenAiAgentRequestMetricAttrs,
   buildRunScopeAttrs,
@@ -33,19 +35,22 @@ import {
   MIN_VISIBLE_CHILD_MS,
   MIN_VISIBLE_MODEL_MS,
   normalizeReasoningPreview,
+  normalizeFinalStatus,
   normalizeUserInputPreview,
   parseSessionKey,
   redactSensitiveText,
   readReplayFinalizationState,
   rememberRunId,
-  resolveAgentIdentity,
   resolveReplayFinalizationStateFile,
+  resolveTranscriptReplayFreshness,
+  resolveTranscriptReplayPlan,
   resolveIngressLifecycleWindows,
   resolveRequestClassification,
   resolveSessionMetricTotals,
   resolveSpanWindow,
   resolveUsageTokenTotals,
   sessionIdentity,
+  shouldFallbackRunBoundEventToActiveRequest,
   stringAttrs,
   traceAttrs,
   writeReplayFinalizationState,
@@ -68,6 +73,13 @@ export function createOtelPluginService(
   const activeRoots = new Map<string, ActiveRootSpan>();
   const activeRuns = new Map<string, ActiveRunSpan>();
   const activeRequestKeyBySession = new Map<string, string>();
+  const requestHistoryBySession = new Map<string, Array<{
+    requestKey: string;
+    requestSeq: number;
+    startedAt: number;
+    messageId?: string;
+    closedAt?: number;
+  }>>();
   const reportedSessionMetrics = new Map<string, {
     inputTokens: number;
     outputTokens: number;
@@ -75,8 +87,10 @@ export function createOtelPluginService(
     traceCount: number;
   }>();
   const replayWatermarkBySession = new Map<string, string>();
-  const finalizedReplayRunIdBySession = new Map<string, string>();
+  const replayTrajectorySourceSeqBySession = new Map<string, number>();
+  const pendingTrajectoryReplayRunIdsBySession = new Map<string, Set<string>>();
   let requestSequence = 0;
+  let recentSessionSweepAt = 0;
   const sessionMetricTokenState = new Map<string, {
     inputTokens: number;
     outputTokens: number;
@@ -96,9 +110,6 @@ export function createOtelPluginService(
       }
 
       sessionStore = createSessionSnapshotStore(ctx.stateDir);
-      const configuredAgentById = new Map(
-        resolveConfiguredAgents(ctx.stateDir).map((agent) => [agent.id, agent]),
-      );
       const runtimeMetadata = resolveRuntimeMetadata(ctx.stateDir);
       const {
         sdk: otelSdk,
@@ -119,25 +130,17 @@ export function createOtelPluginService(
         if (value.watermark) {
           replayWatermarkBySession.set(sessionKey, value.watermark);
         }
-        if (value.runId) {
-          finalizedReplayRunIdBySession.set(sessionKey, value.runId);
+        if (typeof value.trajectorySourceSeq === "number") {
+          replayTrajectorySourceSeqBySession.set(sessionKey, value.trajectorySourceSeq);
+        }
+        if (value.pendingRunIds?.length) {
+          pendingTrajectoryReplayRunIdsBySession.set(sessionKey, new Set(value.pendingRunIds));
         }
       }
+      recentSessionSweepAt = Date.now() - config.flushIntervalMs;
 
       const loadSessionSnapshot = (sessionKey: string | undefined) =>
         sessionStore?.loadSessionSnapshot(sessionKey);
-
-      const resolveSpanAgentIdentity = (
-        sessionKey: string | undefined,
-        snapshot: ReturnType<typeof loadSessionSnapshot> | undefined,
-        attrs?: Record<string, string | number | boolean | undefined>,
-      ) => resolveAgentIdentity({
-        sessionKey,
-        snapshot,
-        attrs,
-        configuredAgentById,
-        runtimeMetadata,
-      });
 
       const buildReplayWatermark = (
         snapshot: ReturnType<typeof loadSessionSnapshot>,
@@ -170,16 +173,6 @@ export function createOtelPluginService(
         return replayWatermarkBySession.get(sessionKey) === watermark;
       };
 
-      const hasFinalizedReplayRunId = (
-        sessionKey: string | undefined,
-        runId: string | undefined,
-      ) => {
-        if (!sessionKey || !runId) {
-          return false;
-        }
-        return finalizedReplayRunIdBySession.get(sessionKey) === runId;
-      };
-
       const markReplayWatermark = (
         sessionKey: string | undefined,
         snapshot: ReturnType<typeof loadSessionSnapshot>,
@@ -193,27 +186,103 @@ export function createOtelPluginService(
         }
         replayWatermarkBySession.set(sessionKey, watermark);
         if (snapshot?.runCompleted === true) {
+          if (snapshot.runId) {
+            const pendingRunIds = pendingTrajectoryReplayRunIdsBySession.get(sessionKey) ?? new Set<string>();
+            pendingRunIds.add(snapshot.runId);
+            pendingTrajectoryReplayRunIdsBySession.set(sessionKey, pendingRunIds);
+          }
           const current = persistedReplayFinalizationBySession.get(sessionKey) ?? {};
           current.watermark = watermark;
+          current.pendingRunIds = Array.from(
+            pendingTrajectoryReplayRunIdsBySession.get(sessionKey) ?? [],
+          ).slice(-16);
           current.updatedAt = Date.now();
           persistedReplayFinalizationBySession.set(sessionKey, current);
           writeReplayFinalizationState(replayFinalizationStateFile, persistedReplayFinalizationBySession);
+          markTrajectoryReplayPositionForRun(sessionKey, snapshot.runId);
         }
       };
 
-      const markFinalizedReplayRunId = (
+      const markTrajectoryReplaySourceSeq = (
+        sessionKey: string | undefined,
+        trajectorySourceSeq: number | undefined,
+      ) => {
+        if (!sessionKey || typeof trajectorySourceSeq !== "number" || !Number.isFinite(trajectorySourceSeq)) {
+          return;
+        }
+        const currentValue = replayTrajectorySourceSeqBySession.get(sessionKey) ?? -1;
+        if (trajectorySourceSeq <= currentValue) {
+          return;
+        }
+        replayTrajectorySourceSeqBySession.set(sessionKey, trajectorySourceSeq);
+        const persisted = persistedReplayFinalizationBySession.get(sessionKey) ?? {};
+        persisted.trajectorySourceSeq = trajectorySourceSeq;
+        persisted.updatedAt = Date.now();
+        persistedReplayFinalizationBySession.set(sessionKey, persisted);
+        writeReplayFinalizationState(replayFinalizationStateFile, persistedReplayFinalizationBySession);
+      };
+
+      const persistPendingTrajectoryReplayRunIds = (sessionKey: string | undefined) => {
+        if (!sessionKey) {
+          return;
+        }
+        const pendingRunIds = pendingTrajectoryReplayRunIdsBySession.get(sessionKey);
+        const persisted = persistedReplayFinalizationBySession.get(sessionKey) ?? {};
+        persisted.pendingRunIds = pendingRunIds?.size ? Array.from(pendingRunIds).slice(-16) : undefined;
+        persisted.updatedAt = Date.now();
+        persistedReplayFinalizationBySession.set(sessionKey, persisted);
+        writeReplayFinalizationState(replayFinalizationStateFile, persistedReplayFinalizationBySession);
+      };
+
+      const rememberPendingTrajectoryReplayRunId = (
         sessionKey: string | undefined,
         runId: string | undefined,
       ) => {
         if (!sessionKey || !runId) {
           return;
         }
-        finalizedReplayRunIdBySession.set(sessionKey, runId);
-        const current = persistedReplayFinalizationBySession.get(sessionKey) ?? {};
-        current.runId = runId;
-        current.updatedAt = Date.now();
-        persistedReplayFinalizationBySession.set(sessionKey, current);
-        writeReplayFinalizationState(replayFinalizationStateFile, persistedReplayFinalizationBySession);
+        const pendingRunIds = pendingTrajectoryReplayRunIdsBySession.get(sessionKey) ?? new Set<string>();
+        if (pendingRunIds.has(runId)) {
+          return;
+        }
+        pendingRunIds.add(runId);
+        pendingTrajectoryReplayRunIdsBySession.set(sessionKey, pendingRunIds);
+        persistPendingTrajectoryReplayRunIds(sessionKey);
+      };
+
+      const forgetPendingTrajectoryReplayRunId = (
+        sessionKey: string | undefined,
+        runId: string | undefined,
+      ) => {
+        if (!sessionKey || !runId) {
+          return;
+        }
+        const pendingRunIds = pendingTrajectoryReplayRunIdsBySession.get(sessionKey);
+        if (!pendingRunIds?.delete(runId)) {
+          return;
+        }
+        if (pendingRunIds.size === 0) {
+          pendingTrajectoryReplayRunIdsBySession.delete(sessionKey);
+        }
+        persistPendingTrajectoryReplayRunIds(sessionKey);
+      };
+
+      const markTrajectoryReplayPositionForRun = (
+        sessionKey: string | undefined,
+        runId: string | undefined,
+      ) => {
+        if (!sessionKey || !runId) {
+          return;
+        }
+        const runState = sessionStore?.loadSessionRunState(sessionKey, runId);
+        if (runState?.runCompleted !== true) {
+          return;
+        }
+        if (typeof runState?.terminalSourceSeq !== "number" || !Number.isFinite(runState.terminalSourceSeq)) {
+          return;
+        }
+        markTrajectoryReplaySourceSeq(sessionKey, runState.terminalSourceSeq);
+        forgetPendingTrajectoryReplayRunId(sessionKey, runId);
       };
 
       const markReplayFinalization = (
@@ -224,7 +293,7 @@ export function createOtelPluginService(
           return;
         }
         markReplayWatermark(sessionKey, snapshot);
-        markFinalizedReplayRunId(sessionKey, snapshot.runId);
+        markTrajectoryReplayPositionForRun(sessionKey, snapshot.runId);
       };
 
       const enrichWithTranscript = (
@@ -245,11 +314,6 @@ export function createOtelPluginService(
         delete nextAttrs.__suppress_session_output_summary;
         delete nextAttrs.__min_snapshot_user_ts;
         const snapshot = loadSessionSnapshot(sessionKey);
-        const { agentId: resolvedAgentId, agentName: resolvedAgentName } = resolveSpanAgentIdentity(
-          sessionKey,
-          snapshot,
-          nextAttrs,
-        );
         const requestClassification = resolveRequestClassification({
           lastUserText: snapshot?.lastUserText,
           lastAssistantText: snapshot?.lastAssistantText,
@@ -277,8 +341,6 @@ export function createOtelPluginService(
         if (!snapshot || staleSnapshotForCurrentRequest) {
           return {
             ...nextAttrs,
-            agent_id: resolvedAgentId,
-            agent_name: resolvedAgentName,
             request_type: nextAttrs.request_type ?? requestClassification.requestType,
             request_category: nextAttrs.request_category ?? requestClassification.requestCategory,
             is_internal_request: nextAttrs.is_internal_request ?? requestClassification.isInternalRequest,
@@ -289,8 +351,6 @@ export function createOtelPluginService(
           ?? (typeof nextAttrs["openclaw.sessionId"] === "string" ? nextAttrs["openclaw.sessionId"] : undefined);
         return {
           ...nextAttrs,
-          agent_id: resolvedAgentId,
-          agent_name: resolvedAgentName,
           request_type: nextAttrs.request_type ?? requestClassification.requestType,
           request_category: nextAttrs.request_category ?? requestClassification.requestCategory,
           is_internal_request: nextAttrs.is_internal_request ?? requestClassification.isInternalRequest,
@@ -342,14 +402,114 @@ export function createOtelPluginService(
         ...runIdSources: Array<string | Iterable<string> | undefined>
       ) => traceAttrs(buildRunScopeAttrs(primaryRunId, ...runIdSources));
 
+      const patchSpanAttributes = (
+        span: any,
+        attrs: Record<string, string | number | boolean | undefined>,
+      ) => {
+        if (!span) {
+          return;
+        }
+        const normalizedAttrs = traceAttrs(attrs);
+        if (Object.keys(normalizedAttrs).length === 0) {
+          return;
+        }
+        if (!span.ended && typeof span.setAttributes === "function") {
+          span.setAttributes(normalizedAttrs);
+          return;
+        }
+        if (span.attributes && typeof span.attributes === "object") {
+          Object.assign(span.attributes, normalizedAttrs);
+        }
+      };
+
+      const patchRuntimeLifecycleRunScopeAttrs = (
+        run: ActiveRunSpan | undefined,
+        root?: ActiveRootSpan,
+        eventRunId?: string,
+      ) => {
+        if (!run?.runtimeLifecycleSpans?.length) {
+          return;
+        }
+        const attrs = traceRunScopeAttrs(
+          eventRunId ?? run.runId ?? root?.runId,
+          run.runIds,
+          root?.runIds,
+          eventRunId,
+        );
+        for (const span of run.runtimeLifecycleSpans) {
+          patchSpanAttributes(span, attrs);
+        }
+      };
+
+      const resolveEventMessageId = (evt: { messageId?: string | number }) =>
+        evt.messageId !== undefined && evt.messageId !== null
+          ? String(evt.messageId)
+          : undefined;
+
+      const resolveRequestStartedAt = (evt: { ts?: number }) =>
+        typeof evt.ts === "number" && Number.isFinite(evt.ts) ? evt.ts : Date.now();
+
+      const resolveRequestSeqFromKey = (requestKey: string): number | undefined => {
+        const separatorIndex = requestKey.lastIndexOf(":");
+        if (separatorIndex < 0) {
+          return undefined;
+        }
+        const value = Number.parseInt(requestKey.slice(separatorIndex + 1), 10);
+        return Number.isFinite(value) ? value : undefined;
+      };
+
+      const rememberRequestRecord = (
+        sessionKey: string,
+        requestKey: string,
+        evt: { ts?: number; messageId?: string | number },
+      ) => {
+        const records = requestHistoryBySession.get(sessionKey) ?? [];
+        const startedAt = resolveRequestStartedAt(evt);
+        const messageId = resolveEventMessageId(evt);
+        const requestSeq = resolveRequestSeqFromKey(requestKey) ?? requestSequence;
+        const existingIndex = records.findIndex((record) => record.requestKey === requestKey);
+        const nextRecord = {
+          requestKey,
+          requestSeq,
+          startedAt,
+          messageId,
+          closedAt: existingIndex >= 0 ? records[existingIndex]?.closedAt : undefined,
+        };
+        if (existingIndex >= 0) {
+          records[existingIndex] = nextRecord;
+        } else {
+          records.push(nextRecord);
+          records.sort((left, right) => left.startedAt - right.startedAt || left.requestSeq - right.requestSeq);
+        }
+        const trimmed = records.slice(-64);
+        requestHistoryBySession.set(sessionKey, trimmed);
+      };
+
+      const markRequestRecordClosed = (
+        sessionKey: string | undefined,
+        requestKey: string | undefined,
+        closedAt?: number,
+      ) => {
+        if (!sessionKey || !requestKey) {
+          return;
+        }
+        const records = requestHistoryBySession.get(sessionKey);
+        if (!records) {
+          return;
+        }
+        const record = records.find((current) => current.requestKey === requestKey);
+        if (!record) {
+          return;
+        }
+        record.closedAt = typeof closedAt === "number" && Number.isFinite(closedAt) ? closedAt : Date.now();
+      };
+
       const buildRequestKey = (evt: { sessionKey?: string; sessionId?: string; ts?: number; messageId?: string | number; runId?: string }) => {
         const sessionKey = resolveSessionKey(evt);
         if (!sessionKey) {
           return undefined;
         }
-        const messageId = evt.messageId !== undefined && evt.messageId !== null
-          ? String(evt.messageId)
-          : undefined;
+        const messageId = resolveEventMessageId(evt);
         const seed = messageId ?? String(typeof evt.ts === "number" ? evt.ts : Date.now());
         requestSequence += 1;
         return `${sessionKey}#${seed}:${requestSequence}`;
@@ -361,9 +521,12 @@ export function createOtelPluginService(
       ) => {
         const sessionKey = resolveSessionKey(evt);
         const resolvedRunId = resolveRunId(evt);
+        const messageId = resolveEventMessageId(evt);
         if (!sessionKey) {
           return undefined;
         }
+        const hasLiveRequest = (requestKey: string) =>
+          activeRuns.has(requestKey) || activeRoots.has(requestKey);
         const findMatchingRequestKey = () => {
           if (!resolvedRunId) {
             return undefined;
@@ -386,17 +549,63 @@ export function createOtelPluginService(
           }
           return undefined;
         };
-        const activeRequestKey = activeRequestKeyBySession.get(sessionKey);
-        if (activeRequestKey) {
-          const matchingRequestKey = findMatchingRequestKey();
-          if (matchingRequestKey) {
-            return matchingRequestKey;
+        const findRequestRecord = () => {
+          const records = requestHistoryBySession.get(sessionKey) ?? [];
+          if (messageId) {
+            for (let index = records.length - 1; index >= 0; index -= 1) {
+              if (records[index].messageId === messageId) {
+                return records[index];
+              }
+            }
           }
-          return activeRequestKey;
-        }
+          if (typeof evt.ts === "number" && Number.isFinite(evt.ts)) {
+            let matched: (typeof records)[number] | undefined;
+            for (const record of records) {
+              if (record.startedAt <= evt.ts) {
+                matched = record;
+                continue;
+              }
+              break;
+            }
+            return matched;
+          }
+          return undefined;
+        };
+        const activeRequestKey = activeRequestKeyBySession.get(sessionKey);
+        const resolveActiveRequestStartedAt = (requestKey: string): number | undefined => {
+          const root = activeRoots.get(requestKey);
+          const run = activeRuns.get(requestKey);
+          const candidates = [
+            root?.startedAt,
+            run?.messageQueuedTs,
+            run?.userStartTs,
+            run?.mainStartTs,
+          ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+          if (candidates.length === 0) {
+            return undefined;
+          }
+          return Math.min(...candidates);
+        };
         const matchingRequestKey = findMatchingRequestKey();
         if (matchingRequestKey) {
           return matchingRequestKey;
+        }
+        const matchingRecord = findRequestRecord();
+        if (matchingRecord) {
+          if (matchingRecord.closedAt !== undefined && !hasLiveRequest(matchingRecord.requestKey)) {
+            return undefined;
+          }
+          return matchingRecord.requestKey;
+        }
+        if (activeRequestKey) {
+          if (!shouldFallbackRunBoundEventToActiveRequest({
+            runId: resolvedRunId,
+            eventTs: typeof evt.ts === "number" && Number.isFinite(evt.ts) ? evt.ts : undefined,
+            activeRequestStartedAt: resolveActiveRequestStartedAt(activeRequestKey),
+          })) {
+            return undefined;
+          }
+          return activeRequestKey;
         }
         if (!createIfMissing) {
           return undefined;
@@ -406,6 +615,7 @@ export function createOtelPluginService(
           return undefined;
         }
         activeRequestKeyBySession.set(sessionKey, nextRequestKey);
+        rememberRequestRecord(sessionKey, nextRequestKey, evt);
         return nextRequestKey;
       };
 
@@ -421,6 +631,7 @@ export function createOtelPluginService(
           return undefined;
         }
         activeRequestKeyBySession.set(sessionKey, nextRequestKey);
+        rememberRequestRecord(sessionKey, nextRequestKey, evt);
         return nextRequestKey;
       };
 
@@ -486,7 +697,7 @@ export function createOtelPluginService(
                 || phase === "dispatch_queue"
                 || phase === "session_processing",
               ...buildRunScopeAttrs(
-                run?.runId ?? root?.runId ?? resolveRunId(evt),
+                resolveRunId(evt) ?? run?.runId ?? root?.runId,
                 run?.runIds,
                 root?.runIds,
                 resolveRunId(evt),
@@ -507,6 +718,11 @@ export function createOtelPluginService(
         );
         span.setStatus({ code: SpanStatusCode.OK });
         endSpanSafely(span, new Date(effectiveEndTs));
+        if (run) {
+          run.runtimeLifecycleSpans ??= [];
+          run.runtimeLifecycleSpans.push(span);
+          patchRuntimeLifecycleRunScopeAttrs(run, root, resolveRunId(evt));
+        }
         if (run && phase !== "channel_ingress" && phase !== "session_processing" && phase !== "channel_egress") {
           run.orchestrationCursorTs = effectiveEndTs;
         }
@@ -539,10 +755,12 @@ export function createOtelPluginService(
         if (!sessionKey) {
           return undefined;
         }
+        const providedSnapshot = options?.snapshot;
+        const snapshot = providedSnapshot ?? loadSessionSnapshot(sessionKey);
         const lifecycleEvt = {
           sessionKey: evt.sessionKey,
           sessionId: evt.sessionId,
-          runId: evt.runId,
+          runId: evt.runId ?? providedSnapshot?.runId,
           ts: options?.startTsHint ?? evt.ts,
         };
         const run = getRun(lifecycleEvt, options?.createIfMissing ?? false);
@@ -550,7 +768,6 @@ export function createOtelPluginService(
           return undefined;
         }
         const root = getRoot(lifecycleEvt, options?.createIfMissing ?? false);
-        const snapshot = options?.snapshot ?? loadSessionSnapshot(sessionKey);
         const resolvedSessionId = snapshot?.sessionId ?? evt.sessionId;
         const ingressStartTs = typeof run.messageQueuedTs === "number"
           ? run.messageQueuedTs
@@ -775,16 +992,25 @@ export function createOtelPluginService(
           return;
         }
         const transcriptEvt = buildTranscriptReplayEvent(sessionKey, snapshot);
-        const hasActiveTrace = Boolean(getRun(transcriptEvt, false) || getRoot(transcriptEvt, false));
+        const activeRun = getRun(transcriptEvt, false);
+        const hasActiveTrace = Boolean(activeRun || getRoot(transcriptEvt, false));
         const replayAlreadyFinalized = hasReplayWatermark(sessionKey, snapshot);
-        const replayRunAlreadyFinalized = hasFinalizedReplayRunId(sessionKey, snapshot.runId);
-        if ((replayAlreadyFinalized || replayRunAlreadyFinalized) && !hasActiveTrace) {
-          return;
+        const replaySnapshotFreshness = resolveTranscriptReplayFreshness({
+          snapshot,
+          activeRun,
+          fallbackTs: transcriptEvt.ts,
+        });
+        const replayPlan = resolveTranscriptReplayPlan({
+          hasActiveTrace,
+          replayAlreadyFinalized,
+          runCompleted: snapshot.runCompleted === true,
+          replaySnapshotFresh: replaySnapshotFreshness,
+        });
+        if (replayPlan.markFinalizationOnly) {
+          markReplayFinalization(sessionKey, snapshot);
         }
-        if (!hasActiveTrace) {
-          ctx.logger.info(
-            `[otel-plugin] transcript fallback replay${options?.source === "sweep" ? " (sweep)" : ""} for ${sessionKey} (${snapshot.sessionId ?? "unknown-session"})`,
-          );
+        if (!replayPlan.emitReplay) {
+          return;
         }
         ensureTranscriptSkillSpans(transcriptEvt);
         const emittedTranscriptModelSpans = emitTranscriptModelSpans(transcriptEvt);
@@ -822,12 +1048,339 @@ export function createOtelPluginService(
         clearRun(transcriptEvt);
       }
 
+      const replayCompletedTrajectoryRuns = (sessionKey: string) => {
+        const lastTrajectorySourceSeq = replayTrajectorySourceSeqBySession.get(sessionKey) ?? 0;
+        const completedRuns = sessionStore?.listCompletedTrajectoryRuns(sessionKey, lastTrajectorySourceSeq) ?? [];
+        if (completedRuns.length === 0) {
+          return;
+        }
+
+        const createImmediateSpan = (
+          name: string,
+          startTs: number,
+          endTs: number,
+          kind: any,
+          attrs: Record<string, string | number | boolean | undefined>,
+          parentCtx?: any,
+        ) => {
+          const span = tracer.startSpan(
+            name,
+            {
+              startTime: new Date(startTs),
+              kind,
+              attributes: traceAttrs(attrs),
+            },
+            parentCtx ?? context.active(),
+          );
+          span.setStatus({ code: SpanStatusCode.OK });
+          endSpanSafely(span, new Date(endTs));
+          return span;
+        };
+
+        const recordTrajectoryModelMetrics = (
+          trajectoryRun: CompletedTrajectoryRun,
+          usageTotals: ReturnType<typeof resolveUsageTokenTotals>,
+        ) => {
+          const modelMetricAttrs = buildGenAiClientModelMetricAttrs(
+            trajectoryRun.provider,
+            trajectoryRun.model,
+            {
+              session_id: trajectoryRun.sessionId,
+            },
+          );
+          const durationMs = Math.max(
+            (trajectoryRun.assistantTs ?? trajectoryRun.completedAt ?? Date.now())
+            - (trajectoryRun.userTs ?? trajectoryRun.startedAt ?? Date.now()),
+            1,
+          );
+          instruments.genAiAgentOperationCount?.add(1, modelMetricAttrs);
+          instruments.genAiAgentOperationDuration?.record(durationMs, modelMetricAttrs);
+          const tokenMetrics = [
+            ["input", usageTotals.inputTokens],
+            ["output", usageTotals.outputTokens],
+            ["total", usageTotals.totalTokens],
+          ] as const;
+          for (const [tokenType, tokenValue] of tokenMetrics) {
+            if (tokenValue <= 0) {
+              continue;
+            }
+            instruments.genAiAgentTokenUsage?.record(
+              tokenValue,
+              buildGenAiAgentTokenMetricAttrs(trajectoryRun.provider, trajectoryRun.model, {
+                session_id: trajectoryRun.sessionId,
+                token_type: tokenType,
+              }),
+            );
+          }
+        };
+
+        for (const trajectoryRun of completedRuns) {
+          const pendingRunIds = pendingTrajectoryReplayRunIdsBySession.get(sessionKey);
+          if (trajectoryRun.runId && pendingRunIds?.has(trajectoryRun.runId)) {
+            markTrajectoryReplaySourceSeq(sessionKey, trajectoryRun.sourceSeq);
+            forgetPendingTrajectoryReplayRunId(sessionKey, trajectoryRun.runId);
+            continue;
+          }
+          const latestSnapshot = loadSessionSnapshot(sessionKey);
+          const sessionId = trajectoryRun.sessionId ?? latestSnapshot?.sessionId;
+          const userText = trajectoryRun.finalPromptText ?? trajectoryRun.userText;
+          const assistantText = trajectoryRun.assistantText;
+          const outputPreview = clipPreview(assistantText);
+          const usageTotals = resolveUsageTokenTotals({
+            input: trajectoryRun.usage?.input,
+            output: trajectoryRun.usage?.output,
+            cacheRead: trajectoryRun.usage?.cacheRead,
+            cacheWrite: trajectoryRun.usage?.cacheWrite,
+            total: trajectoryRun.usage?.total,
+          });
+          const requestClassification = resolveRequestClassification({
+            lastUserText: userText,
+            lastAssistantText: assistantText,
+            inputPreview: userText,
+            outputPreview,
+          });
+          const finalStatus = normalizeFinalStatus(trajectoryRun.finalStatus) ?? "completed";
+          const requestStartTs = trajectoryRun.startedAt
+            ?? trajectoryRun.userTs
+            ?? trajectoryRun.completedAt
+            ?? Date.now();
+          const ingressStartTs = requestStartTs;
+          const processingStartTs = trajectoryRun.userTs ?? requestStartTs;
+          const modelStartTs = trajectoryRun.userTs ?? processingStartTs;
+          const rawModelEndTs = trajectoryRun.assistantTs
+            ?? trajectoryRun.completedAt
+            ?? (modelStartTs + MIN_VISIBLE_MODEL_MS);
+          const modelEndTs = Math.max(rawModelEndTs, modelStartTs + 1);
+          const egressEndTs = Math.max(trajectoryRun.completedAt ?? modelEndTs, modelEndTs + MIN_VISIBLE_CHILD_MS);
+          const ingressEndTs = Math.max(
+            Math.min(ingressStartTs + MIN_VISIBLE_CHILD_MS, processingStartTs),
+            ingressStartTs + 1,
+          );
+          const processingEndTs = Math.max(
+            Math.min(processingStartTs + MIN_VISIBLE_CHILD_MS, modelStartTs),
+            processingStartTs + 1,
+          );
+
+          const baseAttrs = {
+            ...stringAttrs({
+              "openclaw.sessionKey": sessionKey,
+              "openclaw.sessionId": sessionId,
+              "openclaw.channel": latestSnapshot?.lastChannel,
+              "openclaw.provider": trajectoryRun.provider,
+              "openclaw.model": trajectoryRun.model,
+              "openclaw.input.preview": userText,
+              "openclaw.input.length": userText?.length,
+              "openclaw.output.preview": outputPreview,
+              "openclaw.output.length": assistantText?.length,
+              "openclaw.tokens.input": usageTotals.inputTokens,
+              "openclaw.tokens.output": usageTotals.outputTokens,
+              "openclaw.tokens.total": usageTotals.totalTokens,
+              "openclaw.tokens.cache_read": usageTotals.cacheReadTokens,
+              "openclaw.tokens.cache_write": usageTotals.cacheWriteTokens,
+              "openclaw.outcome": finalStatus,
+              "openclaw.output.kind": assistantText ? "text" : undefined,
+            }),
+            ...buildRunScopeAttrs(trajectoryRun.runId, trajectoryRun.runId),
+            request_type: requestClassification.requestType,
+            request_category: requestClassification.requestCategory,
+            is_internal_request: requestClassification.isInternalRequest,
+            session_create_at: latestSnapshot?.createdAt,
+            session_update_time: egressEndTs,
+            "openclaw.session.file": latestSnapshot?.sessionFile,
+            "openclaw.session.chatType": latestSnapshot?.chatType,
+            "openclaw.session.origin.provider": latestSnapshot?.originProvider,
+            "openclaw.session.origin.surface": latestSnapshot?.originSurface,
+            "openclaw.session.cwd": latestSnapshot?.sessionCwd,
+          };
+
+          const rootSpan = tracer.startSpan(
+            "openclaw_request",
+            {
+              startTime: new Date(requestStartTs),
+              kind: SpanKind.SERVER,
+              attributes: traceAttrs({
+                ...baseAttrs,
+                "span.kind": "request",
+              }),
+            },
+            context.active(),
+          );
+          const rootCtx = trace.setSpan(context.active(), rootSpan);
+          const runSpan = tracer.startSpan(
+            "agent_run",
+            {
+              startTime: new Date(requestStartTs),
+              kind: SpanKind.INTERNAL,
+              attributes: traceAttrs({
+                ...baseAttrs,
+                "span.kind": "agent",
+              }),
+            },
+            rootCtx,
+          );
+          const runCtx = trace.setSpan(rootCtx, runSpan);
+
+          createImmediateSpan(
+            "channel_ingress",
+            ingressStartTs,
+            ingressEndTs,
+            SpanKind.INTERNAL,
+            {
+              ...baseAttrs,
+              "span.kind": "runtime",
+              "openclaw.runtime.phase": "channel_ingress",
+            },
+            rootCtx,
+          );
+          createImmediateSpan(
+            "session_processing",
+            processingStartTs,
+            processingEndTs,
+            SpanKind.INTERNAL,
+            {
+              ...baseAttrs,
+              "span.kind": "runtime",
+              "openclaw.runtime.phase": "session_processing",
+              "openclaw.state": "processing",
+            },
+            runCtx,
+          );
+          if (modelStartTs > processingEndTs) {
+            createImmediateSpan(
+              "runtime_orchestration",
+              processingEndTs,
+              modelStartTs,
+              SpanKind.INTERNAL,
+              {
+                ...baseAttrs,
+                "span.kind": "runtime",
+                "openclaw.runtime.phase": "agent_plan",
+              },
+              runCtx,
+            );
+          }
+          const modelSpan = createImmediateSpan(
+            "llm",
+            modelStartTs,
+            modelEndTs,
+            SpanKind.CLIENT,
+            {
+              ...baseAttrs,
+              "span.kind": "model",
+              turn_index: 1,
+              input_preview: userText,
+              output_preview: outputPreview,
+              output_length: assistantText?.length,
+              usage_input_tokens: usageTotals.inputTokens,
+              usage_output_tokens: usageTotals.outputTokens,
+              usage_total_tokens: usageTotals.totalTokens,
+              usage_cache_read_input_tokens: usageTotals.cacheReadTokens,
+              usage_cache_write_input_tokens: usageTotals.cacheWriteTokens,
+            },
+            runCtx,
+          );
+          createImmediateSpan(
+            "channel_egress",
+            modelEndTs,
+            egressEndTs,
+            SpanKind.INTERNAL,
+            {
+              ...baseAttrs,
+              "span.kind": "runtime",
+              "openclaw.runtime.phase": "channel_egress",
+              "openclaw.output.preview": outputPreview,
+              "openclaw.output.length": assistantText?.length,
+            },
+            runCtx,
+          );
+
+          runSpan.setAttributes(traceAttrs({
+            ...baseAttrs,
+            "span.kind": "agent",
+            usage_input_tokens: usageTotals.inputTokens,
+            usage_output_tokens: usageTotals.outputTokens,
+            usage_total_tokens: usageTotals.totalTokens,
+            usage_cache_read_input_tokens: usageTotals.cacheReadTokens,
+            usage_cache_write_input_tokens: usageTotals.cacheWriteTokens,
+          }));
+          rootSpan.setAttributes(traceAttrs({
+            ...baseAttrs,
+            "span.kind": "request",
+            usage_input_tokens: usageTotals.inputTokens,
+            usage_output_tokens: usageTotals.outputTokens,
+            usage_total_tokens: usageTotals.totalTokens,
+            usage_cache_read_input_tokens: usageTotals.cacheReadTokens,
+            usage_cache_write_input_tokens: usageTotals.cacheWriteTokens,
+          }));
+
+          emitModelTurnDebugLog({
+            source: "trajectory",
+            trace_id: typeof modelSpan.spanContext === "function" ? modelSpan.spanContext().traceId : undefined,
+            span_id: typeof modelSpan.spanContext === "function" ? modelSpan.spanContext().spanId : undefined,
+            session_key: sessionKey,
+            session_id: sessionId,
+            run_id: trajectoryRun.runId,
+            provider: trajectoryRun.provider,
+            model: trajectoryRun.model,
+            start_ts: modelStartTs,
+            end_ts: modelEndTs,
+            duration_ms: Math.max(modelEndTs - modelStartTs, 1),
+            usage_input_tokens: usageTotals.inputTokens,
+            usage_output_tokens: usageTotals.outputTokens,
+            usage_total_tokens: usageTotals.totalTokens,
+            usage_cache_read_input_tokens: usageTotals.cacheReadTokens,
+            usage_cache_write_input_tokens: usageTotals.cacheWriteTokens,
+            input_preview: userText,
+            output_preview: outputPreview,
+            output_kind: assistantText ? "text" : undefined,
+          });
+
+          recordTrajectoryModelMetrics(trajectoryRun, usageTotals);
+          const requestMetricSnapshot = {
+            sessionId,
+            lastChannel: latestSnapshot?.lastChannel,
+            lastProvider: trajectoryRun.provider,
+            lastModel: trajectoryRun.model,
+          };
+          const requestSummaryAttrs = {
+            "openclaw.state": "completed",
+            "openclaw.outcome": finalStatus,
+          };
+          const requestMetricAttrs = buildGenAiAgentRequestMetricAttrs(
+            requestMetricSnapshot as any,
+            requestSummaryAttrs,
+          );
+          instruments.genAiAgentRequestCount?.add(1, requestMetricAttrs);
+          instruments.genAiAgentRequestDuration?.record(
+            Math.max(egressEndTs - requestStartTs, 1),
+            requestMetricAttrs,
+          );
+
+          runSpan.setStatus({ code: SpanStatusCode.OK });
+          rootSpan.setStatus({ code: SpanStatusCode.OK });
+          endSpanSafely(runSpan, new Date(egressEndTs));
+          endSpanSafely(rootSpan, new Date(egressEndTs));
+
+          const latestCompletedSnapshot = loadSessionSnapshot(sessionKey);
+          if (
+            latestCompletedSnapshot?.runCompleted === true
+            && latestCompletedSnapshot.runId === trajectoryRun.runId
+          ) {
+            markReplayFinalization(sessionKey, latestCompletedSnapshot);
+          } else {
+            markTrajectoryReplaySourceSeq(sessionKey, trajectoryRun.sourceSeq);
+          }
+        }
+      };
+
       const reportSessionMetrics = () => {
         try {
           sessionStore?.refreshSessionsIndex();
+          const now = Date.now();
           const pendingSessionKeys = Array.from(sessionMetricTokenState.entries())
             .filter(([, state]) => state.dirty)
             .map(([sessionKey]) => sessionKey);
+          const recentSessionKeys = sessionStore?.listRecentSessionKeys(recentSessionSweepAt) ?? [];
           const activeSessionKeys = new Set<string>([
             ...Array.from(activeRoots.values())
               .map((current) => current.sessionIdentity)
@@ -836,8 +1389,10 @@ export function createOtelPluginService(
               .map((current) => current.sessionIdentity)
               .filter((value): value is string => Boolean(value)),
             ...pendingSessionKeys,
+            ...recentSessionKeys,
           ]);
           for (const sessionKey of activeSessionKeys) {
+            replayCompletedTrajectoryRuns(sessionKey);
             replayTranscriptSnapshot(sessionKey, { source: "sweep" });
             const snapshot = loadSessionSnapshot(sessionKey);
             const tokenState = sessionMetricTokenState.get(sessionKey);
@@ -923,6 +1478,7 @@ export function createOtelPluginService(
               }
             }
           }
+          recentSessionSweepAt = now;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           ctx.logger.error?.(`[otel-plugin] active session metrics scan failed: ${message}`);
@@ -970,10 +1526,11 @@ export function createOtelPluginService(
             if (run) {
               rememberRunId(run, resolvedRunId);
               if (run.span) {
-                run.span.setAttributes(traceRunScopeAttrs(run.runId, run.runIds, current.runIds));
+                run.span.setAttributes(traceRunScopeAttrs(resolvedRunId ?? run.runId, run.runIds, current.runIds));
               }
+              patchRuntimeLifecycleRunScopeAttrs(run, current, resolvedRunId);
             }
-            current.span.setAttributes(traceRunScopeAttrs(current.runId, current.runIds));
+            current.span.setAttributes(traceRunScopeAttrs(resolvedRunId ?? current.runId, current.runIds));
           }
           current.lastTouchedAt = Date.now();
           return current;
@@ -1034,11 +1591,12 @@ export function createOtelPluginService(
             const root = activeRoots.get(requestKey);
             if (root) {
               rememberRunId(root, resolvedRunId);
-              root.span.setAttributes(traceRunScopeAttrs(root.runId, root.runIds, current.runIds));
+              root.span.setAttributes(traceRunScopeAttrs(resolvedRunId ?? root.runId, root.runIds, current.runIds));
             }
             if (current.span) {
-              current.span.setAttributes(traceRunScopeAttrs(current.runId, current.runIds));
+              current.span.setAttributes(traceRunScopeAttrs(resolvedRunId ?? current.runId, current.runIds));
             }
+            patchRuntimeLifecycleRunScopeAttrs(current, root, resolvedRunId);
           }
           current.lastTouchedAt = Date.now();
           return current;
@@ -1052,7 +1610,7 @@ export function createOtelPluginService(
         }
         const resolvedRunId = resolveRunId(evt);
         if (rememberRunId(root, resolvedRunId)) {
-          root.span.setAttributes(traceRunScopeAttrs(root.runId, root.runIds));
+          root.span.setAttributes(traceRunScopeAttrs(resolvedRunId ?? root.runId, root.runIds));
         }
         const userCtx = current?.userCtx;
         const snapshot = loadSessionSnapshot(sessionKey);
@@ -1064,7 +1622,7 @@ export function createOtelPluginService(
             attributes: traceAttrs(enrichWithTranscript(sessionKey, {
               "openclaw.sessionKey": evt.sessionKey,
               "openclaw.sessionId": evt.sessionId,
-              ...buildRunScopeAttrs(root.runId ?? resolvedRunId, root.runIds, resolvedRunId),
+              ...buildRunScopeAttrs(resolvedRunId ?? root.runId, root.runIds, resolvedRunId),
               session_create_at: snapshot?.createdAt,
               session_update_time: eventTimestamp(evt).getTime(),
               "span.kind": "agent",
@@ -1080,6 +1638,7 @@ export function createOtelPluginService(
         run.span = span;
         run.ctx = trace.setSpan(userCtx ?? root.ctx, span);
         activeRuns.set(requestKey, run);
+        patchRuntimeLifecycleRunScopeAttrs(run, root, resolvedRunId);
         return run;
       };
 
@@ -1098,7 +1657,7 @@ export function createOtelPluginService(
         }
         const resolvedRunId = resolveRunId(evt);
         if (rememberRunId(root, resolvedRunId)) {
-          root.span.setAttributes(traceRunScopeAttrs(root.runId, root.runIds));
+          root.span.setAttributes(traceRunScopeAttrs(resolvedRunId ?? root.runId, root.runIds));
         }
         const snapshot = loadSnapshotForEvent(evt, loadSessionSnapshot, resolveSessionKey);
         root.span.setAttributes(traceAttrs({
@@ -1143,7 +1702,7 @@ export function createOtelPluginService(
         const finalAttrs = traceAttrs({
           ...enrichWithTranscript(sessionKey, summaryAttrs),
           ...buildRunScopeAttrs(
-            current.runId ?? run?.runId ?? resolveRunId(evt),
+            resolveRunId(evt) ?? current.runId ?? run?.runId,
             current.runIds,
             run?.runIds,
             resolveRunId(evt),
@@ -1171,11 +1730,28 @@ export function createOtelPluginService(
         if (Object.keys(finalAttrs).length > 0) {
           current.span.setAttributes(finalAttrs);
         }
+        patchRuntimeLifecycleRunScopeAttrs(run, current, resolveRunId(evt));
         if (attrs) {
           addEvent(current.span, "session.finish");
         }
         current.span.setStatus({ code: SpanStatusCode.OK });
         endSpanSafely(current.span, eventTimestamp(evt));
+        const finalOutcome = typeof summaryAttrs["openclaw.outcome"] === "string"
+          ? summaryAttrs["openclaw.outcome"]
+          : undefined;
+        if (finalOutcome && finalOutcome !== "interrupted") {
+          const finalizedRunIds = new Set<string>([
+            current.runId,
+            run?.runId,
+            resolveRunId(evt),
+            ...Array.from(current.runIds ?? []),
+            ...Array.from(run?.runIds ?? []),
+          ].filter((value): value is string => Boolean(value)));
+          for (const runId of finalizedRunIds) {
+            rememberPendingTrajectoryReplayRunId(sessionKey, runId);
+          }
+        }
+        markRequestRecordClosed(sessionKey, requestKey, eventTimestamp(evt).getTime());
         const metricState = sessionMetricTokenState.get(sessionKey);
         if (metricState) {
           metricState.active = false;
@@ -1212,7 +1788,7 @@ export function createOtelPluginService(
         const rootCacheWriteTokens = run.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens;
         const rootTotalTokens = run.aggregate.totalTokens || snapshotUsageTotals.totalTokens;
         root.span.setAttributes(traceAttrs({
-          ...buildRunScopeAttrs(root.runId ?? run.runId ?? resolveRunId(evt), root.runIds, run.runIds, resolveRunId(evt)),
+          ...buildRunScopeAttrs(resolveRunId(evt) ?? root.runId ?? run.runId, root.runIds, run.runIds, resolveRunId(evt)),
           session_create_at: snapshot?.createdAt,
           session_update_time: run.modelEndTs ?? run.mainEndTs ?? run.lastTouchedAt ?? Date.now(),
           usage_input_tokens: rootInputTokens,
@@ -1233,6 +1809,7 @@ export function createOtelPluginService(
           "openclaw.tool.commands": Array.from(run.usedToolCommands).join(" | "),
           "openclaw.tool.result_statuses": Array.from(run.usedToolResultStatuses).join(", "),
         }));
+        patchRuntimeLifecycleRunScopeAttrs(run, root, resolveRunId(evt));
       };
 
       const endRun = (
@@ -1272,7 +1849,7 @@ export function createOtelPluginService(
         }
         const finalAttrs = traceAttrs({
           ...enrichWithTranscript(sessionKey, summaryAttrs),
-          ...buildRunScopeAttrs(current.runId ?? resolveRunId(evt), current.runIds, resolveRunId(evt)),
+          ...buildRunScopeAttrs(resolveRunId(evt) ?? current.runId, current.runIds, resolveRunId(evt)),
           session_create_at: snapshot?.createdAt,
           session_update_time: eventTimestamp(evt).getTime(),
           usage_input_tokens: sessionInputTokens,
@@ -1297,6 +1874,7 @@ export function createOtelPluginService(
           current.span.setAttributes(finalAttrs);
         }
         current.finalAttrsApplied = true;
+        patchRuntimeLifecycleRunScopeAttrs(current, activeRoots.get(requestKey), resolveRunId(evt));
         if (attrs) {
           current.span && addEvent(current.span, "run.finish");
         }
@@ -1349,6 +1927,7 @@ export function createOtelPluginService(
           if (metricState) {
             metricState.active = false;
           }
+          markRequestRecordClosed(current.sessionIdentity, requestKey, now);
           activeRoots.delete(requestKey);
           releaseRequestKey(current.sessionIdentity, requestKey);
         }
@@ -1499,7 +2078,6 @@ export function createOtelPluginService(
         getRoot,
         ensureUserSpan,
         loadSessionSnapshot,
-        resolveAgentIdentity: resolveSpanAgentIdentity,
         enrichWithTranscript,
         createChildSpan,
         eventTimestamp,
@@ -1567,8 +2145,6 @@ export function createOtelPluginService(
         annotateToolLoop,
         hasReplayWatermark,
         markReplayWatermark,
-        hasFinalizedReplayRunId,
-        markFinalizedReplayRunId,
       });
 
       unsubscribeDiagnostic = onDiagnosticEvent(handleDiagnosticEvent);
@@ -1632,10 +2208,13 @@ export function createOtelPluginService(
       }
       activeRoots.clear();
       activeRequestKeyBySession.clear();
+      requestHistoryBySession.clear();
       replayWatermarkBySession.clear();
-      finalizedReplayRunIdBySession.clear();
+      replayTrajectorySourceSeqBySession.clear();
+      pendingTrajectoryReplayRunIdsBySession.clear();
       reportedSessionMetrics.clear();
       sessionMetricTokenState.clear();
+      recentSessionSweepAt = 0;
       sessionStore?.clear();
       sessionStore = null;
       await sdk?.shutdown();

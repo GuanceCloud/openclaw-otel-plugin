@@ -15,8 +15,10 @@ import {
   isHeartbeatSessionSnapshot,
   loadSnapshotForEvent,
   MIN_VISIBLE_CHILD_MS,
+  normalizeFinalStatus,
   redactSensitiveText,
   resolveRequestClassification,
+  resolveTranscriptReplayFreshness,
   resolveUsageTokenTotals,
   setError,
   stringAttrs,
@@ -130,8 +132,6 @@ type DiagnosticEventHandlerDeps = {
   annotateToolLoop(evt: Extract<DiagnosticEventPayload, { type: "tool.loop" }>): boolean;
   hasReplayWatermark?(sessionKey: string | undefined, snapshot: SessionSnapshot | undefined): boolean;
   markReplayWatermark?(sessionKey: string | undefined, snapshot: SessionSnapshot | undefined): void;
-  hasFinalizedReplayRunId?(sessionKey: string | undefined, runId: string | undefined): boolean;
-  markFinalizedReplayRunId?(sessionKey: string | undefined, runId: string | undefined): void;
 };
 
 export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
@@ -167,8 +167,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     annotateToolLoop,
     hasReplayWatermark = () => false,
     markReplayWatermark = () => {},
-    hasFinalizedReplayRunId = () => false,
-    markFinalizedReplayRunId = () => {},
   } = deps;
 
   const logDiagnosticEvent = (
@@ -228,59 +226,58 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     return resolvedTs;
   };
 
-  const resolveSnapshotActivityTs = (snapshot: SessionSnapshot | undefined): number | undefined => {
-    const candidates = [
-      snapshot?.lastUserTs,
-      snapshot?.lastAssistantTs,
-      ...(snapshot?.lastRunToolCalls ?? []).flatMap((toolCall) => [toolCall.startedAt, toolCall.endedAt]),
-      ...(snapshot?.lastRunAssistantTurns ?? []).flatMap((turn) => [turn.startedAt, turn.endedAt]),
-    ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-    if (candidates.length === 0) {
-      return undefined;
-    }
-    return Math.max(...candidates);
-  };
-
   const snapshotIsFreshForQueuedRequest = (
     snapshot: SessionSnapshot | undefined,
     run: ActiveRunSpan | undefined,
-  ): boolean => {
-    const minRequestTs = run?.messageQueuedTs;
-    if (typeof minRequestTs !== "number") {
-      return true;
-    }
-    const snapshotActivityTs = resolveSnapshotActivityTs(snapshot);
-    if (typeof snapshotActivityTs !== "number") {
-      return false;
-    }
-    return snapshotActivityTs >= minRequestTs;
+    fallbackTs?: number,
+  ): boolean | undefined => {
+    return resolveTranscriptReplayFreshness({
+      snapshot,
+      activeRun: run,
+      fallbackTs,
+      backfillWindowMs: MAX_PROCESSING_BACKFILL_MS,
+    });
   };
 
   const resolveSnapshotFinalOutcome = (snapshot: SessionSnapshot | undefined): string | undefined => {
-    const raw = typeof snapshot?.runFinalStatus === "string" ? snapshot.runFinalStatus.trim().toLowerCase() : "";
-    if (!raw) {
+    const normalized = normalizeFinalStatus(snapshot?.runFinalStatus);
+    if (!normalized) {
       return snapshot?.runCompleted === true ? "completed" : undefined;
     }
-    if (raw === "success" || raw === "completed") {
-      return "completed";
-    }
-    if (raw === "error" || raw === "failed" || raw === "failure") {
-      return "error";
-    }
-    if (raw === "cancelled" || raw === "canceled") {
-      return "cancelled";
-    }
-    if (raw === "timeout" || raw === "timed_out" || raw === "timed-out") {
-      return "timeout";
-    }
-    if (raw === "superseded" || raw === "superseded_by_next_message") {
-      return "superseded";
-    }
-    return raw;
+    return normalized;
   };
 
   const resolveSnapshotForEvent = (evt: SessionEvent): SessionSnapshot | undefined =>
     loadSnapshotForEvent(evt, loadSessionSnapshot, resolveSessionKey);
+
+  const resolveReplaySessionKey = (
+    evt: SessionEvent,
+    snapshot: SessionSnapshot | undefined,
+  ): string | undefined => {
+    const resolved = snapshot?.sessionKey
+      ?? resolveSessionKey?.(evt)
+      ?? evt.sessionKey;
+    return typeof resolved === "string" && resolved.trim() ? resolved.trim() : undefined;
+  };
+
+  const hasRunProgressedPastQueue = (run: ActiveRunSpan | undefined): boolean => {
+    if (!run) {
+      return false;
+    }
+    return Boolean(
+      run.modelSpanEmitted
+      || typeof run.modelEndTs === "number"
+      || (typeof run.orchestrationCursorTs === "number" && run.orchestrationCursorTs > run.mainStartTs)
+      || run.channelIngressEmitted
+      || run.dispatchQueueEmitted
+      || run.sessionProcessingEmitted
+      || run.channelEgressEmitted
+      || (typeof run.pendingFinalOutcome === "string" && run.pendingFinalOutcome.length > 0)
+      || run.finalAttrsApplied
+      || (run.usedToolNames?.size ?? 0) > 0
+      || (run.aggregate?.modelCalls ?? 0) > 0
+    );
+  };
 
   return (evt: DiagnosticEventPayload) => {
     cleanupExpiredRoots();
@@ -331,8 +328,22 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           syncRootFromRun(evt);
         }
         if (evt.state === "processing") {
-          const snapshot = processingSnapshot;
+          const processingSnapshotFreshness = snapshotIsFreshForQueuedRequest(
+            processingSnapshot,
+            existingRun,
+            evt.ts,
+          );
           const lifecycleStartTs = typeof processingTraceTs === "number" ? processingTraceTs : evt.ts;
+          const snapshotBackfilledProcessingStart = Boolean(
+            typeof processingTraceTs === "number"
+            && typeof evt.ts === "number"
+            && processingTraceTs < evt.ts
+          );
+          const snapshot = processingSnapshotFreshness === false
+            ? snapshotBackfilledProcessingStart && processingSnapshot
+              ? { ...processingSnapshot, runId: undefined }
+              : undefined
+            : processingSnapshot;
           ensureUserSpan({
             sessionKey: evt.sessionKey,
             sessionId: evt.sessionId,
@@ -368,58 +379,62 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           }
         }
         if (shouldCloseForSessionState(evt.state)) {
+          const activeRun = getRun(evt, false);
           const snapshot = resolveSnapshotForEvent(evt);
+          const replaySessionKey = resolveReplaySessionKey(evt, snapshot);
           if (isHeartbeatSessionSnapshot(snapshot)) {
             break;
           }
-          const hasActiveTrace = Boolean(getRun(evt, false) || getRoot(evt, false));
-          const replayAlreadyFinalized = hasReplayWatermark(evt.sessionKey, snapshot);
-          const replayRunAlreadyFinalized = hasFinalizedReplayRunId(evt.sessionKey, snapshot?.runId);
-          if ((replayAlreadyFinalized || replayRunAlreadyFinalized) && !hasActiveTrace) {
+          const hasActiveTrace = Boolean(activeRun || getRoot(evt, false));
+          const replayAlreadyFinalized = hasReplayWatermark(replaySessionKey, snapshot);
+          if (replayAlreadyFinalized && !hasActiveTrace) {
             break;
           }
-          const emittedTranscriptModelSpans = emitTranscriptModelSpans(evt);
-          emitTranscriptToolSpans(evt);
-          if (!emittedTranscriptModelSpans) {
-            emitSyntheticModelSpan(evt);
+          const replaySnapshotFreshness = snapshotIsFreshForQueuedRequest(snapshot, activeRun, evt.ts);
+          const replaySnapshotIsFresh = replaySnapshotFreshness === true;
+          if (!hasActiveTrace && replaySnapshotFreshness !== true) {
+            break;
+          }
+          if (replaySnapshotIsFresh) {
+            const emittedTranscriptModelSpans = emitTranscriptModelSpans(evt);
+            emitTranscriptToolSpans(evt);
+            if (!emittedTranscriptModelSpans) {
+              emitSyntheticModelSpan(evt);
+            }
           }
           ensureRuntimeLifecycleSpans(
             {
               sessionKey: evt.sessionKey,
               sessionId: evt.sessionId,
               ts: evt.ts,
-              channel: snapshot?.lastChannel,
+              channel: replaySnapshotIsFresh ? snapshot?.lastChannel : undefined,
               outcome: evt.state,
             },
             {
               createIfMissing: true,
               emitEgress: true,
-              snapshot,
-              outputPreview: clipPreview(snapshot?.lastAssistantText),
-              outputLength: snapshot?.lastAssistantText?.length,
-            outcome: evt.state,
-          },
-        );
-        if (snapshot?.runCompleted === true) {
-          markReplayWatermark(evt.sessionKey, snapshot);
-        }
-        markFinalizedReplayRunId(
-          evt.sessionKey,
-          getRun(evt, false)?.runId ?? snapshot?.runId,
-        );
-        const finalOutcome = getRun(evt, false)?.pendingFinalOutcome
-          ?? resolveSnapshotFinalOutcome(snapshot);
-        endRun(evt, stringAttrs({
-          "openclaw.state": evt.state,
-          "openclaw.outcome": finalOutcome,
-          "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
-        }));
-        endRoot(evt, stringAttrs({
-          "openclaw.state": evt.state,
-          "openclaw.outcome": finalOutcome,
-          "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
-        }));
-        clearRun(evt);
+              snapshot: replaySnapshotIsFresh ? snapshot : undefined,
+              outputPreview: replaySnapshotIsFresh ? clipPreview(snapshot?.lastAssistantText) : undefined,
+              outputLength: replaySnapshotIsFresh ? snapshot?.lastAssistantText?.length : undefined,
+              outcome: evt.state,
+            },
+          );
+          if (replaySnapshotIsFresh && snapshot?.runCompleted === true) {
+            markReplayWatermark(replaySessionKey, snapshot);
+          }
+          const finalOutcome = getRun(evt, false)?.pendingFinalOutcome
+            ?? (replaySnapshotIsFresh ? resolveSnapshotFinalOutcome(snapshot) : undefined);
+          endRun(evt, stringAttrs({
+            "openclaw.state": evt.state,
+            "openclaw.outcome": finalOutcome,
+            "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
+          }));
+          endRoot(evt, stringAttrs({
+            "openclaw.state": evt.state,
+            "openclaw.outcome": finalOutcome,
+            "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
+          }));
+          clearRun(evt);
         }
         break;
       }
@@ -452,15 +467,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         }
         const isRuntimeContinueRequest = requestClassification.requestCategory === "runtime_continue";
         const activeRun = getRun(evt, false);
-        const hasStartedExecution = Boolean(
-          activeRun
-          && (
-            activeRun.modelSpanEmitted
-            || typeof activeRun.modelEndTs === "number"
-            || activeRun.usedToolNames.size > 0
-            || activeRun.aggregate.modelCalls > 0
-          ),
-        );
+        const hasStartedExecution = hasRunProgressedPastQueue(activeRun);
         if (
           !isRuntimeContinueRequest
           && (
@@ -690,22 +697,12 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         break;
       }
       case "message.processed": {
+        const activeRun = getRun(evt, false);
         const snapshot = resolveSnapshotForEvent(evt);
+        const replaySessionKey = resolveReplaySessionKey(evt, snapshot);
         if (isHeartbeatSessionSnapshot(snapshot)) {
           break;
         }
-        const processedAttrs = {
-          "openclaw.channel": evt.channel,
-          "openclaw.messageId": evt.messageId ? String(evt.messageId) : undefined,
-          "openclaw.chatId": evt.chatId ? String(evt.chatId) : undefined,
-          "openclaw.outcome": evt.outcome,
-          "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
-          "span.kind": "output",
-          "openclaw.output.preview": clipPreview(snapshot?.lastAssistantText),
-          "openclaw.output.length": snapshot?.lastAssistantText?.length,
-          "openclaw.provider": snapshot?.lastProvider,
-          "openclaw.model": snapshot?.lastModel,
-        };
         instruments.genAiRuntimeMessageProcessedCount?.add(
           1,
           buildGenAiRuntimeMessageMetricAttrs(evt.channel, evt.sessionId, {
@@ -720,19 +717,33 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             }),
           );
         }
-        ensureTranscriptSkillSpans(evt);
-        const activeRun = getRun(evt, false);
         const hasActiveTrace = Boolean(activeRun || getRoot(evt, false));
-        const replayAlreadyFinalized = hasReplayWatermark(evt.sessionKey, snapshot);
-        const replayRunAlreadyFinalized = hasFinalizedReplayRunId(evt.sessionKey, snapshot?.runId);
-        const replaySnapshotIsFresh = snapshotIsFreshForQueuedRequest(snapshot, activeRun);
+        const replayAlreadyFinalized = hasReplayWatermark(replaySessionKey, snapshot);
+        const replaySnapshotFreshness = snapshotIsFreshForQueuedRequest(snapshot, activeRun, evt.ts);
+        const replaySnapshotIsFresh = replaySnapshotFreshness === true;
         const replaySnapshotCompleted = snapshot?.runCompleted === true;
+        const replaySnapshotOutputPreview = replaySnapshotIsFresh
+          ? clipPreview(snapshot?.lastAssistantText)
+          : undefined;
+        const processedAttrs = {
+          "openclaw.channel": evt.channel,
+          "openclaw.messageId": evt.messageId ? String(evt.messageId) : undefined,
+          "openclaw.chatId": evt.chatId ? String(evt.chatId) : undefined,
+          "openclaw.outcome": evt.outcome,
+          "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
+          "span.kind": "output",
+          "openclaw.output.preview": replaySnapshotOutputPreview,
+          "openclaw.output.length": replaySnapshotIsFresh ? snapshot?.lastAssistantText?.length : undefined,
+          "openclaw.provider": replaySnapshotIsFresh ? snapshot?.lastProvider : undefined,
+          "openclaw.model": replaySnapshotIsFresh ? snapshot?.lastModel : undefined,
+        };
         const shouldAttemptReplay = (
-          ((!replayAlreadyFinalized && !replayRunAlreadyFinalized) || hasActiveTrace)
+          (!replayAlreadyFinalized || hasActiveTrace)
           && replaySnapshotIsFresh
           && (hasActiveTrace || replaySnapshotCompleted)
         );
         if (shouldAttemptReplay) {
+          ensureTranscriptSkillSpans(evt);
           const emittedTranscriptModelSpans = emitTranscriptModelSpans(evt);
           if (emittedTranscriptModelSpans) {
             emitTranscriptToolSpans(evt);
@@ -740,15 +751,18 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             emitSyntheticModelSpan(evt);
           }
         }
-        if ((replayAlreadyFinalized || replayRunAlreadyFinalized) && !hasActiveTrace) {
+        if (replayAlreadyFinalized && !hasActiveTrace) {
+          break;
+        }
+        if (replaySnapshotFreshness === false && !hasActiveTrace) {
           break;
         }
         const run = ensureRuntimeLifecycleSpans(evt, {
           createIfMissing: true,
           emitEgress: true,
-          snapshot,
-          outputPreview: clipPreview(snapshot?.lastAssistantText),
-          outputLength: snapshot?.lastAssistantText?.length,
+          snapshot: replaySnapshotIsFresh ? snapshot : undefined,
+          outputPreview: replaySnapshotOutputPreview,
+          outputLength: replaySnapshotIsFresh ? snapshot?.lastAssistantText?.length : undefined,
           outcome: evt.outcome,
         });
         logDiagnosticEvent(evt, processedAttrs, {
@@ -763,9 +777,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           run.pendingFinalOutcome = evt.outcome;
           run.lastTouchedAt = Date.now();
         }
-        if (snapshot?.runCompleted === true) {
-          markReplayWatermark(evt.sessionKey, snapshot);
-          markFinalizedReplayRunId(evt.sessionKey, snapshot.runId);
+        if (replaySnapshotIsFresh && snapshot?.runCompleted === true) {
+          markReplayWatermark(replaySessionKey, snapshot);
         }
         break;
       }

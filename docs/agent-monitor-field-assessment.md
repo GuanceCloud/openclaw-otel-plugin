@@ -16,7 +16,7 @@
 当前插件里的字段来源分三层：
 
 - OTel 原生链路字段：`trace_id`、`span_id`、`parent_span_id`、span 起止时间、span duration、`service.name`
-- 全局 resource 标签：`agent_provider`、`agent_version`、`runtime_environment`、`agent_name`、`globalTags`、`resourceAttributes`
+- 全局 resource 标签：`agent_provider`、`agent_version`、`runtime_environment`、`globalTags`、`resourceAttributes`
 - span/request attributes：`session_id`、`session_key`、`channel`、`model_provider`、`model_name`、`tool_*`、`skill_*`、`final_status` 等
 
 ## 1.1 当前映射规则
@@ -113,7 +113,7 @@
 | `tool_outcome` | tool span attr | `tool_outcome` | 直接可取 |
 | `tool_target` | tool span attr | `tool_target` | 直接可取 |
 | `final_status` | root/run attr | `final_status` | 直接可取 |
-| `agent_name` | resource | `agent_name` | 已补全局 tag |
+| `agent_name` | session key / 平台 enrich | `session_agent` 或平台注册信息 | 当前不再上报独立 `agent_name` tag |
 | `agent_runtime` | resource | `runtime_environment` | 已补全局 tag，但语义更接近 runtime lane |
 | `output_summary` | run/message attr | `openclaw.output.preview` | 直接可取，属于摘要字段 |
 | `output_text_length` | message attr | `openclaw.output.length` | 直接可取 |
@@ -127,7 +127,6 @@
 - `agent_provider`
 - `agent_version`
 - `runtime_environment`
-- `agent_name`
 
 当前应用也已经支持通过 [src/config.ts](/home/liurui/code/openclaw-otel-plugin/src/config.ts) 里的 `globalTags` 追加固定标签。
 
@@ -138,24 +137,20 @@
 | `deployment.environment` / `env` | 部分支持 | `globalTags` 或 `resourceAttributes` | 用于 prod/test/dev 隔离，优先补 |
 | `app_id` | 未内建，已可配置 | `globalTags` | 用于区分“监测应用”而不是插件本身 |
 | `app_name` | 未内建，已可配置 | `globalTags` | 页面展示常用 |
-| `agent_id` | 未内建，已可配置 | `globalTags` | 如果要稳定识别某个 Agent，建议补 |
 | `agent_type` | 未内建，已可配置 | `globalTags` | 如 `assistant`、`workflow-agent` |
 | `agent_source` | 未内建，已可配置 | `globalTags` | 如 `builtin`、`sdk`、`api` |
 | `agent_provider` | 已支持 | `agentProvider` 配置 | 默认 `openclaw` |
 | `agent_version` | 已支持 | 自动解析 | 适合版本维度排查 |
 | `runtime_environment` | 已支持 | 自动解析 | 当前从 `agent:<runtime>:<name>` 提取 |
-| `agent_name` | 已支持 | 自动解析 | 当前从 session key 提取 |
 
 推荐最小全局 tag 组合：
 
 - `agent_provider`
 - `agent_version`
 - `runtime_environment`
-- `agent_name`
 - `deployment.environment`
 - `app_id`
 - `app_name`
-- `agent_id`
 - `agent_type`
 - `agent_source`
 
@@ -175,7 +170,6 @@
             "deployment.environment": "prod",
             "app_id": "agent-monitor",
             "app_name": "Agent监测",
-            "agent_id": "main",
             "agent_type": "builtin",
             "agent_source": "openclaw"
           }
@@ -253,7 +247,7 @@
 - 链路直接取：
   `trace_id`、`span_id`、`parent_span_id`、`service.name`、`session_id`、`session_key`、`session_namespace`、`session_channel`、`session_agent`、`session_scope`、`session_channel_target`、`channel`、`model_provider`、`model_name`、`input_tokens`、`output_tokens`、`total_tokens`、`tool_call_id`、`tool_name`、`tool_phase`、`tool_result_status`、`tool_outcome`、`tool_target`、`skill_call_id`、`skill_name`、`skill_type`、`skill_source`、`final_status`
 - 全局 tag 补：
-  `agent_provider`、`agent_version`、`runtime_environment`、`agent_name`、`deployment.environment`、`app_id`、`app_name`、`agent_id`、`agent_type`、`agent_source`
+  `agent_provider`、`agent_version`、`runtime_environment`、`deployment.environment`、`app_id`、`app_name`、`agent_type`、`agent_source`
 - 平台 enrich：
   注册信息、负责人、权限、工具治理信息
 - 平台计算：

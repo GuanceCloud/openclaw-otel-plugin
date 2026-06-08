@@ -122,8 +122,6 @@ function resolveResourceAttributes(
   } as Record<string, string | number | boolean>;
   const aliasGroups: Array<[string, string[]]> = [
     ["agent_runtime", ["gen_ai.agent_runtime", "gen_ai_agent_runtime"]],
-    ["agent_id", ["gen_ai.agent_id", "gen_ai_agent_id"]],
-    ["agent_name", ["gen_ai.agent_name", "gen_ai_agent_name"]],
     ["agent_version", ["gen_ai.agent_version", "gen_ai_agent_version"]],
     ["runtime_environment", ["gen_ai.runtime_environment", "gen_ai_runtime_environment"]],
   ];

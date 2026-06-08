@@ -408,12 +408,17 @@ test("message.processed prefers transcript replay and marks replay watermark for
   assert.equal(watermarkMarked, 1);
 });
 
-test("message.processed skips stale transcript replay from an older request", () => {
+test("message.processed finalizes active trace without replaying stale transcript", () => {
   let transcriptCalls = 0;
   let toolReplayCalls = 0;
   let syntheticCalls = 0;
-  let lifecycleCalls = 0;
+  const lifecycleCalls = [];
+  let syncCalls = 0;
+  let skillCalls = 0;
+  let logAttrs;
   const run = {
+    runId: "run-new",
+    runIds: new Set(["run-new"]),
     ctx: { ctx: "run" },
     modelCtx: { ctx: "model" },
     messageQueuedTs: 2_000,
@@ -452,7 +457,9 @@ test("message.processed skips stale transcript replay from an older request", ()
     ensureUserSpan() {
       return run;
     },
-    syncRootFromRun() {},
+    syncRootFromRun() {
+      syncCalls += 1;
+    },
     endRun() {},
     endRoot() {},
     clearRun() {},
@@ -466,17 +473,21 @@ test("message.processed skips stale transcript replay from an older request", ()
     createChildSpan() {
       throw new Error("not expected");
     },
-    emitDiagnosticLog() {},
+    emitDiagnosticLog(_evt, attrs) {
+      logAttrs = attrs;
+    },
     emitRuntimeOrchestrationSpan() {},
-    ensureRuntimeLifecycleSpans() {
-      lifecycleCalls += 1;
+    ensureRuntimeLifecycleSpans(evt, options) {
+      lifecycleCalls.push({ evt, options });
       return run;
     },
     emitModelTurnDebugLog() {},
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    ensureTranscriptSkillSpans() {
+      skillCalls += 1;
+    },
     emitTranscriptModelSpans() {
       transcriptCalls += 1;
       return true;
@@ -494,9 +505,6 @@ test("message.processed skips stale transcript replay from an older request", ()
     hasReplayWatermark() {
       return false;
     },
-    hasFinalizedReplayRunId() {
-      return false;
-    },
   });
 
   handler({
@@ -510,8 +518,14 @@ test("message.processed skips stale transcript replay from an older request", ()
   assert.equal(transcriptCalls, 0);
   assert.equal(toolReplayCalls, 0);
   assert.equal(syntheticCalls, 0);
-  assert.equal(lifecycleCalls, 1);
+  assert.equal(skillCalls, 0);
+  assert.equal(lifecycleCalls.length, 1);
+  assert.equal(lifecycleCalls[0].options.snapshot, undefined);
+  assert.equal(lifecycleCalls[0].options.outputPreview, undefined);
+  assert.equal(syncCalls, 1);
   assert.equal(run.pendingFinalOutcome, "completed");
+  assert.equal(logAttrs["openclaw.output.preview"], undefined);
+  assert.equal(logAttrs["openclaw.provider"], undefined);
 });
 
 test("message.processed does not synthesize replay traces for incomplete snapshots without an active trace", () => {
@@ -596,9 +610,6 @@ test("message.processed does not synthesize replay traces for incomplete snapsho
     hasReplayWatermark() {
       return false;
     },
-    hasFinalizedReplayRunId() {
-      return false;
-    },
   });
 
   handler({
@@ -615,8 +626,10 @@ test("message.processed does not synthesize replay traces for incomplete snapsho
   assert.equal(lifecycleCalls, 1);
 });
 
-test("message.processed marks finalized replay run_id for completed sessions", () => {
-  const finalizedRunIds = [];
+test("message.processed replays completed transcript snapshots even without an active trace", () => {
+  let transcriptCalls = 0;
+  let toolReplayCalls = 0;
+  let lifecycleCalls = 0;
   const snapshot = {
     sessionFile: "session.jsonl",
     mtimeMs: 1,
@@ -641,13 +654,13 @@ test("message.processed marks finalized replay run_id for completed sessions", (
     cleanupExpiredRoots() {},
     beginRequestTrace() {},
     getRoot() {
-      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+      return undefined;
     },
     getRun() {
-      return { ctx: { ctx: "run" }, modelCtx: { ctx: "model" } };
+      return undefined;
     },
     ensureUserSpan() {
-      return { ctx: { ctx: "run" }, modelCtx: { ctx: "model" } };
+      return undefined;
     },
     syncRootFromRun() {},
     endRun() {},
@@ -666,6 +679,7 @@ test("message.processed marks finalized replay run_id for completed sessions", (
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
     ensureRuntimeLifecycleSpans() {
+      lifecycleCalls += 1;
       return { ctx: { ctx: "run" }, modelCtx: { ctx: "model" } };
     },
     emitModelTurnDebugLog() {},
@@ -674,10 +688,13 @@ test("message.processed marks finalized replay run_id for completed sessions", (
     },
     ensureTranscriptSkillSpans() {},
     emitTranscriptModelSpans() {
+      transcriptCalls += 1;
       return true;
     },
     emitSyntheticModelSpan() {},
-    emitTranscriptToolSpans() {},
+    emitTranscriptToolSpans() {
+      toolReplayCalls += 1;
+    },
     emitFallbackThinkingSpan() {},
     annotateToolLoop() {
       return false;
@@ -686,9 +703,6 @@ test("message.processed marks finalized replay run_id for completed sessions", (
       return false;
     },
     markReplayWatermark() {},
-    markFinalizedReplayRunId(sessionKey, runId) {
-      finalizedRunIds.push({ sessionKey, runId });
-    },
   });
 
   handler({
@@ -699,9 +713,131 @@ test("message.processed marks finalized replay run_id for completed sessions", (
     outcome: "completed",
   });
 
-  assert.deepEqual(finalizedRunIds, [
-    { sessionKey: "s1", runId: "run-123" },
-  ]);
+  assert.equal(transcriptCalls, 1);
+  assert.equal(toolReplayCalls, 1);
+  assert.equal(lifecycleCalls, 1);
+});
+
+test("message.processed does not replay stale snapshots while a new trace is active", () => {
+  let transcriptCalls = 0;
+  let syntheticCalls = 0;
+  const lifecycleCalls = [];
+  let syncCalls = 0;
+  let finalizedCalls = 0;
+  let skillCalls = 0;
+  const run = {
+    runId: "run-new",
+    runIds: new Set(["run-new"]),
+    ctx: { ctx: "run" },
+    modelCtx: { ctx: "model" },
+    mainStartTs: 350,
+    messageQueuedTs: 350,
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageProcessedCounter: { add() {} },
+      diagnosticsMessageDurationMs: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return run;
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    syncRootFromRun() {
+      syncCalls += 1;
+    },
+    endRun() {
+      throw new Error("not expected");
+    },
+    endRoot() {
+      throw new Error("not expected");
+    },
+    clearRun() {
+      throw new Error("not expected");
+    },
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        runId: "run-old",
+        runCompleted: true,
+        lastUserTs: 360,
+        lastAssistantTs: 100,
+        lastAssistantText: "旧回答",
+        lastRunAssistantTurns: [{ startedAt: 90, endedAt: 100 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans(evt, options) {
+      lifecycleCalls.push({ evt, options });
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {
+      skillCalls += 1;
+    },
+    emitTranscriptModelSpans() {
+      transcriptCalls += 1;
+      return true;
+    },
+    emitSyntheticModelSpan() {
+      syntheticCalls += 1;
+    },
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+    markReplayWatermark() {
+      finalizedCalls += 1;
+    },
+  });
+
+  handler({
+    type: "message.processed",
+    sessionKey: "s1",
+    ts: 360,
+    channel: "chat",
+    outcome: "completed",
+  });
+
+  assert.equal(transcriptCalls, 0);
+  assert.equal(syntheticCalls, 0);
+  assert.equal(skillCalls, 0);
+  assert.equal(lifecycleCalls.length, 1);
+  assert.equal(lifecycleCalls[0].options.snapshot, undefined);
+  assert.equal(lifecycleCalls[0].options.outputPreview, undefined);
+  assert.equal(syncCalls, 1);
+  assert.equal(run.pendingFinalOutcome, "completed");
+  assert.equal(finalizedCalls, 0);
 });
 
 test("session.state processing requests lifecycle shell spans", () => {
@@ -801,6 +937,7 @@ test("session.state processing backfills trace start from transcript snapshot", 
     ctx: { ctx: "run" },
     modelCtx: { ctx: "model" },
     mainStartTs: 360_000,
+    messageQueuedTs: 900,
     orchestrationCursorTs: 360_000,
   };
 
@@ -839,6 +976,7 @@ test("session.state processing backfills trace start from transcript snapshot", 
       return {
         sessionFile: "session.jsonl",
         mtimeMs: 1,
+        runId: "run-fresh",
         lastUserTs: 900,
         lastRunAssistantTurns: [{ startedAt: 950, endedAt: 980 }],
         lastRunToolCalls: [{ startedAt: 960 }],
@@ -887,6 +1025,7 @@ test("session.state processing backfills trace start from transcript snapshot", 
   assert.equal(lifecycleCalls[0].evt.ts, 900);
   assert.equal(lifecycleCalls[0].options.startTsHint, 900);
   assert.equal(lifecycleCalls[0].options.processingStartTs, 1000);
+  assert.equal(lifecycleCalls[0].options.snapshot.runId, "run-fresh");
 });
 
 test("session.state processing ignores stale transcript snapshots from an older request", () => {
@@ -936,6 +1075,7 @@ test("session.state processing ignores stale transcript snapshots from an older 
       return {
         sessionFile: "session.jsonl",
         mtimeMs: 1,
+        runId: "run-old",
         lastUserTs: 100,
         lastRunAssistantTurns: [{ startedAt: 150, endedAt: 200 }],
         lastRunToolCalls: [{ startedAt: 160 }],
@@ -982,6 +1122,97 @@ test("session.state processing ignores stale transcript snapshots from an older 
   assert.equal(run.mainStartTs, 360_000);
   assert.equal(lifecycleCalls[0].evt.ts, 360_000);
   assert.equal(lifecycleCalls[0].options.startTsHint, 360_000);
+  assert.equal(lifecycleCalls[0].options.snapshot, undefined);
+});
+
+test("session.state processing strips stale snapshot runId while keeping backfill metadata", () => {
+  const lifecycleCalls = [];
+  const run = {
+    ctx: { ctx: "run" },
+    modelCtx: { ctx: "model" },
+    mainStartTs: 1_000,
+    messageQueuedTs: 1_000,
+    orchestrationCursorTs: 1_000,
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsSessionStateCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return run;
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    syncRootFromRun() {},
+    endRun() {},
+    endRoot() {},
+    clearRun() {},
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        runId: "run-old",
+        lastChannel: "webchat",
+        lastUserTs: 900,
+        lastRunAssistantTurns: [{ startedAt: 930, endedAt: 950 }],
+        lastRunToolCalls: [{ startedAt: 940 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans(evt, options) {
+      lifecycleCalls.push({ evt, options });
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "session.state",
+    sessionKey: "s1",
+    ts: 1_200,
+    state: "processing",
+  });
+
+  assert.equal(lifecycleCalls[0].evt.ts, 1_000);
+  assert.equal(lifecycleCalls[0].options.startTsHint, 1_000);
+  assert.equal(lifecycleCalls[0].options.snapshot.lastChannel, "webchat");
+  assert.equal(lifecycleCalls[0].options.snapshot.runId, undefined);
 });
 
 test("session.state processing never backfills earlier than the queued message start", () => {
@@ -1181,7 +1412,7 @@ test("session.state idle skips duplicate replay after the transcript has already
   assert.equal(clearRunCalls, 0);
 });
 
-test("session.state idle skips duplicate replay after the completed run_id has already been finalized", () => {
+test("session.state idle skips stale transcript snapshots from an older request when no active trace exists", () => {
   let transcriptCalls = 0;
   let syntheticCalls = 0;
   let lifecycleCalls = 0;
@@ -1227,9 +1458,11 @@ test("session.state idle skips duplicate replay after the completed run_id has a
       return {
         sessionFile: "session.jsonl",
         mtimeMs: 1,
-        runId: "run-123",
+        runId: "run-old",
         runCompleted: true,
-        lastAssistantText: "final answer",
+        runFinalStatus: "success",
+        lastAssistantText: "old answer",
+        lastAssistantTs: 1,
         lastRunAssistantTurns: [{ startedAt: 1, endedAt: 2 }],
       };
     },
@@ -1266,15 +1499,13 @@ test("session.state idle skips duplicate replay after the completed run_id has a
       return false;
     },
     markReplayWatermark() {},
-    hasFinalizedReplayRunId(sessionKey, runId) {
-      return sessionKey === "s1" && runId === "run-123";
-    },
   });
 
   handler({
     type: "session.state",
     sessionKey: "s1",
-    ts: 1000,
+    sessionId: "sid-1",
+    ts: 1000 + (6 * 60 * 1000),
     state: "idle",
   });
 
@@ -1286,10 +1517,137 @@ test("session.state idle skips duplicate replay after the completed run_id has a
   assert.equal(clearRunCalls, 0);
 });
 
+test("session.state idle closes active trace without replaying stale transcript", () => {
+  let transcriptCalls = 0;
+  let syntheticCalls = 0;
+  let toolReplayCalls = 0;
+  const lifecycleCalls = [];
+  const endRunCalls = [];
+  const endRootCalls = [];
+  let clearRunCalls = 0;
+  let watermarkCalls = 0;
+  const run = {
+    runId: "run-new",
+    runIds: new Set(["run-new"]),
+    ctx: { ctx: "run" },
+    modelCtx: { ctx: "model" },
+    messageQueuedTs: 2_000,
+    pendingFinalOutcome: "completed",
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsSessionStateCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return run;
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    syncRootFromRun() {},
+    endRun(_evt, attrs) {
+      endRunCalls.push(attrs);
+    },
+    endRoot(_evt, attrs) {
+      endRootCalls.push(attrs);
+    },
+    clearRun() {
+      clearRunCalls += 1;
+    },
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        runId: "run-old",
+        runCompleted: true,
+        runFinalStatus: "success",
+        lastChannel: "old-channel",
+        lastAssistantText: "old answer",
+        lastAssistantTs: 1_500,
+        lastRunAssistantTurns: [{ startedAt: 1_200, endedAt: 1_500 }],
+        lastRunToolCalls: [{ startedAt: 1_250, endedAt: 1_400 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans(evt, options) {
+      lifecycleCalls.push({ evt, options });
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      transcriptCalls += 1;
+      return true;
+    },
+    emitSyntheticModelSpan() {
+      syntheticCalls += 1;
+    },
+    emitTranscriptToolSpans() {
+      toolReplayCalls += 1;
+    },
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+    markReplayWatermark() {
+      watermarkCalls += 1;
+    },
+  });
+
+  handler({
+    type: "session.state",
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 3_000,
+    state: "idle",
+  });
+
+  assert.equal(transcriptCalls, 0);
+  assert.equal(toolReplayCalls, 0);
+  assert.equal(syntheticCalls, 0);
+  assert.equal(lifecycleCalls.length, 1);
+  assert.equal(lifecycleCalls[0].evt.channel, undefined);
+  assert.equal(lifecycleCalls[0].options.snapshot, undefined);
+  assert.equal(lifecycleCalls[0].options.outputPreview, undefined);
+  assert.equal(endRunCalls.length, 1);
+  assert.equal(endRootCalls.length, 1);
+  assert.equal(endRunCalls[0].final_status, "completed");
+  assert.equal(endRootCalls[0].final_status, "completed");
+  assert.equal(clearRunCalls, 1);
+  assert.equal(watermarkCalls, 0);
+});
+
 test("session.state idle falls back to completed final_status when message.processed never arrived", () => {
   const endRunCalls = [];
   const endRootCalls = [];
-  const finalizedRunIds = [];
   const run = {
     runId: "run-123",
     ctx: { ctx: "run" },
@@ -1366,9 +1724,6 @@ test("session.state idle falls back to completed final_status when message.proce
       return false;
     },
     markReplayWatermark() {},
-    markFinalizedReplayRunId(sessionKey, runId) {
-      finalizedRunIds.push({ sessionKey, runId });
-    },
   });
 
   handler({
@@ -1385,9 +1740,6 @@ test("session.state idle falls back to completed final_status when message.proce
   assert.equal(endRootCalls[0].final_status, "completed");
   assert.equal(endRunCalls[0].state, "idle");
   assert.equal(endRootCalls[0].state, "idle");
-  assert.deepEqual(finalizedRunIds, [
-    { sessionKey: "s1", runId: "run-123" },
-  ]);
 });
 
 test("session.state idle prefers trajectory final status over idle", () => {
@@ -1470,7 +1822,6 @@ test("session.state idle prefers trajectory final status over idle", () => {
       return false;
     },
     markReplayWatermark() {},
-    markFinalizedReplayRunId() {},
   });
 
   handler({
@@ -1564,7 +1915,6 @@ test("session.state idle leaves final_status empty when no business outcome is a
       return false;
     },
     markReplayWatermark() {},
-    markFinalizedReplayRunId() {},
   });
 
   handler({
@@ -1807,6 +2157,207 @@ test("message.queued rotates a completed active run before starting the next req
     aggregate: { modelCalls: 1 },
     usedToolNames: new Set(["web_search"]),
     pendingFinalOutcome: "completed",
+  };
+  const newRun = {
+    ctx: { ctx: "new-run" },
+  };
+  let cleared = false;
+  let beginCalls = 0;
+  const endRunCalls = [];
+  const endRootCalls = [];
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageQueuedCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {
+      beginCalls += 1;
+    },
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return cleared ? undefined : oldRun;
+    },
+    ensureUserSpan() {
+      return newRun;
+    },
+    syncRootFromRun() {},
+    endRun(evt, attrs) {
+      endRunCalls.push({ evt, attrs });
+    },
+    endRoot(evt, attrs) {
+      endRootCalls.push({ evt, attrs });
+    },
+    clearRun() {
+      cleared = true;
+    },
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return undefined;
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return undefined;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "message.queued",
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 2000,
+    channel: "chat",
+    source: "feishu",
+  });
+
+  assert.equal(endRunCalls.length, 1);
+  assert.equal(endRootCalls.length, 1);
+  assert.equal(beginCalls, 1);
+  assert.equal(endRunCalls[0].evt.ts, 1999);
+  assert.equal(endRootCalls[0].evt.ts, 1999);
+});
+
+test("message.queued rotates an active run that only reached terminal lifecycle spans", () => {
+  const oldRun = {
+    ctx: { ctx: "old-run" },
+    mainStartTs: 1000,
+    orchestrationCursorTs: 1000,
+    modelSpanEmitted: false,
+    aggregate: { modelCalls: 0 },
+    usedToolNames: new Set(),
+    channelEgressEmitted: true,
+    pendingFinalOutcome: "completed",
+  };
+  const newRun = {
+    ctx: { ctx: "new-run" },
+  };
+  let cleared = false;
+  let beginCalls = 0;
+  const endRunCalls = [];
+  const endRootCalls = [];
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageQueuedCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {
+      beginCalls += 1;
+    },
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return cleared ? undefined : oldRun;
+    },
+    ensureUserSpan() {
+      return newRun;
+    },
+    syncRootFromRun() {},
+    endRun(evt, attrs) {
+      endRunCalls.push({ evt, attrs });
+    },
+    endRoot(evt, attrs) {
+      endRootCalls.push({ evt, attrs });
+    },
+    clearRun() {
+      cleared = true;
+    },
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return undefined;
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      return undefined;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      return false;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {},
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "message.queued",
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 2000,
+    channel: "chat",
+    source: "feishu",
+  });
+
+  assert.equal(endRunCalls.length, 1);
+  assert.equal(endRootCalls.length, 1);
+  assert.equal(beginCalls, 1);
+  assert.equal(endRunCalls[0].evt.ts, 1999);
+  assert.equal(endRootCalls[0].evt.ts, 1999);
+});
+
+test("message.queued rotates an active run once session processing has started", () => {
+  const oldRun = {
+    ctx: { ctx: "old-run" },
+    mainStartTs: 1000,
+    orchestrationCursorTs: 1500,
+    modelSpanEmitted: false,
+    aggregate: { modelCalls: 0 },
+    usedToolNames: new Set(),
+    sessionProcessingEmitted: true,
   };
   const newRun = {
     ctx: { ctx: "new-run" },

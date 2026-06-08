@@ -1,4 +1,12 @@
-import { context, metrics, trace, SpanKind, SpanStatusCode } from "@opentelemetry/api";
+import {
+  context,
+  metrics,
+  trace,
+  SpanKind,
+  SpanStatusCode,
+  TraceFlags,
+} from "@opentelemetry/api";
+import type { Context } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto";
@@ -7,7 +15,16 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
-import { ParentBasedSampler, TraceIdRatioBasedSampler } from "@opentelemetry/sdk-trace-base";
+import {
+  ParentBasedSampler,
+  TraceIdRatioBasedSampler,
+} from "@opentelemetry/sdk-trace-base";
+import type {
+  ReadableSpan,
+  SpanExporter,
+  SpanProcessor,
+  Span,
+} from "@opentelemetry/sdk-trace-base";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import type { OtelPluginConfig } from "./config.js";
 import type { MetricInstruments, OtelBootstrapResult, RuntimeMetadata } from "./service-types.js";
@@ -23,6 +40,10 @@ type TracePayloadDebugOptions = {
   enabled: boolean;
 };
 
+type RootBufferedTraceState = {
+  spans: ReadableSpan[];
+};
+
 function compactResourceAttrs(
   attrs: Record<string, string | number | boolean | undefined>,
 ): Record<string, string | number | boolean> {
@@ -31,28 +52,21 @@ function compactResourceAttrs(
   ) as Record<string, string | number | boolean>;
 }
 
-const SPAN_ONLY_RESOURCE_ATTR_KEYS = new Set([
-  "agent_id",
-  "agent_name",
-]);
-
 export function buildOtelResourceAttrs(
   config: Pick<OtelPluginConfig, "serviceName" | "resourceAttributes">,
   runtimeMetadata?: RuntimeMetadata,
 ): Record<string, string | number | boolean> {
-  const filteredConfiguredResourceAttrs = Object.fromEntries(
-    Object.entries(config.resourceAttributes ?? {}).filter(([key]) => !SPAN_ONLY_RESOURCE_ATTR_KEYS.has(key)),
-  ) as Record<string, string | number | boolean>;
+  const configuredResourceAttrs = config.resourceAttributes ?? {};
 
   return compactResourceAttrs({
     [ATTR_SERVICE_NAME]: config.serviceName,
     agent_runtime:
-      typeof filteredConfiguredResourceAttrs.agent_runtime === "string"
-        ? filteredConfiguredResourceAttrs.agent_runtime
+      typeof configuredResourceAttrs.agent_runtime === "string"
+        ? configuredResourceAttrs.agent_runtime
         : "openclaw",
     agent_version: runtimeMetadata?.openclawVersion,
     runtime_environment: runtimeMetadata?.runtimeEnvironment,
-    ...filteredConfiguredResourceAttrs,
+    ...configuredResourceAttrs,
   });
 }
 
@@ -140,16 +154,6 @@ function collectTracePayloadSummary(
         end_time: hrTimeToUnixMs((item as { endTime?: unknown }).endTime),
         session_id: typeof attrs.session_id === "string" ? String(attrs.session_id) : undefined,
         session_key: typeof attrs.session_key === "string" ? String(attrs.session_key) : undefined,
-        agent_id: typeof attrs.agent_id === "string"
-          ? String(attrs.agent_id)
-          : typeof resourceAttrs.agent_id === "string"
-            ? String(resourceAttrs.agent_id)
-            : undefined,
-        agent_name: typeof attrs.agent_name === "string"
-          ? String(attrs.agent_name)
-          : typeof resourceAttrs.agent_name === "string"
-            ? String(resourceAttrs.agent_name)
-            : undefined,
         agent_runtime: typeof attrs.agent_runtime === "string"
           ? String(attrs.agent_runtime)
           : typeof resourceAttrs.agent_runtime === "string"
@@ -233,6 +237,130 @@ function withExportLogging<T extends { export: (items: any, callback: (result: a
   return exporter;
 }
 
+function compareHrTime(
+  left: readonly [number, number],
+  right: readonly [number, number],
+): number {
+  if (left[0] !== right[0]) {
+    return left[0] - right[0];
+  }
+  return left[1] - right[1];
+}
+
+function compareReadableSpans(left: ReadableSpan, right: ReadableSpan): number {
+  const startCompare = compareHrTime(left.startTime, right.startTime);
+  if (startCompare !== 0) {
+    return startCompare;
+  }
+  const endCompare = compareHrTime(left.endTime, right.endTime);
+  if (endCompare !== 0) {
+    return endCompare;
+  }
+  return left.name.localeCompare(right.name);
+}
+
+function isRootReadableSpan(span: ReadableSpan): boolean {
+  return !span.parentSpanContext?.spanId;
+}
+
+export class RootBufferedTraceSpanProcessor implements SpanProcessor {
+  private readonly exporter: SpanExporter;
+  private readonly bufferedByTraceId = new Map<string, RootBufferedTraceState>();
+  private readonly exportingTraceIds = new Set<string>();
+  private readonly pendingExports = new Set<Promise<void>>();
+  private shutdownPromise: Promise<void> | undefined;
+  private shuttingDown = false;
+
+  constructor(exporter: SpanExporter) {
+    this.exporter = exporter;
+  }
+
+  onStart(_span: Span, _parentContext: Context): void {}
+
+  onEnd(span: ReadableSpan): void {
+    if (this.shuttingDown) {
+      return;
+    }
+    if ((span.spanContext().traceFlags & TraceFlags.SAMPLED) === 0) {
+      return;
+    }
+    const traceId = span.spanContext().traceId;
+    if (!traceId) {
+      return;
+    }
+
+    const state = this.bufferedByTraceId.get(traceId) ?? { spans: [] };
+    state.spans.push(span);
+    this.bufferedByTraceId.set(traceId, state);
+
+    if (isRootReadableSpan(span)) {
+      this.exportBufferedTrace(traceId);
+    }
+  }
+
+  async forceFlush(): Promise<void> {
+    for (const traceId of Array.from(this.bufferedByTraceId.keys())) {
+      this.exportBufferedTrace(traceId);
+    }
+    await Promise.all(Array.from(this.pendingExports));
+    if (typeof this.exporter.forceFlush === "function") {
+      await this.exporter.forceFlush();
+    }
+  }
+
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) {
+      return this.shutdownPromise;
+    }
+    this.shuttingDown = true;
+    this.shutdownPromise = (async () => {
+      await this.forceFlush();
+      await this.exporter.shutdown();
+    })();
+    return this.shutdownPromise;
+  }
+
+  private exportBufferedTrace(traceId: string): void {
+    if (this.exportingTraceIds.has(traceId)) {
+      return;
+    }
+    const state = this.bufferedByTraceId.get(traceId);
+    if (!state || state.spans.length === 0) {
+      return;
+    }
+    const spans = state.spans.slice().sort(compareReadableSpans);
+    this.bufferedByTraceId.delete(traceId);
+    this.exportingTraceIds.add(traceId);
+
+    const pendingExport = this.doExport(spans)
+      .finally(() => {
+        this.exportingTraceIds.delete(traceId);
+        this.pendingExports.delete(pendingExport);
+      });
+    this.pendingExports.add(pendingExport);
+    void pendingExport.catch(() => undefined);
+  }
+
+  private async doExport(spans: ReadableSpan[]): Promise<void> {
+    await Promise.all(
+      spans
+        .map((span) => span.resource)
+        .filter((resource) => resource?.asyncAttributesPending)
+        .map((resource) => resource.waitForAsyncAttributes?.()),
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      this.exporter.export(spans, (result) => {
+        if (result?.code === 0) {
+          resolve();
+          return;
+        }
+        reject(result?.error ?? new Error("RootBufferedTraceSpanProcessor export failed"));
+      });
+    });
+  }
+}
+
 export async function startOtelBootstrap(
   config: OtelPluginConfig,
   runtimeMetadata?: RuntimeMetadata,
@@ -278,7 +406,9 @@ export async function startOtelBootstrap(
   const sdk = new NodeSDK({
     serviceName: config.serviceName,
     resource,
-    traceExporter,
+    spanProcessors: [
+      new RootBufferedTraceSpanProcessor(traceExporter),
+    ],
     metricReader: new PeriodicExportingMetricReader({
       exporter: metricExporter,
       exportIntervalMillis: config.flushIntervalMs,

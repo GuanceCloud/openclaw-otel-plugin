@@ -93,6 +93,7 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
     dispatchQueueEmitted: false,
     sessionProcessingEmitted: false,
     channelEgressEmitted: false,
+    runtimeLifecycleSpans: [],
     modelSpanEmitted: false,
     thinkingSpanEmitted: false,
     transcriptAssistantTurnsEmitted: 0,
@@ -158,41 +159,6 @@ export function loadSnapshotForEvent(
   return undefined;
 }
 
-export function resolveAgentIdentity(options: {
-  sessionKey?: string;
-  snapshot?: Pick<SessionSnapshot, "agentId" | "agentName">;
-  attrs?: Record<string, string | number | boolean | undefined>;
-  configuredAgentById?: Map<string, { id?: string; name?: string }>;
-  runtimeMetadata?: RuntimeMetadata;
-}): {
-  agentId?: string;
-  agentName?: string;
-} {
-  const sessionKey = typeof options.sessionKey === "string" && options.sessionKey.trim()
-    ? options.sessionKey.trim()
-    : undefined;
-  const parsedSessionKey = parseSessionKey(sessionKey);
-  const configuredAgent = parsedSessionKey.sessionAgent
-    ? options.configuredAgentById?.get(parsedSessionKey.sessionAgent)
-    : undefined;
-  const explicitAgentId = typeof options.attrs?.agent_id === "string" && options.attrs.agent_id.trim()
-    ? options.attrs.agent_id.trim()
-    : undefined;
-  const explicitAgentName = typeof options.attrs?.agent_name === "string" && options.attrs.agent_name.trim()
-    ? options.attrs.agent_name.trim()
-    : undefined;
-  const dynamicAgentId = parsedSessionKey.sessionAgent ?? options.snapshot?.agentId;
-  const dynamicAgentName = configuredAgent?.name
-    ?? configuredAgent?.id
-    ?? options.snapshot?.agentName
-    ?? dynamicAgentId;
-
-  return {
-    agentId: explicitAgentId ?? dynamicAgentId ?? options.runtimeMetadata?.agentId,
-    agentName: explicitAgentName ?? dynamicAgentName ?? options.runtimeMetadata?.agentName,
-  };
-}
-
 export function isHeartbeatSessionSnapshot(snapshot: SessionSnapshot | undefined): boolean {
   return resolveRequestClassification({
     lastUserText: snapshot?.lastUserText,
@@ -200,6 +166,29 @@ export function isHeartbeatSessionSnapshot(snapshot: SessionSnapshot | undefined
     inputPreview: snapshot?.lastRunAssistantTurns?.at(-1)?.inputPreview,
     outputPreview: snapshot?.lastRunAssistantTurns?.at(-1)?.outputPreview,
   }).requestCategory === "heartbeat";
+}
+
+export function normalizeFinalStatus(rawStatus: string | undefined): string | undefined {
+  const raw = typeof rawStatus === "string" ? rawStatus.trim().toLowerCase() : "";
+  if (!raw) {
+    return undefined;
+  }
+  if (raw === "success" || raw === "completed") {
+    return "completed";
+  }
+  if (raw === "error" || raw === "failed" || raw === "failure") {
+    return "error";
+  }
+  if (raw === "cancelled" || raw === "canceled") {
+    return "cancelled";
+  }
+  if (raw === "timeout" || raw === "timed_out" || raw === "timed-out") {
+    return "timeout";
+  }
+  if (raw === "superseded" || raw === "superseded_by_next_message") {
+    return "superseded";
+  }
+  return raw;
 }
 
 export function resolveRequestClassification(input: {
@@ -323,18 +312,95 @@ export function buildTranscriptReplayEvent(
   };
 }
 
+function isFiniteTimestamp(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function resolveTranscriptReplayActivityTs(
+  snapshot: Pick<SessionSnapshot, "lastAssistantTs" | "lastRunToolCalls" | "lastRunAssistantTurns"> | undefined,
+): number | undefined {
+  const candidates = [
+    snapshot?.lastAssistantTs,
+    ...(snapshot?.lastRunToolCalls ?? []).flatMap((toolCall) => [toolCall.startedAt, toolCall.endedAt]),
+    ...(snapshot?.lastRunAssistantTurns ?? []).flatMap((turn) => [turn.startedAt, turn.endedAt]),
+  ].filter(isFiniteTimestamp);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  return Math.max(...candidates);
+}
+
+export function resolveTranscriptReplayFreshness(options: {
+  snapshot: Pick<SessionSnapshot, "lastAssistantTs" | "lastRunToolCalls" | "lastRunAssistantTurns"> | undefined;
+  activeRun?: Pick<ActiveRunSpan, "mainStartTs" | "messageQueuedTs"> | undefined;
+  fallbackTs?: number;
+  backfillWindowMs?: number;
+}): boolean | undefined {
+  const replayActivityTs = resolveTranscriptReplayActivityTs(options.snapshot);
+  if (!isFiniteTimestamp(replayActivityTs)) {
+    return undefined;
+  }
+  const minRequestTs = isFiniteTimestamp(options.activeRun?.messageQueuedTs)
+    ? options.activeRun.messageQueuedTs
+    : isFiniteTimestamp(options.activeRun?.mainStartTs)
+      ? options.activeRun.mainStartTs
+      : undefined;
+  if (isFiniteTimestamp(minRequestTs)) {
+    return replayActivityTs >= minRequestTs;
+  }
+  if (isFiniteTimestamp(options.fallbackTs)) {
+    return replayActivityTs >= (options.fallbackTs - (options.backfillWindowMs ?? 5 * 60 * 1000));
+  }
+  return true;
+}
+
+export function resolveTranscriptReplayPlan(options: {
+  hasActiveTrace: boolean;
+  replayAlreadyFinalized: boolean;
+  runCompleted: boolean;
+  replaySnapshotFresh?: boolean;
+}): {
+  emitReplay: boolean;
+  markFinalizationOnly: boolean;
+} {
+  if (options.replaySnapshotFresh === false) {
+    return {
+      emitReplay: false,
+      markFinalizationOnly: false,
+    };
+  }
+  if (options.hasActiveTrace) {
+    return {
+      emitReplay: true,
+      markFinalizationOnly: false,
+    };
+  }
+  if (options.replayAlreadyFinalized) {
+    return {
+      emitReplay: false,
+      markFinalizationOnly: false,
+    };
+  }
+  return {
+    emitReplay: options.runCompleted,
+    markFinalizationOnly: false,
+  };
+}
+
 export function resolveReplayFinalizationStateFile(stateDir: string): string {
   return path.join(stateDir, "plugins", "openclaw-otel-plugin", "replay-finalization-state.json");
 }
 
 export function readReplayFinalizationState(filePath: string): Map<string, {
   watermark?: string;
-  runId?: string;
+  trajectorySourceSeq?: number;
+  pendingRunIds?: string[];
   updatedAt?: number;
 }> {
   const entries = new Map<string, {
     watermark?: string;
-    runId?: string;
+    trajectorySourceSeq?: number;
+    pendingRunIds?: string[];
     updatedAt?: number;
   }>();
   try {
@@ -345,7 +411,8 @@ export function readReplayFinalizationState(filePath: string): Map<string, {
     const parsed = JSON.parse(raw) as {
       sessions?: Record<string, {
         watermark?: unknown;
-        runId?: unknown;
+        trajectorySourceSeq?: unknown;
+        pendingRunIds?: unknown;
         updatedAt?: unknown;
       }>;
     };
@@ -353,16 +420,22 @@ export function readReplayFinalizationState(filePath: string): Map<string, {
       const watermark = typeof value?.watermark === "string" && value.watermark.trim()
         ? value.watermark
         : undefined;
-      const runId = typeof value?.runId === "string" && value.runId.trim()
-        ? value.runId
+      const trajectorySourceSeq = typeof value?.trajectorySourceSeq === "number"
+        && Number.isFinite(value.trajectorySourceSeq)
+        ? value.trajectorySourceSeq
+        : undefined;
+      const pendingRunIds = Array.isArray(value?.pendingRunIds)
+        ? value.pendingRunIds
+          .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+          .slice(0, 16)
         : undefined;
       const updatedAt = typeof value?.updatedAt === "number" && Number.isFinite(value.updatedAt)
         ? value.updatedAt
         : undefined;
-      if (!watermark && !runId) {
+      if (!watermark && trajectorySourceSeq === undefined && !pendingRunIds?.length) {
         continue;
       }
-      entries.set(sessionKey, { watermark, runId, updatedAt });
+      entries.set(sessionKey, { watermark, trajectorySourceSeq, pendingRunIds, updatedAt });
     }
   } catch {
     return new Map();
@@ -374,12 +447,17 @@ export function writeReplayFinalizationState(
   filePath: string,
   entries: Map<string, {
     watermark?: string;
-    runId?: string;
+    trajectorySourceSeq?: number;
+    pendingRunIds?: string[];
     updatedAt?: number;
   }>,
 ): void {
   const normalizedSessions = Array.from(entries.entries())
-    .filter(([, value]) => Boolean(value?.watermark || value?.runId))
+    .filter(([, value]) => Boolean(
+      value?.watermark
+      || value?.trajectorySourceSeq !== undefined
+      || value?.pendingRunIds?.length,
+    ))
     .sort((left, right) => (right[1].updatedAt ?? 0) - (left[1].updatedAt ?? 0))
     .slice(0, REPLAY_FINALIZATION_STATE_MAX_SESSIONS);
   try {
@@ -390,7 +468,12 @@ export function writeReplayFinalizationState(
         sessionKey,
         {
           ...(value.watermark ? { watermark: value.watermark } : {}),
-          ...(value.runId ? { runId: value.runId } : {}),
+          ...(typeof value.trajectorySourceSeq === "number"
+            ? { trajectorySourceSeq: value.trajectorySourceSeq }
+            : {}),
+          ...(value.pendingRunIds?.length
+            ? { pendingRunIds: value.pendingRunIds.slice(0, 16) }
+            : {}),
           ...(typeof value.updatedAt === "number" ? { updatedAt: value.updatedAt } : {}),
         },
       ])),
@@ -459,6 +542,28 @@ export function buildRunScopeAttrs(
     run_id: resolvedPrimaryRunId,
     run_ids: orderedRunIds.length > 0 ? orderedRunIds.join(",") : undefined,
   };
+}
+
+export function shouldFallbackRunBoundEventToActiveRequest(
+  options: {
+    runId?: string;
+    eventTs?: number;
+    activeRequestStartedAt?: number;
+  },
+): boolean {
+  const normalizedRunId = typeof options.runId === "string" ? options.runId.trim() : "";
+  if (!normalizedRunId) {
+    return true;
+  }
+  if (
+    typeof options.eventTs !== "number"
+    || !Number.isFinite(options.eventTs)
+    || typeof options.activeRequestStartedAt !== "number"
+    || !Number.isFinite(options.activeRequestStartedAt)
+  ) {
+    return false;
+  }
+  return options.eventTs >= options.activeRequestStartedAt;
 }
 
 export function parseSessionKey(
@@ -728,13 +833,27 @@ export function stringAttrs(
   }
   return Object.fromEntries(
     Object.entries(stripOpenClawNamespace(withCanonicalAliases(withGlobalRuntime)))
-      .filter(([key, value]) => key !== "trace_id" && value !== undefined && value !== "")
+      .filter(([key, value]) => (
+        !OMITTED_AGENT_IDENTITY_ATTR_KEYS.has(key)
+        && key !== "trace_id"
+        && value !== undefined
+        && value !== ""
+      ))
       .map(([key, value]) => [
         key,
         typeof value === "string" ? stripAnsiEscapeCodes(value) : value,
       ]),
   ) as Record<string, string | number | boolean>;
 }
+
+const OMITTED_AGENT_IDENTITY_ATTR_KEYS = new Set([
+  "agent_id",
+  "agent_name",
+  "gen_ai.agent_id",
+  "gen_ai.agent_name",
+  "gen_ai_agent_id",
+  "gen_ai_agent_name",
+]);
 
 const LEGACY_TRACE_CONTEXT_KEYS = new Set([
   "skill.call_id",
@@ -757,8 +876,6 @@ const LEGACY_TRACE_CONTEXT_KEYS = new Set([
   "session_update_time",
   "session.chatType",
   "session.file",
-  "gen_ai.agent_id",
-  "gen_ai.agent_name",
   "gen_ai.agent_runtime",
   "gen_ai.agent_channel",
   "gen_ai.session_id",

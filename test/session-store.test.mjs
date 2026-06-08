@@ -739,6 +739,161 @@ test("session store reads final status from trace.artifacts and session.ended", 
   assert.equal(snapshot.runCompleted, true);
   assert.equal(snapshot.runTerminalType, "session.ended");
   assert.equal(snapshot.runFinalStatus, "success");
+  const runState = store.loadSessionRunState("s6", "run-6");
+  assert.equal(runState.terminalSourceSeq, undefined);
+});
+
+test("session store lists completed trajectory runs in sourceSeq order", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "s6b.jsonl");
+  const trajectoryFile = path.join(sessionsDir, "s6b.trajectory.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s6b: {
+        sessionFile,
+        sessionId: "session-6b",
+      },
+    }),
+  );
+  fs.writeFileSync(
+    trajectoryFile,
+    `${JSON.stringify({
+      type: "session.started",
+      runId: "run-a",
+      sourceSeq: 1,
+      ts: "2026-05-14T12:05:46.000Z",
+      provider: "deepseek",
+      modelId: "deepseek-chat",
+    })}\n${JSON.stringify({
+      type: "model.completed",
+      runId: "run-a",
+      sourceSeq: 2,
+      ts: "2026-05-14T12:05:49.000Z",
+      provider: "deepseek",
+      modelId: "deepseek-chat",
+      data: {
+        finalPromptText: "A",
+        assistantTexts: ["A1"],
+        usage: {
+          input: 10,
+          output: 1,
+          total: 11,
+        },
+        messagesSnapshot: [
+          { role: "user", timestamp: "2026-05-14T12:05:47.000Z", content: [{ type: "text", text: "A" }] },
+          { role: "assistant", timestamp: "2026-05-14T12:05:49.000Z", content: [{ type: "text", text: "A1" }] },
+        ],
+      },
+    })}\n${JSON.stringify({
+      type: "trace.artifacts",
+      runId: "run-a",
+      sourceSeq: 3,
+      ts: "2026-05-14T12:05:49.500Z",
+      data: { finalStatus: "success" },
+    })}\n${JSON.stringify({
+      type: "session.started",
+      runId: "run-b",
+      sourceSeq: 4,
+      ts: "2026-05-14T12:06:00.000Z",
+      provider: "deepseek",
+      modelId: "deepseek-chat",
+    })}\n${JSON.stringify({
+      type: "model.completed",
+      runId: "run-b",
+      sourceSeq: 5,
+      ts: "2026-05-14T12:06:03.000Z",
+      provider: "deepseek",
+      modelId: "deepseek-chat",
+      data: {
+        finalPromptText: "B",
+        assistantTexts: ["B1"],
+        usage: {
+          input: 12,
+          output: 2,
+          total: 14,
+        },
+        messagesSnapshot: [
+          { role: "user", timestamp: "2026-05-14T12:06:01.000Z", content: [{ type: "text", text: "B" }] },
+          { role: "assistant", timestamp: "2026-05-14T12:06:03.000Z", content: [{ type: "text", text: "B1" }] },
+        ],
+      },
+    })}\n${JSON.stringify({
+      type: "trace.artifacts",
+      runId: "run-b",
+      sourceSeq: 6,
+      ts: "2026-05-14T12:06:03.500Z",
+      data: { finalStatus: "success" },
+    })}\n`,
+  );
+  fs.writeFileSync(sessionFile, "");
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+
+  const completedRuns = store.listCompletedTrajectoryRuns("s6b", 0);
+  assert.equal(completedRuns.length, 2);
+  assert.equal(completedRuns[0].runId, "run-a");
+  assert.equal(completedRuns[0].sourceSeq, 3);
+  assert.equal(completedRuns[0].userText, "A");
+  assert.equal(completedRuns[0].assistantText, "A1");
+  assert.equal(completedRuns[0].usage?.total, 11);
+  assert.equal(completedRuns[1].runId, "run-b");
+  assert.equal(completedRuns[1].sourceSeq, 6);
+  assert.equal(completedRuns[1].userText, "B");
+  assert.equal(completedRuns[1].assistantText, "B1");
+
+  const incrementalRuns = store.listCompletedTrajectoryRuns("s6b", 3);
+  assert.equal(incrementalRuns.length, 1);
+  assert.equal(incrementalRuns[0].runId, "run-b");
+  assert.equal(store.loadSessionRunState("s6b", "run-b").terminalSourceSeq, 6);
+});
+
+test("session store only exposes terminalSourceSeq after a terminal trajectory line", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "s6c.jsonl");
+  const trajectoryFile = path.join(sessionsDir, "s6c.trajectory.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s6c: {
+        sessionFile,
+        sessionId: "session-6c",
+      },
+    }),
+  );
+  fs.writeFileSync(
+    trajectoryFile,
+    `${JSON.stringify({
+      type: "session.started",
+      runId: "run-c",
+      sourceSeq: 11,
+      ts: "2026-05-14T12:07:00.000Z",
+    })}\n${JSON.stringify({
+      type: "model.completed",
+      runId: "run-c",
+      sourceSeq: 12,
+      ts: "2026-05-14T12:07:02.000Z",
+      data: {
+        assistantTexts: ["C1"],
+      },
+    })}\n`,
+  );
+  fs.writeFileSync(sessionFile, "");
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+
+  const runState = store.loadSessionRunState("s6c", "run-c");
+  assert.equal(runState.runCompleted, false);
+  assert.equal(runState.runTerminalType, "model.completed");
+  assert.equal(runState.terminalSourceSeq, undefined);
 });
 
 test("session store infers completed run from final assistant stopReason", () => {
@@ -795,6 +950,82 @@ test("session store infers completed run from final assistant stopReason", () =>
   assert.equal(snapshot.runCompleted, true);
   assert.equal(snapshot.runTerminalType, "assistant.stop");
   assert.equal(snapshot.runFinalStatus, "success");
+});
+
+test("session store does not mark a new user turn completed from the previous assistant stopReason", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionFile = path.join(sessionsDir, "s7b.jsonl");
+  const trajectoryFile = path.join(sessionsDir, "s7b.trajectory.jsonl");
+  fs.writeFileSync(
+    path.join(sessionsDir, "sessions.json"),
+    JSON.stringify({
+      s7b: {
+        sessionFile,
+        sessionId: "session-7b",
+      },
+    }),
+  );
+  fs.writeFileSync(
+    trajectoryFile,
+    `${JSON.stringify({
+      type: "session.started",
+      runId: "run-7a",
+      ts: "2026-05-14T12:05:46.000Z",
+    })}\n${JSON.stringify({
+      type: "trace.artifacts",
+      runId: "run-7a",
+      ts: "2026-05-14T12:05:49.000Z",
+      data: {
+        finalStatus: "success",
+      },
+    })}\n${JSON.stringify({
+      type: "session.started",
+      runId: "run-7b",
+      ts: "2026-05-14T12:06:00.000Z",
+    })}\n`,
+  );
+  fs.writeFileSync(
+    sessionFile,
+    `${JSON.stringify({
+      type: "message",
+      timestamp: "2026-05-14T12:05:47.000Z",
+      message: {
+        role: "user",
+        content: "hello",
+        idempotencyKey: "run-7a:user",
+      },
+    })}\n${JSON.stringify({
+      type: "message",
+      timestamp: "2026-05-14T12:05:49.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "world" }],
+        stopReason: "stop",
+      },
+    })}\n${JSON.stringify({
+      type: "message",
+      timestamp: "2026-05-14T12:06:01.000Z",
+      message: {
+        role: "user",
+        content: "follow up",
+        idempotencyKey: "run-7b:user",
+      },
+    })}\n`,
+  );
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const snapshot = store.loadSessionSnapshot("s7b");
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.runId, "run-7b");
+  assert.equal(snapshot.runCompleted, false);
+  assert.equal(snapshot.runTerminalType, "session.started");
+  assert.equal(snapshot.lastUserText, "follow up");
+  assert.equal(snapshot.lastRunAssistantTurns.length, 0);
 });
 
 test("session store resolves sessionKey from sessionId", () => {

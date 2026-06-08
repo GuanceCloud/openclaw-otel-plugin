@@ -65,6 +65,14 @@ export type SessionUsageTotals = {
   totalTokens: number;
 };
 
+export type RunUsageTotals = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  total?: number;
+};
+
 export type ActiveRunSpan = {
   requestKey?: string;
   sessionIdentity?: string;
@@ -81,6 +89,7 @@ export type ActiveRunSpan = {
   dispatchQueueEmitted?: boolean;
   sessionProcessingEmitted?: boolean;
   channelEgressEmitted?: boolean;
+  runtimeLifecycleSpans?: any[];
   pendingChannelIngressWindow?: {
     startTs: number;
     endTs: number;
@@ -240,6 +249,33 @@ export type SessionSnapshot = {
   trajectoryMtimeMs?: number;
 };
 
+export type SessionRunState = {
+  runId?: string;
+  runCompleted?: boolean;
+  runTerminalType?: string;
+  runFinalStatus?: string;
+  terminalSourceSeq?: number;
+};
+
+export type CompletedTrajectoryRun = {
+  sessionKey: string;
+  sessionFile: string;
+  sessionId?: string;
+  runId: string;
+  sourceSeq: number;
+  startedAt?: number;
+  completedAt?: number;
+  provider?: string;
+  model?: string;
+  finalStatus?: string;
+  finalPromptText?: string;
+  userText?: string;
+  userTs?: number;
+  assistantText?: string;
+  assistantTs?: number;
+  usage?: RunUsageTotals;
+};
+
 export type SkillCatalogEntry = {
   name: string;
   aliases: string[];
@@ -251,7 +287,12 @@ export type SessionSnapshotStore = {
   loadSessionRunState(
     sessionKey: string | undefined,
     runId?: string,
-  ): { runId?: string; runCompleted?: boolean; runTerminalType?: string; runFinalStatus?: string };
+  ): SessionRunState;
+  listRecentSessionKeys(sinceUpdatedAt?: number): string[];
+  listCompletedTrajectoryRuns(
+    sessionKey: string | undefined,
+    afterSourceSeqExclusive?: number,
+  ): CompletedTrajectoryRun[];
   resolveSessionKeyById(sessionId: string): string | undefined;
   resolveSessionKeyByFile(sessionFile: string): string | undefined;
   setLatestAssistantText(sessionKey: string, text: string): void;

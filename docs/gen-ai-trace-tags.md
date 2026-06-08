@@ -147,8 +147,6 @@
 
 | 字段 | 描述 |
 | --- | --- |
-| `agent_id` | agent 标识 |
-| `agent_name` | agent 名称 |
 | `agent_runtime` | agent runtime 名称，当前为 `openclaw` |
 | `agent_version` | agent / runtime 版本 |
 | `runtime_environment` | 当前运行环境 |

@@ -22,20 +22,35 @@ import {
   buildSessionMetricAttrs,
   computeSessionMetricDelta,
   loadSnapshotForEvent,
-  resolveAgentIdentity,
+  normalizeFinalStatus,
   readReplayFinalizationState,
   resolveRequestClassification,
+  resolveTranscriptReplayActivityTs,
+  resolveTranscriptReplayFreshness,
   rememberRunId,
+  resolveTranscriptReplayPlan,
   resolveUsageTokenTotals,
   resolveReplayFinalizationStateFile,
   resolveIngressLifecycleWindows,
   resolveSessionSpanName,
   resolveSpanWindow,
   resolveSessionMetricTotals,
+  shouldFallbackRunBoundEventToActiveRequest,
   stringAttrs,
   traceAttrs,
   writeReplayFinalizationState,
 } from "../dist/src/service-utils.js";
+
+test("normalizeFinalStatus maps upstream terminal aliases to canonical values", () => {
+  assert.equal(normalizeFinalStatus("success"), "completed");
+  assert.equal(normalizeFinalStatus("completed"), "completed");
+  assert.equal(normalizeFinalStatus("failure"), "error");
+  assert.equal(normalizeFinalStatus("failed"), "error");
+  assert.equal(normalizeFinalStatus("canceled"), "cancelled");
+  assert.equal(normalizeFinalStatus("timed-out"), "timeout");
+  assert.equal(normalizeFinalStatus("superseded_by_next_message"), "superseded");
+  assert.equal(normalizeFinalStatus(undefined), undefined);
+});
 
 test("resolveSpanWindow backfills start time from event end time", () => {
   const { startTime, endTime, effectiveDurationMs } = resolveSpanWindow(2000, 300);
@@ -85,6 +100,126 @@ test("buildTranscriptReplayEvent carries snapshot runId into replay events", () 
   });
 });
 
+test("resolveTranscriptReplayPlan replays completed transcript snapshots even without an active trace", () => {
+  assert.deepEqual(
+    resolveTranscriptReplayPlan({
+      hasActiveTrace: true,
+      replayAlreadyFinalized: false,
+      runCompleted: true,
+    }),
+    {
+      emitReplay: true,
+      markFinalizationOnly: false,
+    },
+  );
+
+  assert.deepEqual(
+    resolveTranscriptReplayPlan({
+      hasActiveTrace: false,
+      replayAlreadyFinalized: false,
+      runCompleted: true,
+    }),
+    {
+      emitReplay: true,
+      markFinalizationOnly: false,
+    },
+  );
+
+  assert.deepEqual(
+    resolveTranscriptReplayPlan({
+      replaySnapshotFresh: false,
+      hasActiveTrace: true,
+      replayAlreadyFinalized: false,
+      runCompleted: true,
+    }),
+    {
+      emitReplay: false,
+      markFinalizationOnly: false,
+    },
+  );
+
+  assert.deepEqual(
+    resolveTranscriptReplayPlan({
+      hasActiveTrace: false,
+      replayAlreadyFinalized: true,
+      runCompleted: true,
+    }),
+    {
+      emitReplay: false,
+      markFinalizationOnly: false,
+    },
+  );
+
+  assert.deepEqual(
+    resolveTranscriptReplayPlan({
+      hasActiveTrace: false,
+      replayAlreadyFinalized: false,
+      runCompleted: false,
+    }),
+    {
+      emitReplay: false,
+      markFinalizationOnly: false,
+    },
+  );
+});
+
+test("resolveTranscriptReplayActivityTs ignores newer user input and keeps assistant replay time", () => {
+  assert.equal(
+    resolveTranscriptReplayActivityTs({
+      lastAssistantTs: 100,
+      lastRunToolCalls: [{ startedAt: 80, endedAt: 90 }],
+      lastRunAssistantTurns: [{ startedAt: 95, endedAt: 100 }],
+    }),
+    100,
+  );
+});
+
+test("resolveTranscriptReplayFreshness rejects stale snapshots from a previous request window", () => {
+  assert.equal(
+    resolveTranscriptReplayFreshness({
+      snapshot: {
+        lastAssistantTs: 100,
+        lastRunAssistantTurns: [{ startedAt: 95, endedAt: 100 }],
+      },
+      activeRun: {
+        mainStartTs: 150,
+        messageQueuedTs: 150,
+      },
+    }),
+    false,
+  );
+
+  assert.equal(
+    resolveTranscriptReplayFreshness({
+      snapshot: {
+        lastAssistantTs: 100,
+        lastRunAssistantTurns: [{ startedAt: 95, endedAt: 100 }],
+      },
+      activeRun: {
+        mainStartTs: 150,
+        messageQueuedTs: 150,
+      },
+    }),
+    false,
+  );
+});
+
+test("resolveTranscriptReplayFreshness accepts replay inside the active request window", () => {
+  assert.equal(
+    resolveTranscriptReplayFreshness({
+      snapshot: {
+        lastAssistantTs: 220,
+        lastRunAssistantTurns: [{ startedAt: 200, endedAt: 220 }],
+      },
+      activeRun: {
+        mainStartTs: 180,
+        messageQueuedTs: 180,
+      },
+    }),
+    true,
+  );
+});
+
 test("rememberRunId keeps the first run_id and accumulates later run ids", () => {
   const state = {};
 
@@ -94,6 +229,34 @@ test("rememberRunId keeps the first run_id and accumulates later run ids", () =>
 
   assert.equal(state.runId, "run-1");
   assert.deepEqual(Array.from(state.runIds ?? []), ["run-1", "run-2"]);
+});
+
+test("shouldFallbackRunBoundEventToActiveRequest blocks stale explicit run ids from reusing a newer request", () => {
+  assert.equal(
+    shouldFallbackRunBoundEventToActiveRequest({
+      runId: "run-old",
+      eventTs: 100,
+      activeRequestStartedAt: 200,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldFallbackRunBoundEventToActiveRequest({
+      runId: "run-new",
+      eventTs: 250,
+      activeRequestStartedAt: 200,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldFallbackRunBoundEventToActiveRequest({
+      eventTs: 100,
+      activeRequestStartedAt: 200,
+    }),
+    true,
+  );
 });
 
 test("resolveUsageTokenTotals keeps cache tokens separate from llm total tokens", () => {
@@ -159,63 +322,6 @@ test("loadSnapshotForEvent resolves snapshots through sessionId when sessionKey 
   assert.deepEqual(calls, ["agent:main:dashboard:test-user"]);
 });
 
-test("resolveAgentIdentity uses configured names and runtime fallback with one priority chain", () => {
-  assert.deepEqual(
-    resolveAgentIdentity({
-      sessionKey: "agent:main:dashboard:user-1",
-      snapshot: {
-        agentId: "snapshot-agent",
-        agentName: "Snapshot Agent",
-      },
-      configuredAgentById: new Map([
-        ["main", { id: "main", name: "Dashboard Agent" }],
-      ]),
-      runtimeMetadata: {
-        agentId: "runtime-agent",
-        agentName: "Runtime Agent",
-      },
-    }),
-    {
-      agentId: "main",
-      agentName: "Dashboard Agent",
-    },
-  );
-
-  assert.deepEqual(
-    resolveAgentIdentity({
-      snapshot: {
-        agentId: "snapshot-agent",
-        agentName: "Snapshot Agent",
-      },
-      runtimeMetadata: {
-        agentId: "runtime-agent",
-        agentName: "Runtime Agent",
-      },
-    }),
-    {
-      agentId: "snapshot-agent",
-      agentName: "Snapshot Agent",
-    },
-  );
-
-  assert.deepEqual(
-    resolveAgentIdentity({
-      runtimeMetadata: {
-        agentId: "runtime-agent",
-        agentName: "Runtime Agent",
-      },
-      attrs: {
-        agent_id: "explicit-agent",
-        agent_name: "Explicit Agent",
-      },
-    }),
-    {
-      agentId: "explicit-agent",
-      agentName: "Explicit Agent",
-    },
-  );
-});
-
 test("buildRunScopeAttrs preserves the primary run_id and exposes the run_ids summary", () => {
   const attrs = buildRunScopeAttrs(
     "run-1",
@@ -234,7 +340,12 @@ test("replay finalization state survives restart-style reloads", () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-replay-state-"));
   const stateFile = resolveReplayFinalizationStateFile(stateDir);
   const entries = new Map([
-    ["agent:main:main", { watermark: "session-1|1|2|3", runId: "run-1", updatedAt: 200 }],
+    ["agent:main:main", {
+      watermark: "session-1|1|2|3",
+      trajectorySourceSeq: 11,
+      pendingRunIds: ["run-1", "run-2"],
+      updatedAt: 200,
+    }],
     ["agent:main:chat", { watermark: "session-2|4|5|6", updatedAt: 100 }],
   ]);
 
@@ -242,9 +353,10 @@ test("replay finalization state survives restart-style reloads", () => {
   const restored = readReplayFinalizationState(stateFile);
 
   assert.equal(restored.get("agent:main:main")?.watermark, "session-1|1|2|3");
-  assert.equal(restored.get("agent:main:main")?.runId, "run-1");
+  assert.equal(restored.get("agent:main:main")?.trajectorySourceSeq, 11);
+  assert.deepEqual(restored.get("agent:main:main")?.pendingRunIds, ["run-1", "run-2"]);
   assert.equal(restored.get("agent:main:chat")?.watermark, "session-2|4|5|6");
-  assert.equal(restored.get("agent:main:chat")?.runId, undefined);
+  assert.equal(restored.get("agent:main:chat")?.trajectorySourceSeq, undefined);
 });
 
 test("replay finalization state keeps only the newest completed sessions", () => {
@@ -254,7 +366,7 @@ test("replay finalization state keeps only the newest completed sessions", () =>
   for (let index = 0; index < 2050; index += 1) {
     entries.set(`agent:main:${index}`, {
       watermark: `session-${index}`,
-      runId: `run-${index}`,
+      trajectorySourceSeq: index,
       updatedAt: index,
     });
   }
@@ -265,7 +377,20 @@ test("replay finalization state keeps only the newest completed sessions", () =>
   assert.equal(restored.size, 2048);
   assert.equal(restored.has("agent:main:0"), false);
   assert.equal(restored.has("agent:main:1"), false);
-  assert.equal(restored.get("agent:main:2049")?.runId, "run-2049");
+  assert.equal(restored.get("agent:main:2049")?.trajectorySourceSeq, 2049);
+});
+
+test("replay finalization state keeps sessions that only carry pending run dedupe", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-replay-state-pending-"));
+  const stateFile = resolveReplayFinalizationStateFile(stateDir);
+  const entries = new Map([
+    ["agent:main:pending", { pendingRunIds: ["run-pending"], updatedAt: 50 }],
+  ]);
+
+  writeReplayFinalizationState(stateFile, entries);
+  const restored = readReplayFinalizationState(stateFile);
+
+  assert.deepEqual(restored.get("agent:main:pending")?.pendingRunIds, ["run-pending"]);
 });
 
 test("resolveIngressLifecycleWindows emits a queue window when processing starts much later", () => {
@@ -415,6 +540,8 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   const attrs = traceAttrs({
     agent_id: "main",
     agent_name: "main",
+    "gen_ai.agent_id": "legacy-main",
+    "gen_ai.agent_name": "Legacy Main",
     agent_runtime: "openclaw",
     session_id: "session-1",
     session_key: "agent:main:feishu:direct:user-1",
@@ -475,8 +602,10 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   });
 
   assert.equal(attrs.agent_runtime, undefined);
-  assert.equal(attrs.agent_id, "main");
-  assert.equal(attrs.agent_name, "main");
+  assert.equal(attrs.agent_id, undefined);
+  assert.equal(attrs.agent_name, undefined);
+  assert.equal(attrs["gen_ai.agent_id"], undefined);
+  assert.equal(attrs["gen_ai.agent_name"], undefined);
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs.session_key, "agent:main:feishu:direct:user-1");
   assert.equal(attrs.session_id, "session-1");

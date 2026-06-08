@@ -51,7 +51,7 @@ test("resolveOtelPluginConfig lets resourceAttributes override default runtime f
   });
 });
 
-test("resolveOtelPluginConfig accepts legacy gen_ai resource keys but normalizes them to canonical tags", () => {
+test("resolveOtelPluginConfig keeps explicitly configured agent identity resource tags", () => {
   const config = resolveOtelPluginConfig({
     resourceAttributes: {
       "gen_ai.agent_runtime": "hermes",
@@ -64,8 +64,8 @@ test("resolveOtelPluginConfig accepts legacy gen_ai resource keys but normalizes
 
   assert.deepEqual(config.resourceAttributes, {
     agent_runtime: "hermes",
-    agent_name: "legacy-agent",
-    agent_id: "agent-02",
+    "gen_ai.agent_name": "legacy-agent",
+    "gen_ai.agent_id": "agent-02",
     agent_version: "2026.5.11",
     runtime_environment: "prod",
   });
@@ -124,7 +124,7 @@ test("resolveOtelPluginConfig keeps trace payload debug off by default and accep
   assert.equal(enabledConfig.tracePayloadDebugEnabled, true);
 });
 
-test("buildOtelResourceAttrs keeps agent identity on spans only", () => {
+test("buildOtelResourceAttrs keeps configured agent identity tags but does not auto-fill them", () => {
   const config = resolveOtelPluginConfig({
     serviceName: "openclaw-otel-plugin",
     resourceAttributes: {
@@ -148,7 +148,26 @@ test("buildOtelResourceAttrs keeps agent identity on spans only", () => {
     agent_version: "2026.5.28",
     runtime_environment: "main",
     team: "platform",
+    agent_id: "configured-agent-id",
+    agent_name: "configured-agent-name",
   });
+});
+
+test("buildOtelResourceAttrs does not auto-fill agent identity tags from runtime metadata", () => {
+  const config = resolveOtelPluginConfig({
+    serviceName: "openclaw-otel-plugin",
+    resourceAttributes: {
+      team: "platform",
+    },
+  });
+
+  const attrs = buildOtelResourceAttrs(config, {
+    runtimeEnvironment: "main",
+    openclawVersion: "2026.5.28",
+    agentId: "runtime-agent-id",
+    agentName: "runtime-agent-name",
+  });
+
   assert.equal(attrs.agent_id, undefined);
   assert.equal(attrs.agent_name, undefined);
 });
