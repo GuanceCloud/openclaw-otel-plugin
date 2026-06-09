@@ -10,10 +10,16 @@ RESTART_GATEWAY=1
 WRITE_CONFIG=1
 VERSION_INPUT=""
 ENDPOINT=""
-INSTALL_TYPE="${OPENCLAW_PLUGIN_INSTALL_TYPE:-gtrace}"
+INSTALL_TYPE="${OPENCLAW_PLUGIN_INSTALL_TYPE:-}"
 X_TOKEN=""
 TAGS=()
 tmp_dir=""
+INSTALL_TYPE_EXPLICIT=0
+PLUGIN_DIR_EXPLICIT=0
+EXISTING_PLUGIN_DIR=""
+EXISTING_ENDPOINT=""
+EXISTING_X_TOKEN=""
+EXISTING_INSTALL_TYPE=""
 
 log() {
   printf '[install] %s\n' "$1"
@@ -33,7 +39,7 @@ Usage:
   OSS_ENDPOINT=https://example.com scripts/install.sh [latest|vX.Y.Z|X.Y.Z|/path/to/archive.tar.gz|https://...tar.gz] [--type gtrace|otlp] [--endpoint URL] [--x-token TOKEN] [--tag KEY=VALUE] [--no-config] [--no-restart]
 
 Environment variables:
-  OSS_ENDPOINT              OSS root endpoint. Required.
+  OSS_ENDPOINT              OSS root endpoint. Required for OSS-backed install/upgrade.
                             The script appends /openclaw-otel-plugin when needed.
   OPENCLAW_PLUGIN_DIR        Install directory. Default: ~/.openclaw/extensions/openclaw-otel-plugin
   OPENCLAW_CONFIG_FILE       OpenClaw config file. Default: ~/.openclaw/openclaw.json
@@ -126,6 +132,13 @@ if [ -z "$VERSION_INPUT" ]; then
   VERSION_INPUT="latest"
 fi
 
+if [ -n "$INSTALL_TYPE" ]; then
+  INSTALL_TYPE_EXPLICIT=1
+fi
+if [ -n "${OPENCLAW_PLUGIN_DIR:-}" ]; then
+  PLUGIN_DIR_EXPLICIT=1
+fi
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     printf '[install] missing command: %s\n' "$1" >&2
@@ -135,11 +148,14 @@ require_command() {
 
 normalize_install_type() {
   case "$1" in
-    ""|gtrace)
+    gtrace)
       printf 'gtrace'
       ;;
     otlp|otel)
       printf 'otlp'
+      ;;
+    "")
+      printf ''
       ;;
     *)
       printf '[install] unsupported --type: %s. Supported values: gtrace, otlp\n' "$1" >&2
@@ -194,6 +210,122 @@ download_archive() {
     fi
   else
     log "checksum not found, skipped sha256 verification"
+  fi
+}
+
+load_existing_install_context() {
+  require_command node
+
+  OPENCLAW_CONFIG_FILE_RUNTIME="$CONFIG_FILE" \
+  OPENCLAW_PLUGIN_NAME_RUNTIME="$PLUGIN_NAME" \
+  node <<'NODE'
+const fs = require("fs");
+
+const configFile = process.env.OPENCLAW_CONFIG_FILE_RUNTIME;
+const pluginName = process.env.OPENCLAW_PLUGIN_NAME_RUNTIME;
+
+if (!configFile || !fs.existsSync(configFile)) {
+  process.exit(0);
+}
+
+const raw = fs.readFileSync(configFile, "utf8").trim();
+if (!raw) {
+  process.exit(0);
+}
+
+let config;
+try {
+  config = JSON.parse(raw);
+} catch {
+  process.exit(0);
+}
+
+const pluginConfig = config?.plugins?.entries?.[pluginName]?.config ?? {};
+const path = require("path");
+
+const headers = pluginConfig.headers ?? {};
+const loadPaths = Array.isArray(config?.plugins?.load?.paths) ? config.plugins.load.paths : [];
+const explicitPluginDir =
+  loadPaths.find((value) => {
+    if (typeof value !== "string") return false;
+    const pluginManifestPath = path.join(value, "openclaw.plugin.json");
+    if (!fs.existsSync(pluginManifestPath)) {
+      return false;
+    }
+    try {
+      const manifest = JSON.parse(fs.readFileSync(pluginManifestPath, "utf8"));
+      return manifest?.id === pluginName;
+    } catch {
+      return false;
+    }
+  }) ??
+  loadPaths.find((value) => typeof value === "string" && value.includes(`/${pluginName}`)) ??
+  (loadPaths.length === 1 && typeof loadPaths[0] === "string" ? loadPaths[0] : "");
+
+let installType = "";
+if (
+  pluginConfig.tracePath === "v1/write/otel-llm" &&
+  pluginConfig.metricsPath === "v1/write/otel-metrics" &&
+  String(headers.to_headless ?? "") === "true"
+) {
+  installType = "gtrace";
+} else if (pluginConfig.endpoint || pluginConfig.tracePath || pluginConfig.metricsPath || pluginConfig.logsPath) {
+  installType = "otlp";
+}
+
+const values = {
+  plugin_dir: explicitPluginDir,
+  endpoint: typeof pluginConfig.endpoint === "string" ? pluginConfig.endpoint : "",
+  x_token: typeof headers["X-Token"] === "string" ? headers["X-Token"] : "",
+  install_type: installType,
+};
+
+for (const [key, value] of Object.entries(values)) {
+  process.stdout.write(`${key}=${JSON.stringify(value)}\n`);
+}
+NODE
+}
+
+apply_existing_install_context() {
+  local line key value
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    value="$(node -p "JSON.parse(process.argv[1])" "$value")"
+    case "$key" in
+      plugin_dir)
+        EXISTING_PLUGIN_DIR="$value"
+        ;;
+      endpoint)
+        EXISTING_ENDPOINT="$value"
+        ;;
+      x_token)
+        EXISTING_X_TOKEN="$value"
+        ;;
+      install_type)
+        EXISTING_INSTALL_TYPE="$value"
+        ;;
+    esac
+  done <<EOF
+$(load_existing_install_context)
+EOF
+
+  if [ "$PLUGIN_DIR_EXPLICIT" -eq 0 ] && [ -n "$EXISTING_PLUGIN_DIR" ]; then
+    PLUGIN_DIR="$EXISTING_PLUGIN_DIR"
+    log "reusing existing plugin path: ${PLUGIN_DIR}"
+  fi
+  if [ -z "$ENDPOINT" ] && [ -n "$EXISTING_ENDPOINT" ]; then
+    ENDPOINT="$EXISTING_ENDPOINT"
+    log "reusing existing endpoint from ${CONFIG_FILE}"
+  fi
+  if [ -z "$X_TOKEN" ] && [ -n "$EXISTING_X_TOKEN" ]; then
+    X_TOKEN="$EXISTING_X_TOKEN"
+    log "reusing existing X-Token from ${CONFIG_FILE}"
+  fi
+  if [ "$INSTALL_TYPE_EXPLICIT" -eq 0 ] && [ -n "$EXISTING_INSTALL_TYPE" ]; then
+    INSTALL_TYPE="$EXISTING_INSTALL_TYPE"
+    log "reusing existing install type: ${INSTALL_TYPE}"
   fi
 }
 
@@ -338,7 +470,11 @@ main() {
   require_command tar
 
   DOWNLOAD_BASE_URL="$(resolve_download_base_url)"
+  apply_existing_install_context
   INSTALL_TYPE="$(normalize_install_type "$INSTALL_TYPE")"
+  if [ -z "$INSTALL_TYPE" ]; then
+    INSTALL_TYPE="gtrace"
+  fi
   if [ "$WRITE_CONFIG" -eq 1 ] && [ "$INSTALL_TYPE" = "gtrace" ]; then
     if [ -z "$ENDPOINT" ]; then
       printf '[install] type=gtrace requires --endpoint\n' >&2

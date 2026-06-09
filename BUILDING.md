@@ -67,10 +67,9 @@ npm run pack:release
 - `output/openclaw-otel-plugin.tar.gz`
 - `output/openclaw-otel-plugin.tar.gz.sha256`
 - `output/install.sh`
-- `output/update.sh`
 
 其中带版本包是不可变发布包，`openclaw-otel-plugin.tar.gz` 是 latest 包，每次发布可以覆盖。
-`install.sh` 是安装执行层，`update.sh` 是面向 OSS 发布入口的更新包装脚本；它会在每次执行时重新下载 `install.sh`，不会依赖上一次安装遗留的 `/tmp` 文件。自定义 OSS 地址可通过 `OSS_ENDPOINT=...` 或 `--oss-endpoint ...` 显式传入。
+`install.sh` 同时作为 OSS 的安装和升级执行层；每次执行都直接下载并解压目标发布包，不依赖上一次安装遗留的 `/tmp` 文件。自定义 OSS 地址可通过 `OSS_ENDPOINT=...` 或 `--oss-endpoint ...` 显式传入。
 
 打包内容包括：
 
@@ -89,4 +88,4 @@ npm run pack:release
 2. 运行 `npm test`。
 3. 运行 `npm run pack:release`。
 4. 提交版本变更并打 tag，例如 `v0.6.7`。
-5. 将 `output/` 下的带版本包、latest 包、对应 `.sha256`、`install.sh` 和 `update.sh` 上传到 OSS 的 `openclaw-otel-plugin/` 目录。
+5. 将 `output/` 下的带版本包、latest 包、对应 `.sha256` 和 `install.sh` 上传到 OSS 的 `openclaw-otel-plugin/` 目录。

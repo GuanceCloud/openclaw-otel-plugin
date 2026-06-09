@@ -121,14 +121,12 @@ async function main() {
   await fs.copyFile(archivePath, latestArchivePath);
   const latestChecksumPath = await writeSha256(latestArchivePath);
   const installScriptPath = await copyReleaseSidecar("scripts/install.sh", "install.sh", 0o755);
-  const updateScriptPath = await copyReleaseSidecar("scripts/update.sh", "update.sh", 0o755);
 
   log(`artifact: ${path.relative(repoRoot, archivePath)}`);
   log(`checksum: ${path.relative(repoRoot, checksumPath)}`);
   log(`latest artifact: ${path.relative(repoRoot, latestArchivePath)}`);
   log(`latest checksum: ${path.relative(repoRoot, latestChecksumPath)}`);
   log(`installer: ${path.relative(repoRoot, installScriptPath)}`);
-  log(`updater: ${path.relative(repoRoot, updateScriptPath)}`);
 }
 
 main().catch((error) => {

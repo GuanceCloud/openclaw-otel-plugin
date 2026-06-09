@@ -89,7 +89,12 @@ Trace 说明：
 
 ## 安装
 
-如果使用 GTrace，推荐走 skill 安装；release 产物里的 `install.sh` 是 skill 调用的安装执行层，`update.sh` 是面向 OSS 发布入口的更新包装脚本，它会在每次执行时重新下载 `install.sh`，不依赖上一次安装遗留的 `/tmp` 文件；如果使用自定义 OSS 根地址，可通过 `OSS_ENDPOINT=...` 或 `--oss-endpoint ...` 显式传入。如果使用标准 OTLP 接收端，先按 [BUILDING.md](./BUILDING.md) 的源码安装流程完成安装，再手动配置 `~/.openclaw/openclaw.json`。
+如果使用 GTrace，推荐走 skill 安装；release 产物里的 `install.sh` 是 skill 调用和 OSS 手工发布共用的唯一安装/升级执行层，既可用于首次安装，也可用于升级，不依赖上一次安装遗留的 `/tmp` 文件；如果使用自定义 OSS 根地址，可通过 `OSS_ENDPOINT=...` 或 `--oss-endpoint ...` 显式传入。如果使用标准 OTLP 接收端，先按 [BUILDING.md](./BUILDING.md) 的源码安装流程完成安装，再手动配置 `~/.openclaw/openclaw.json`。
+
+升级说明：
+
+- 如果插件已经安装，`install.sh` 会优先复用现有 `~/.openclaw/openclaw.json` 里的 `endpoint`、`headers.X-Token`、安装类型和插件加载路径。
+- 这意味着升级到 `latest` 或指定版本时，通常不需要重复传 `--endpoint`、`--x-token` 或 `--type`。
 
 构建、打包、源码安装和发布流程见 [BUILDING.md](./BUILDING.md)。
 

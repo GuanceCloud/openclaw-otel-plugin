@@ -89,7 +89,12 @@ Compatibility notes:
 
 ## Install
 
-Use the GTrace skill for managed installation. The release output still includes `install.sh` as the execution layer used by the skill and `update.sh` as the OSS update wrapper; `update.sh` re-downloads `install.sh` on each run instead of relying on a previous `/tmp` copy, and accepts either `OSS_ENDPOINT=...` or `--oss-endpoint ...` for custom OSS roots. For a standard OTLP receiver, follow the source-install path from [BUILDING.md](./BUILDING.md) and then configure `~/.openclaw/openclaw.json` manually.
+Use the GTrace skill for managed installation. The release output keeps `install.sh` as the single OSS install/upgrade entrypoint used by the skill and manual release delivery; it works for both first-time installs and upgrades without relying on a previous `/tmp` copy, and accepts either `OSS_ENDPOINT=...` or `--oss-endpoint ...` for custom OSS roots. For a standard OTLP receiver, follow the source-install path from [BUILDING.md](./BUILDING.md) and then configure `~/.openclaw/openclaw.json` manually.
+
+Upgrade notes:
+
+- If the plugin is already installed, `install.sh` reuses the existing `~/.openclaw/openclaw.json` values for `endpoint`, `headers.X-Token`, install type, and plugin load path whenever those arguments are omitted.
+- In practice, upgrading to `latest` or a pinned version usually does not require repeating `--endpoint`, `--x-token`, or `--type`.
 
 For build, packaging, source install, and release workflow, see [BUILDING.md](./BUILDING.md).
 

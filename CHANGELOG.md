@@ -4,11 +4,11 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 ## 2026-06-09
 
-### OSS Update Flow
+### OSS Install Flow
 
-- Restored a repository-managed `scripts/update.sh` release sidecar so OSS-hosted upgrade entrypoints no longer break when `/tmp` is cleared between installs.
-- Changed `update.sh` to download a fresh `install.sh` into a new temp directory on every run, then re-exec the installer with the original arguments and `OSS_ENDPOINT`; custom OSS roots can now be passed through either `OSS_ENDPOINT` or `--oss-endpoint`.
-- Added `output/update.sh` back to the release artifacts and documented that OSS publication must upload both `install.sh` and `update.sh`.
+- Removed the separate `scripts/update.sh` sidecar and reverted OSS delivery back to a single `install.sh` entrypoint for both fresh installs and upgrades.
+- Documented `install.sh` as the only OSS install/upgrade execution layer; release publication now uploads `install.sh` together with the versioned and latest archives, without a separate `update.sh`.
+- Simplified upgrade usage so `install.sh` now reuses the existing `endpoint`, `X-Token`, install type, and plugin path from `~/.openclaw/openclaw.json` when those flags are omitted.
 
 ## 2026-06-05
 
