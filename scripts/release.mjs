@@ -90,6 +90,7 @@ async function main() {
   await fs.rm(latestArchivePath, { force: true });
   await fs.rm(`${latestArchivePath}.sha256`, { force: true });
   await fs.rm(path.join(outputDir, "install.sh"), { force: true });
+  await fs.rm(path.join(outputDir, "update.sh"), { force: true });
   await fs.mkdir(stagingDir, { recursive: true });
 
   const releaseFiles = [
@@ -120,12 +121,14 @@ async function main() {
   await fs.copyFile(archivePath, latestArchivePath);
   const latestChecksumPath = await writeSha256(latestArchivePath);
   const installScriptPath = await copyReleaseSidecar("scripts/install.sh", "install.sh", 0o755);
+  const updateScriptPath = await copyReleaseSidecar("scripts/update.sh", "update.sh", 0o755);
 
   log(`artifact: ${path.relative(repoRoot, archivePath)}`);
   log(`checksum: ${path.relative(repoRoot, checksumPath)}`);
   log(`latest artifact: ${path.relative(repoRoot, latestArchivePath)}`);
   log(`latest checksum: ${path.relative(repoRoot, latestChecksumPath)}`);
   log(`installer: ${path.relative(repoRoot, installScriptPath)}`);
+  log(`updater: ${path.relative(repoRoot, updateScriptPath)}`);
 }
 
 main().catch((error) => {

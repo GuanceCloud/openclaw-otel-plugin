@@ -89,7 +89,7 @@ Compatibility notes:
 
 ## Install
 
-Use the GTrace skill for managed installation. The release output still includes `install.sh` as the execution layer used by the skill, not as the primary user-facing entrypoint. For a standard OTLP receiver, follow the source-install path from [BUILDING.md](./BUILDING.md) and then configure `~/.openclaw/openclaw.json` manually.
+Use the GTrace skill for managed installation. The release output still includes `install.sh` as the execution layer used by the skill and `update.sh` as the OSS update wrapper; `update.sh` re-downloads `install.sh` on each run instead of relying on a previous `/tmp` copy, and accepts either `OSS_ENDPOINT=...` or `--oss-endpoint ...` for custom OSS roots. For a standard OTLP receiver, follow the source-install path from [BUILDING.md](./BUILDING.md) and then configure `~/.openclaw/openclaw.json` manually.
 
 For build, packaging, source install, and release workflow, see [BUILDING.md](./BUILDING.md).
 

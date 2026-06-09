@@ -89,7 +89,7 @@ Trace 说明：
 
 ## 安装
 
-如果使用 GTrace，推荐走 skill 安装；release 产物里的 `install.sh` 是 skill 调用的安装执行层，不作为优先暴露给用户的入口。如果使用标准 OTLP 接收端，先按 [BUILDING.md](./BUILDING.md) 的源码安装流程完成安装，再手动配置 `~/.openclaw/openclaw.json`。
+如果使用 GTrace，推荐走 skill 安装；release 产物里的 `install.sh` 是 skill 调用的安装执行层，`update.sh` 是面向 OSS 发布入口的更新包装脚本，它会在每次执行时重新下载 `install.sh`，不依赖上一次安装遗留的 `/tmp` 文件；如果使用自定义 OSS 根地址，可通过 `OSS_ENDPOINT=...` 或 `--oss-endpoint ...` 显式传入。如果使用标准 OTLP 接收端，先按 [BUILDING.md](./BUILDING.md) 的源码安装流程完成安装，再手动配置 `~/.openclaw/openclaw.json`。
 
 构建、打包、源码安装和发布流程见 [BUILDING.md](./BUILDING.md)。
 
