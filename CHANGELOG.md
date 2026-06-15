@@ -2,6 +2,13 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-06-12
+
+### Replay Trace Marking
+
+- Marked replay-only transcript traces with `replay_source=transcript` and `trace_completeness=partial` when a completed request has to be reconstructed without an active runtime trace.
+- Marked trajectory-backed reconstructed traces with `replay_source=trajectory` and `trace_completeness=partial` so downstream queries can distinguish replay/backfill traces from normal live runtime traces.
+
 ## 2026-06-09
 
 ### OSS Install Flow

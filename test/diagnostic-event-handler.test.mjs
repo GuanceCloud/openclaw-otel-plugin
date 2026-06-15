@@ -1412,6 +1412,117 @@ test("session.state idle skips duplicate replay after the transcript has already
   assert.equal(clearRunCalls, 0);
 });
 
+test("session.state idle marks replay-only completed transcript traces", () => {
+  const endRunCalls = [];
+  const endRootCalls = [];
+  let clearRunCalls = 0;
+  let transcriptCalls = 0;
+  let toolReplayCalls = 0;
+  let lifecycleCalls = 0;
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsSessionStateCounter: { add() {} },
+      diagnosticsQueueDepth: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return undefined;
+    },
+    getRun() {
+      return undefined;
+    },
+    ensureUserSpan() {
+      return undefined;
+    },
+    syncRootFromRun() {},
+    endRun(_evt, attrs) {
+      endRunCalls.push(attrs);
+    },
+    endRoot(_evt, attrs) {
+      endRootCalls.push(attrs);
+    },
+    clearRun() {
+      clearRunCalls += 1;
+    },
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        runId: "run-123",
+        runCompleted: true,
+        runFinalStatus: "success",
+        lastAssistantText: "final answer",
+        lastAssistantTs: 2,
+        lastRunAssistantTurns: [{ startedAt: 1, endedAt: 2 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      lifecycleCalls += 1;
+      return undefined;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    ensureTranscriptSkillSpans() {},
+    emitTranscriptModelSpans() {
+      transcriptCalls += 1;
+      return true;
+    },
+    emitSyntheticModelSpan() {},
+    emitTranscriptToolSpans() {
+      toolReplayCalls += 1;
+    },
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+    markReplayWatermark() {},
+  });
+
+  handler({
+    type: "session.state",
+    sessionKey: "s1",
+    sessionId: "sid-1",
+    ts: 1000,
+    state: "idle",
+  });
+
+  assert.equal(transcriptCalls, 1);
+  assert.equal(toolReplayCalls, 1);
+  assert.equal(lifecycleCalls, 1);
+  assert.equal(endRunCalls.length, 1);
+  assert.equal(endRootCalls.length, 1);
+  assert.equal(endRunCalls[0].replay_source, "transcript");
+  assert.equal(endRunCalls[0].trace_completeness, "partial");
+  assert.equal(endRootCalls[0].replay_source, "transcript");
+  assert.equal(endRootCalls[0].trace_completeness, "partial");
+  assert.equal(endRunCalls[0].final_status, "completed");
+  assert.equal(endRootCalls[0].final_status, "completed");
+  assert.equal(clearRunCalls, 1);
+});
+
 test("session.state idle skips stale transcript snapshots from an older request when no active trace exists", () => {
   let transcriptCalls = 0;
   let syntheticCalls = 0;

@@ -190,6 +190,8 @@
 | `queue_depth` | 当前关联队列深度 |
 | `runtime_phase` | 当前 runtime 阶段 |
 | `final_status` | 最终状态，推荐用于和 metrics / 查询侧统一 |
+| `replay_source` | 该 trace 是否由回放补齐；当前可能值为 `transcript`、`trajectory` |
+| `trace_completeness` | 链路完整度标记；当前 `partial` 表示该 trace 由 replay/backfill 生成，不保证保留完整 runtime 明细 |
 | `tools` | 本轮汇总的 tool 列表 |
 | `tool_count` | tool 数量 |
 | `skills` | 本轮汇总的 skill 列表 |

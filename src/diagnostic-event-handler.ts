@@ -402,6 +402,12 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               emitSyntheticModelSpan(evt);
             }
           }
+          const replayFinalAttrs = (!hasActiveTrace && replaySnapshotIsFresh)
+            ? {
+              replay_source: "transcript",
+              trace_completeness: "partial",
+            }
+            : undefined;
           ensureRuntimeLifecycleSpans(
             {
               sessionKey: evt.sessionKey,
@@ -428,11 +434,13 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             "openclaw.state": evt.state,
             "openclaw.outcome": finalOutcome,
             "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
+            ...(replayFinalAttrs ?? {}),
           }));
           endRoot(evt, stringAttrs({
             "openclaw.state": evt.state,
             "openclaw.outcome": finalOutcome,
             "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
+            ...(replayFinalAttrs ?? {}),
           }));
           clearRun(evt);
         }

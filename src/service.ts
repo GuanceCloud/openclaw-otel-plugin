@@ -441,6 +441,13 @@ export function createOtelPluginService(
         }
       };
 
+      const buildReplaySummaryAttrs = (
+        source: "transcript" | "trajectory",
+      ) => stringAttrs({
+        replay_source: source,
+        trace_completeness: "partial",
+      });
+
       const resolveEventMessageId = (evt: { messageId?: string | number }) =>
         evt.messageId !== undefined && evt.messageId !== null
           ? String(evt.messageId)
@@ -1012,6 +1019,9 @@ export function createOtelPluginService(
         if (!replayPlan.emitReplay) {
           return;
         }
+        const replaySummaryAttrs = !hasActiveTrace
+          ? buildReplaySummaryAttrs("transcript")
+          : undefined;
         ensureTranscriptSkillSpans(transcriptEvt);
         const emittedTranscriptModelSpans = emitTranscriptModelSpans(transcriptEvt);
         if (emittedTranscriptModelSpans) {
@@ -1040,10 +1050,12 @@ export function createOtelPluginService(
         endRun(transcriptEvt, stringAttrs({
           "openclaw.state": "completed",
           "openclaw.outcome": "completed",
+          ...(replaySummaryAttrs ?? {}),
         }));
         endRoot(transcriptEvt, stringAttrs({
           "openclaw.state": "completed",
           "openclaw.outcome": "completed",
+          ...(replaySummaryAttrs ?? {}),
         }));
         clearRun(transcriptEvt);
       }
@@ -1179,6 +1191,8 @@ export function createOtelPluginService(
               "openclaw.tokens.cache_write": usageTotals.cacheWriteTokens,
               "openclaw.outcome": finalStatus,
               "openclaw.output.kind": assistantText ? "text" : undefined,
+              replay_source: "trajectory",
+              trace_completeness: "partial",
             }),
             ...buildRunScopeAttrs(trajectoryRun.runId, trajectoryRun.runId),
             request_type: requestClassification.requestType,
