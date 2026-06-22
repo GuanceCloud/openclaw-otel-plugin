@@ -10,7 +10,7 @@
 ### Traces
 
 - A request-scoped root span named `openclaw_request`
-- A request-scoped run span named `agent_run`
+- A request-scoped run span named `invoke_agent`
 - Runtime lifecycle spans such as `channel_ingress`, `dispatch_queue`, `session_processing`, `runtime_orchestration`, and `channel_egress`
 - Model spans named `llm`
 - Skill summary spans such as `skill:<name>`
@@ -290,7 +290,7 @@ Then send a test message in OpenClaw and query by:
 ## Behavior Notes
 
 - The plugin enriches spans and logs with session, agent, provider, model, and preview fields derived from OpenClaw session snapshots
-- Root and run spans are intentionally separate. The root span models the inbound request envelope, while `agent_run` models the agent execution lifecycle.
+- Root and run spans are intentionally separate. The root span models the inbound request envelope, while `invoke_agent` models the agent execution lifecycle.
 - When fine-grained runtime events are missing, the plugin can replay transcript state to backfill `thinking`, model, and tool spans.
 - The plugin periodically scans active sessions on the `flushIntervalMs` cadence (default `30s`); session metrics are emitted as scan-time deltas and carry `session_id` as a metric tag.
 - `gen_ai.agent.session.token.*` and `gen_ai.agent.session.trace.count` represent session-level cumulative totals instead of being tied to individual run completion.

@@ -1221,7 +1221,7 @@ export function createOtelPluginService(
           );
           const rootCtx = trace.setSpan(context.active(), rootSpan);
           const runSpan = tracer.startSpan(
-            "agent_run",
+            "invoke_agent",
             {
               startTime: new Date(requestStartTs),
               kind: SpanKind.INTERNAL,
@@ -1629,7 +1629,7 @@ export function createOtelPluginService(
         const userCtx = current?.userCtx;
         const snapshot = loadSessionSnapshot(sessionKey);
         const span = tracer.startSpan(
-          "agent_run",
+          "invoke_agent",
           {
             startTime: eventTimestamp(evt),
             kind: SpanKind.INTERNAL,

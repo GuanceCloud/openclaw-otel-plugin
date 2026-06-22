@@ -2,6 +2,12 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-06-22
+
+### Span Naming
+
+- Renamed the agent execution run span from `agent_run` to `invoke_agent` so the exported trace name matches the current GenAI agent operation naming.
+
 ## 2026-06-17
 
 ### GenAI Semantic Convention Alignment

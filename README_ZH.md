@@ -10,7 +10,7 @@
 ### Traces
 
 - 按单条用户消息生成的 root span：固定命名为 `openclaw_request`
-- 按单条用户消息生成的 run span：固定命名为 `agent_run`
+- 按单条用户消息生成的 run span：固定命名为 `invoke_agent`
 - 运行时生命周期 span，例如 `channel_ingress`、`dispatch_queue`、`session_processing`、`runtime_orchestration`、`channel_egress`
 - 模型 span：固定命名为 `llm`
 - Skill 汇总 span，例如 `skill:<name>`
@@ -290,7 +290,7 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 ## 行为说明
 
 - 插件会从 OpenClaw 会话快照里补齐 session、agent、provider、model，以及输入/输出预览等属性
-- root 和 run 是两层有意分开的会话级 span：前者表示请求入口，后者表示 `agent_run` 执行生命周期
+- root 和 run 是两层有意分开的会话级 span：前者表示请求入口，后者表示 `invoke_agent` 执行生命周期
 - 当运行时缺少细粒度事件时，插件会回放 transcript 状态来补 `thinking`、model 和 tool spans
 - 插件会在启动后开始对激活中的 session 做周期扫描，按 `flushIntervalMs` 周期继续扫描，默认周期是 `30s`；session 指标按扫描结果增量上报，并带上 `session_id` tag
 - `gen_ai.agent.session.token.*` 和 `gen_ai.agent.session.trace.count` 统计的是 session 级累计值，不再绑定单次 run 结束时机

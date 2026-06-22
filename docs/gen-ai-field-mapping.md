@@ -23,14 +23,14 @@
 | --- | --- | --- | --- |
 | `operation_name` / `span.kind` / `runtime_phase` | `gen_ai.operation.name` | model / agent / tool / skill / planning span，相关指标 tag | 官方 operation 名。当前映射见下方 operation 表。 |
 | span error status | `error.type` | 错误 span | 当前输出低基数 `error`，错误详情仍放在 OTEL span status message。 |
-| `provider_name` | `gen_ai.provider.name` | `llm`、`agent_run`、request 汇总、model token/operation 指标 | 模型或 Agent 调用的 GenAI provider。 |
-| `request_model` | `gen_ai.request.model` | `llm`、`agent_run`、request 汇总、model token/operation 指标 | 请求模型名。 |
+| `provider_name` | `gen_ai.provider.name` | `llm`、`invoke_agent`、request 汇总、model token/operation 指标 | 模型或 Agent 调用的 GenAI provider。 |
+| `request_model` | `gen_ai.request.model` | `llm`、`invoke_agent`、request 汇总、model token/operation 指标 | 请求模型名。 |
 | `response_model` | `gen_ai.response.model` | `llm`、model token/operation 指标 | 响应模型名；没有独立响应模型时沿用请求模型。 |
 | `session_id` | `gen_ai.conversation.id` | 带 session 关联的 span / metric | OpenClaw session id 对应官方 conversation id。 |
-| `usage_input_tokens` | `gen_ai.usage.input_tokens` | `llm`、`agent_run`、request 汇总 span | 输入 token 数。 |
-| `usage_output_tokens` | `gen_ai.usage.output_tokens` | `llm`、`agent_run`、request 汇总 span | 输出 token 数。 |
-| `usage_cache_read_input_tokens` | `gen_ai.usage.cache_read.input_tokens` | `llm`、`agent_run`、request 汇总 span | provider cache read input token 数。 |
-| `usage_cache_write_input_tokens` | `gen_ai.usage.cache_creation.input_tokens` | `llm`、`agent_run`、request 汇总 span | provider cache creation / write input token 数。 |
+| `usage_input_tokens` | `gen_ai.usage.input_tokens` | `llm`、`invoke_agent`、request 汇总 span | 输入 token 数。 |
+| `usage_output_tokens` | `gen_ai.usage.output_tokens` | `llm`、`invoke_agent`、request 汇总 span | 输出 token 数。 |
+| `usage_cache_read_input_tokens` | `gen_ai.usage.cache_read.input_tokens` | `llm`、`invoke_agent`、request 汇总 span | provider cache read input token 数。 |
+| `usage_cache_write_input_tokens` | `gen_ai.usage.cache_creation.input_tokens` | `llm`、`invoke_agent`、request 汇总 span | provider cache creation / write input token 数。 |
 | `input_preview` | `gen_ai.input.messages` | 模型 / Agent 相关 span | 使用已脱敏、截断后的 preview 构造 JSON 字符串，形如 `[{role:"user",parts:[{type:"text",content:"..."}]}]`。 |
 | `output_preview`、`output_summary`、`output_kind` | `gen_ai.output.messages` | 模型 / Agent 相关 span | 使用已脱敏、截断后的 preview / summary 构造 JSON 字符串；`output_kind=tool_call` 且有 tool 身份时输出 `tool_call` part。 |
 | `tool_name` | `gen_ai.tool.name` | `tool:*` span、tool operation 指标 | tool 名称。 |
@@ -48,7 +48,7 @@
 | `operation_name=model` 或 `span.kind=model` | `chat` | 一次模型 chat / completion 调用。 |
 | `operation_name=tool` 或 `span.kind=tool` | `execute_tool` | tool 执行。 |
 | `operation_name=skill` | `execute_tool` | 当前 skill 调用按工具执行能力对齐。 |
-| `span.kind=agent` | `invoke_agent` | `agent_run` 表示一次 agent 主执行窗口。 |
+| `span.kind=agent` | `invoke_agent` | `invoke_agent` span 表示一次 agent 主执行窗口。 |
 | `span.kind=request` | `invoke_workflow` | `openclaw_request` 表示一次用户消息触发的完整工作流。 |
 | `runtime_phase=agent_plan` | `plan` | `runtime_orchestration` 中的规划阶段。 |
 

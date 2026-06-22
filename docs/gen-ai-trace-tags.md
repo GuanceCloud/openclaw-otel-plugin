@@ -14,12 +14,12 @@
 - 在 OpenClaw 里，`agent` 不是单次模型调用，而是围绕一次用户消息组织上下文、决策、工具调用和结果返回的运行单元
 - 当前 trace 里，`AI Agent` 的主要观测边界是：
   - `openclaw_request`：一条用户消息对应的一次完整请求
-  - `agent_run`：这次请求里的 agent 主执行窗口
+  - `invoke_agent`：这次请求里的 agent 主执行窗口
   - `llm`：agent 在执行过程中发起的一次模型调用
   - `skill:* / tool:*`：agent 在执行过程中使用的能力与外部操作
 - 因此：
   - `llm` 不等于 `agent`
-  - `agent_run` 才是最接近 `AI Agent execution` 的 span
+  - `invoke_agent` 才是最接近 `AI Agent execution` 的 span
   - 多轮 `llm`、`tool:*`、`skill:*` 共同构成一次 agent 执行
 
 ## 最终 Span 规范
@@ -29,7 +29,7 @@
 - `openclaw_request`
 - `channel_ingress`
 - `dispatch_queue`
-- `agent_run`
+- `invoke_agent`
 - `session_processing`
 - `runtime_orchestration`
 - `llm`
@@ -76,7 +76,7 @@
   - 汇总输出
   - 会话创建/更新时间
 
-### `agent_run`
+### `invoke_agent`
 
 表示“一次 agent 实际执行窗口”。
 
@@ -119,7 +119,7 @@
   | `unset` / 空 | 当前 span 没有显式设置状态 |
 
 - `final_status`
-  - 表示一条 `openclaw_request` / `agent_run` 最终的业务结果
+  - 表示一条 `openclaw_request` / `invoke_agent` 最终的业务结果
   - 用于判断一次 agent 请求最终是成功完成、超时、取消还是被后续消息顶替
 
 使用建议：

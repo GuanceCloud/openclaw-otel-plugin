@@ -692,7 +692,7 @@ test("tool completion records separate tool and skill agent operation metrics", 
     },
   };
   const run = createRunState({ ctx: "root" }, 1000, 1000);
-  run.span = createFakeSpan("agent_run");
+  run.span = createFakeSpan("invoke_agent");
   run.ctx = { ctx: "run" };
 
   const manager = createToolSpanManager({
@@ -1150,7 +1150,7 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
         run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
         run.runId = "run-synthetic";
         run.runIds = new Set(["run-synthetic"]);
-        run.span = createFakeSpan("agent_run");
+        run.span = createFakeSpan("invoke_agent");
         run.ctx = { ctx: "run" };
       }
       return run;
@@ -1290,7 +1290,7 @@ test("transcript replay backfills run start from transcript timestamps", () => {
         run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
         run.runId = "run-2";
         run.runIds = new Set(["run-2"]);
-        run.span = createFakeSpan("agent_run");
+        run.span = createFakeSpan("invoke_agent");
         run.ctx = { ctx: "run" };
       }
       return run;
@@ -1390,7 +1390,7 @@ test("transcript model spans are replayed per assistant turn", () => {
         run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
         run.runId = "run-2";
         run.runIds = new Set(["run-2"]);
-        run.span = createFakeSpan("agent_run");
+        run.span = createFakeSpan("invoke_agent");
         run.ctx = { ctx: "run" };
       }
       return run;
@@ -1577,7 +1577,7 @@ test("transcript model replay skips turns already covered by runtime model usage
   };
   const rootSpan = createFakeSpan("root");
   const run = createRunState({ ctx: "root" }, 1000, 1000);
-  run.span = createFakeSpan("agent_run");
+  run.span = createFakeSpan("invoke_agent");
   run.ctx = { ctx: "run" };
   run.modelSpanEmitted = true;
   run.aggregate.inputTokens = 11;
@@ -1777,7 +1777,7 @@ test("transcript model replay only appends turns that were not emitted yet", () 
     getRun(evt, createIfMissing = false) {
       if (!run && createIfMissing) {
         run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
-        run.span = createFakeSpan("agent_run");
+        run.span = createFakeSpan("invoke_agent");
         run.ctx = { ctx: "run" };
       }
       return run;
@@ -1859,7 +1859,7 @@ test("transcript model spans do not inherit session output preview without turn 
     getRun(evt, createIfMissing = false) {
       if (!run && createIfMissing) {
         run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
-        run.span = createFakeSpan("agent_run");
+        run.span = createFakeSpan("invoke_agent");
         run.ctx = { ctx: "run" };
       }
       return run;
