@@ -5,6 +5,8 @@
 - 本文档只描述当前 **trace / span / event / log** 已落地可用的字段
 - 不展开历史映射
 - `app_name`、`app_id` 保留原名，不并入 `gen_ai.*`
+- 当前输出采用双写过渡：保留短字段用于兼容既有查询，同时新增官方 OpenTelemetry GenAI 点分字段
+- 字段变更关系见 [gen-ai-field-mapping.md](./gen-ai-field-mapping.md)
 
 ## AI Agent 说明
 
@@ -157,9 +159,9 @@
 
 说明：
 
-- trace 的 span / event / log tag 现在统一使用 canonical 字段
-- `gen_ai.*` 双写 alias 已移除；做 trace / metrics 关联时，直接使用下表字段
-- Resource 级字段也统一使用 canonical 字段
+- trace 的 span / event / log tag 现在同时输出兼容短字段和官方 `gen_ai.*` 点分字段
+- 旧版扁平 `gen_ai_session_id` / `gen_ai.session_id` 这类 alias 不再恢复
+- Resource 级字段继续使用 `agent_runtime`、`agent_version`、`runtime_environment` 等短字段
 
 | 字段 | 描述 |
 | --- | --- |
@@ -204,6 +206,28 @@
 | `tool_meta_preview` | tool 元数据预览 |
 | `tool_result_preview` | tool 结果预览 |
 | `tool_result_status` | tool 结果状态 |
+
+## 官方 GenAI 字段
+
+| 字段 | 描述 |
+| --- | --- |
+| `gen_ai.operation.name` | 官方 GenAI operation 名，例如 `chat`、`invoke_agent`、`invoke_workflow`、`execute_tool`、`plan` |
+| `error.type` | 错误 span 的低基数错误类型，当前统一为 `error` |
+| `gen_ai.provider.name` | 模型或 Agent 调用的 GenAI provider |
+| `gen_ai.request.model` | 请求模型名 |
+| `gen_ai.response.model` | 响应模型名；没有独立响应模型时沿用请求模型 |
+| `gen_ai.conversation.id` | OpenClaw `session_id` 对应的 conversation id |
+| `gen_ai.input.messages` | 使用现有 `input_preview` 构造的官方 input messages JSON 字符串 |
+| `gen_ai.output.messages` | 使用现有 `output_preview` / `output_summary` / tool preview 构造的官方 output messages JSON 字符串 |
+| `gen_ai.usage.input_tokens` | 输入 token 数 |
+| `gen_ai.usage.output_tokens` | 输出 token 数 |
+| `gen_ai.usage.cache_read.input_tokens` | cache read input token 数 |
+| `gen_ai.usage.cache_creation.input_tokens` | cache creation / write input token 数 |
+| `gen_ai.tool.name` | tool 名称 |
+| `gen_ai.tool.call.id` | tool call 标识 |
+| `gen_ai.tool.call.arguments` | tool 参数 preview，当前为字符串 |
+| `gen_ai.tool.call.result` | tool 结果 preview，当前为字符串 |
+| `gen_ai.output.type` | 输出类型；当前只在值符合官方枚举时输出 |
 
 ### `request_type` 结果语义
 

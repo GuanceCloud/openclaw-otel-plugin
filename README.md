@@ -23,6 +23,7 @@ Trace notes:
 - One inbound user message maps to one trace
 - `message.processed` replays transcript turns first; trailing `session.state idle` only acts as a fallback close path
 - Transcript replay emits one `llm` per assistant turn so multi-tool sessions show `model -> tool -> model` loops instead of one oversized model span
+- Spans keep compatibility query fields such as `session_id`, `provider_name`, and `request_model`, and also emit official OpenTelemetry GenAI fields such as `gen_ai.conversation.id`, `gen_ai.provider.name`, and `gen_ai.request.model`
 
 ### Metrics
 
@@ -54,8 +55,9 @@ Metric boundary notes:
 
 - `gen_ai.client.*` is reserved for OTEL-native client semantics; the plugin no longer writes custom token or operation metrics there.
 - OpenClaw custom model token and model/tool/skill operation metrics are reported under `gen_ai.agent.token.usage` and `gen_ai.agent.operation.*`.
+- Plugin metrics keep compatibility tags and also emit official GenAI tags such as `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, and `gen_ai.conversation.id`.
 
-See [docs/gen-ai-metrics.md](./docs/gen-ai-metrics.md) for the full metric catalog.
+See [docs/gen-ai-metrics.md](./docs/gen-ai-metrics.md) for the full metric catalog and [docs/gen-ai-field-mapping.md](./docs/gen-ai-field-mapping.md) for field mapping.
 
 ### Logs
 
@@ -297,7 +299,7 @@ Then send a test message in OpenClaw and query by:
 - Transcript-derived skill spans prefer actually invoked skills over merely mentioned skills
 - If no skill identity can be inferred, the plugin will keep tool spans without fabricating a generic skill span.
 - Tool loop diagnostics are attached to the active tool span when possible; critical loops mark the tool span as error
-- Canonical query fields such as `session_id`, `session_key`, `tool_name`, `tool_call_id`, `provider_name`, and `request_model` are emitted for easier querying
+- Compatibility query fields such as `session_id`, `session_key`, `tool_name`, `tool_call_id`, `provider_name`, and `request_model` are emitted alongside official GenAI fields such as `gen_ai.conversation.id`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.provider.name`, and `gen_ai.request.model`
 
 ## Common Issues
 

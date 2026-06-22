@@ -2,6 +2,15 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-06-17
+
+### GenAI Semantic Convention Alignment
+
+- Added official OpenTelemetry GenAI semantic attributes alongside existing compatibility fields on traces, logs, events, and metric tags, including `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.conversation.id`, `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.usage.*`, and `gen_ai.tool.*`.
+- Added low-cardinality `error.type=error` on errored spans while keeping detailed error text in the OTEL span status message.
+- Kept existing `gen_ai.agent.*` and `gen_ai.runtime.*` plugin metric names and `ms` duration units while adding official GenAI tag aliases for query migration.
+- Added `docs/gen-ai-field-mapping.md` to document the field change relationship from existing OpenClaw-compatible fields to official GenAI semantic fields.
+
 ## 2026-06-12
 
 ### Replay Trace Marking

@@ -36,6 +36,7 @@ import {
   resolveSpanWindow,
   resolveSessionMetricTotals,
   shouldFallbackRunBoundEventToActiveRequest,
+  setError,
   stringAttrs,
   traceAttrs,
   writeReplayFinalizationState,
@@ -50,6 +51,27 @@ test("normalizeFinalStatus maps upstream terminal aliases to canonical values", 
   assert.equal(normalizeFinalStatus("timed-out"), "timeout");
   assert.equal(normalizeFinalStatus("superseded_by_next_message"), "superseded");
   assert.equal(normalizeFinalStatus(undefined), undefined);
+});
+
+test("setError records low-cardinality error.type alongside span status", () => {
+  const span = {
+    attributes: {},
+    status: undefined,
+    setStatus(status) {
+      this.status = status;
+    },
+    setAttributes(attrs) {
+      Object.assign(this.attributes, attrs);
+    },
+  };
+
+  setError(span, 2, "provider timeout with sensitive detail");
+
+  assert.deepEqual(span.status, {
+    code: 2,
+    message: "provider timeout with sensitive detail",
+  });
+  assert.equal(span.attributes["error.type"], "error");
 });
 
 test("resolveSpanWindow backfills start time from event end time", () => {
@@ -434,6 +456,7 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
     "openclaw.tool.name": "read",
     "openclaw.tool.target": "/tmp/demo.txt",
     "openclaw.tool.command": "cat /tmp/demo.txt",
+    "openclaw.tool.args.preview": "{\"path\":\"/tmp/demo.txt\"}",
     "openclaw.tool.provider": "mcp",
     "openclaw.tool.namespace": "owl",
     "openclaw.tool.outcome": "completed",
@@ -460,21 +483,45 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.provider_name, "doubao");
   assert.equal(attrs.request_model, "ark-code-latest");
   assert.equal(attrs.response_model, "ark-code-latest");
+  assert.equal(attrs["gen_ai.provider.name"], "doubao");
+  assert.equal(attrs["gen_ai.request.model"], "ark-code-latest");
+  assert.equal(attrs["gen_ai.response.model"], "ark-code-latest");
+  assert.equal(attrs["gen_ai.conversation.id"], "session-1");
   assert.equal(attrs.input_preview, "user asks for dashboard");
   assert.equal(attrs.input_length, 23);
   assert.equal(attrs.output_preview, "toolCall:exec");
   assert.equal(attrs.output_length, 11);
   assert.equal(attrs.output_summary, "planning summary");
   assert.equal(attrs.output_text_length, 16);
+  assert.deepEqual(JSON.parse(attrs["gen_ai.input.messages"]), [{
+    role: "user",
+    parts: [{ type: "text", content: "user asks for dashboard" }],
+  }]);
+  assert.deepEqual(JSON.parse(attrs["gen_ai.output.messages"]), [{
+    role: "assistant",
+    parts: [
+      { type: "tool_call", id: "call-1", name: "read", arguments: "{\"path\":\"/tmp/demo.txt\"}" },
+      { type: "reasoning", content: "planning summary" },
+    ],
+    finish_reason: "tool_call",
+  }]);
   assert.equal(attrs.usage_input_tokens, 12);
   assert.equal(attrs.usage_output_tokens, 34);
   assert.equal(attrs.usage_total_tokens, 46);
   assert.equal(attrs.usage_cache_read_input_tokens, 5);
   assert.equal(attrs.usage_cache_write_input_tokens, 7);
   assert.equal(attrs.usage_cache_total_tokens, 12);
+  assert.equal(attrs["gen_ai.usage.input_tokens"], 12);
+  assert.equal(attrs["gen_ai.usage.output_tokens"], 34);
+  assert.equal(attrs["gen_ai.usage.cache_read.input_tokens"], 5);
+  assert.equal(attrs["gen_ai.usage.cache_creation.input_tokens"], 7);
   assert.equal(attrs.output_kind, "tool_call");
   assert.equal(attrs.tool_call_id, "call-1");
   assert.equal(attrs.tool_name, "read");
+  assert.equal(attrs["gen_ai.tool.call.id"], "call-1");
+  assert.equal(attrs["gen_ai.tool.name"], "read");
+  assert.equal(attrs["gen_ai.tool.call.arguments"], "{\"path\":\"/tmp/demo.txt\"}");
+  assert.equal(attrs["gen_ai.tool.call.result"], undefined);
   assert.equal(attrs.tool_command, "cat /tmp/demo.txt");
   assert.equal(attrs.tool_target, "/tmp/demo.txt");
   assert.equal(attrs.tool_provider, "mcp");
@@ -546,6 +593,16 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
     session_id: "session-1",
     session_key: "agent:main:feishu:direct:user-1",
     channel: "feishu",
+    provider_name: "doubao",
+    request_model: "ark-code-latest",
+    response_model: "ark-code-latest",
+    usage_input_tokens: 12,
+    usage_output_tokens: 34,
+    usage_cache_read_input_tokens: 5,
+    usage_cache_write_input_tokens: 7,
+    input_preview: "user asks for dashboard",
+    output_preview: "toolCall:exec",
+    "span.kind": "model",
     session_cwd: "/tmp/workspace",
     source_app: "feishu",
     entry_point: "feishu",
@@ -610,14 +667,38 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   assert.equal(attrs.session_key, "agent:main:feishu:direct:user-1");
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs.channel, "feishu");
+  assert.equal(attrs["gen_ai.operation.name"], "chat");
+  assert.equal(attrs["gen_ai.provider.name"], "doubao");
+  assert.equal(attrs["gen_ai.request.model"], "ark-code-latest");
+  assert.equal(attrs["gen_ai.response.model"], "ark-code-latest");
+  assert.equal(attrs["gen_ai.conversation.id"], "session-1");
+  assert.equal(attrs["gen_ai.usage.input_tokens"], 12);
+  assert.equal(attrs["gen_ai.usage.output_tokens"], 34);
+  assert.equal(attrs["gen_ai.usage.cache_read.input_tokens"], 5);
+  assert.equal(attrs["gen_ai.usage.cache_creation.input_tokens"], 7);
+  assert.deepEqual(JSON.parse(attrs["gen_ai.input.messages"]), [{
+    role: "user",
+    parts: [{ type: "text", content: "user asks for dashboard" }],
+  }]);
+  assert.deepEqual(JSON.parse(attrs["gen_ai.output.messages"]), [{
+    role: "assistant",
+    parts: [
+      { type: "tool_call", id: "call-1", name: "read", arguments: "{\"path\":\"/tmp/a\"}" },
+    ],
+    finish_reason: "tool_call",
+  }]);
   assert.equal(attrs.session_cwd, "/tmp/workspace");
   assert.equal(attrs.source_app, "feishu");
   assert.equal(attrs.entry_point, "feishu");
-  assert.equal(attrs.provider_name, undefined);
-  assert.equal(attrs.request_model, undefined);
+  assert.equal(attrs.provider_name, "doubao");
+  assert.equal(attrs.request_model, "ark-code-latest");
   assert.equal(attrs.output_kind, "tool_call");
   assert.equal(attrs.tool_call_id, "call-1");
   assert.equal(attrs.tool_name, "read");
+  assert.equal(attrs["gen_ai.tool.call.id"], "call-1");
+  assert.equal(attrs["gen_ai.tool.name"], "read");
+  assert.equal(attrs["gen_ai.tool.call.arguments"], "{\"path\":\"/tmp/a\"}");
+  assert.equal(attrs["gen_ai.tool.call.result"], "done");
   assert.equal(attrs.tool_target, "/tmp/workspace/demo.txt");
   assert.equal(attrs.tool_command, "cat /tmp/workspace/demo.txt");
   assert.equal(attrs.tool_provider, "mcp");
@@ -697,6 +778,37 @@ test("final_status no longer falls back to final_state", () => {
 
   assert.equal(attrs.final_status, undefined);
   assert.equal(attrs.state, "idle");
+});
+
+test("traceAttrs maps runtime planning phase to GenAI plan operation only", () => {
+  const planAttrs = traceAttrs({
+    "span.kind": "runtime",
+    runtime_phase: "agent_plan",
+  });
+  const runtimeAttrs = traceAttrs({
+    "span.kind": "runtime",
+    runtime_phase: "session_processing",
+  });
+
+  assert.equal(planAttrs["gen_ai.operation.name"], "plan");
+  assert.equal(runtimeAttrs["gen_ai.operation.name"], undefined);
+});
+
+test("traceAttrs maps tool previews to official GenAI tool call fields", () => {
+  const attrs = traceAttrs({
+    "span.kind": "tool",
+    tool_call_id: "call-1",
+    tool_name: "exec",
+    tool_args_preview: "{\"cmd\":\"date\"}",
+    tool_result_preview: "{\"stdout\":\"ok\"}",
+    tool_result_status: "completed",
+  });
+
+  assert.equal(attrs["gen_ai.operation.name"], "execute_tool");
+  assert.equal(attrs["gen_ai.tool.call.id"], "call-1");
+  assert.equal(attrs["gen_ai.tool.name"], "exec");
+  assert.equal(attrs["gen_ai.tool.call.arguments"], "{\"cmd\":\"date\"}");
+  assert.equal(attrs["gen_ai.tool.call.result"], "{\"stdout\":\"ok\"}");
 });
 
 test("stringAttrs keeps zero-valued token aliases on summary spans", () => {
@@ -826,10 +938,15 @@ test("buildGenAiClientModelMetricAttrs uses GenAI semantic-style keys", () => {
   });
 
   assert.equal(attrs.operation_name, "model");
+  assert.equal(attrs["gen_ai.operation.name"], "chat");
   assert.equal(attrs.provider_name, "volcengine-plan");
+  assert.equal(attrs["gen_ai.provider.name"], "volcengine-plan");
   assert.equal(attrs.request_model, "ark-code-latest");
+  assert.equal(attrs["gen_ai.request.model"], "ark-code-latest");
   assert.equal(attrs.response_model, "ark-code-latest");
+  assert.equal(attrs["gen_ai.response.model"], "ark-code-latest");
   assert.equal(attrs.token_type, "input");
+  assert.equal(attrs["gen_ai.token.type"], "input");
 });
 
 test("buildGenAiAgentTokenMetricAttrs uses canonical agent token keys", () => {
@@ -842,8 +959,14 @@ test("buildGenAiAgentTokenMetricAttrs uses canonical agent token keys", () => {
   assert.equal(attrs.request_model, "ark-code-latest");
   assert.equal(attrs.response_model, "ark-code-latest");
   assert.equal(attrs.session_id, "session-1");
+  assert.equal(attrs["gen_ai.provider.name"], "volcengine-plan");
+  assert.equal(attrs["gen_ai.request.model"], "ark-code-latest");
+  assert.equal(attrs["gen_ai.response.model"], "ark-code-latest");
+  assert.equal(attrs["gen_ai.conversation.id"], "session-1");
   assert.equal(attrs.token_type, "input");
+  assert.equal(attrs["gen_ai.token.type"], "input");
   assert.equal(attrs.operation_name, undefined);
+  assert.equal(attrs["gen_ai.operation.name"], undefined);
 });
 
 test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
@@ -855,11 +978,14 @@ test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
   );
 
   assert.equal(attrs.operation_name, "tool");
+  assert.equal(attrs["gen_ai.operation.name"], "execute_tool");
   assert.equal(attrs.tool_name, "exec");
+  assert.equal(attrs["gen_ai.tool.name"], "exec");
   assert.equal(attrs.skill_name, "dashboard");
   assert.equal(attrs.model_name, "gpt-5");
   assert.equal(attrs.tool_result_status, "completed");
   assert.equal(attrs.session_id, "session-1");
+  assert.equal(attrs["gen_ai.conversation.id"], "session-1");
 });
 
 test("buildGenAiClientSkillMetricAttrs uses skill operation naming", () => {
@@ -870,9 +996,11 @@ test("buildGenAiClientSkillMetricAttrs uses skill operation naming", () => {
   );
 
   assert.equal(attrs.operation_name, "skill");
+  assert.equal(attrs["gen_ai.operation.name"], "execute_tool");
   assert.equal(attrs.skill_name, "dashboard");
   assert.equal(attrs.skill_source, "runtime");
   assert.equal(attrs.session_id, "session-1");
+  assert.equal(attrs["gen_ai.conversation.id"], "session-1");
 });
 
 test("GenAI agent metric builders preserve session and request semantics", () => {
@@ -906,6 +1034,9 @@ test("GenAI agent metric builders preserve session and request semantics", () =>
   assert.equal(requestAttrs.session_id, "session-1");
   assert.equal(requestAttrs.provider_name, "volcengine-plan");
   assert.equal(requestAttrs.request_model, "ark-code-latest");
+  assert.equal(requestAttrs["gen_ai.provider.name"], "volcengine-plan");
+  assert.equal(requestAttrs["gen_ai.request.model"], "ark-code-latest");
+  assert.equal(requestAttrs["gen_ai.conversation.id"], "session-1");
   assert.equal(requestAttrs.session_state, "idle");
   assert.equal(requestAttrs.outcome, "completed");
 
@@ -913,7 +1044,11 @@ test("GenAI agent metric builders preserve session and request semantics", () =>
   assert.equal(sessionAttrs.session_key, "agent:main:main");
   assert.equal(sessionAttrs.provider_name, "runtime-provider");
   assert.equal(sessionAttrs.request_model, "runtime-model");
+  assert.equal(sessionAttrs["gen_ai.provider.name"], "runtime-provider");
+  assert.equal(sessionAttrs["gen_ai.request.model"], "runtime-model");
+  assert.equal(sessionAttrs["gen_ai.conversation.id"], "session-1");
   assert.equal(sessionAttrs.token_type, "total");
+  assert.equal(sessionAttrs["gen_ai.token.type"], "total");
 });
 
 test("GenAI runtime and skill metric builders use the new namespaces", () => {
@@ -927,15 +1062,19 @@ test("GenAI runtime and skill metric builders use the new namespaces", () => {
   const sessionAttrs = buildGenAiRuntimeSessionMetricAttrs("processing", "waiting_for_tool", "session-1");
 
   assert.equal(skillAttrs.session_id, "session-1");
+  assert.equal(skillAttrs["gen_ai.conversation.id"], "session-1");
   assert.equal(skillAttrs.skill_name, "dashboard");
   assert.equal(skillAttrs.skill_source, "runtime");
   assert.equal(messageAttrs.channel, "feishu");
   assert.equal(messageAttrs.session_id, "session-1");
+  assert.equal(messageAttrs["gen_ai.conversation.id"], "session-1");
   assert.equal(messageAttrs.outcome, "completed");
   assert.equal(queueAttrs.queue_name, "main");
   assert.equal(queueAttrs.session_id, "session-1");
+  assert.equal(queueAttrs["gen_ai.conversation.id"], "session-1");
   assert.equal(queueAttrs.outcome, "dequeue");
   assert.equal(sessionAttrs.session_id, "session-1");
+  assert.equal(sessionAttrs["gen_ai.conversation.id"], "session-1");
   assert.equal(sessionAttrs.session_state, "processing");
   assert.equal(sessionAttrs.outcome, "waiting_for_tool");
 });

@@ -645,6 +645,210 @@ function mirrorAlias(
   }
 }
 
+const OFFICIAL_GEN_AI_ATTR_KEYS = new Set([
+  "gen_ai.agent.version",
+  "gen_ai.conversation.id",
+  "gen_ai.input.messages",
+  "gen_ai.operation.name",
+  "gen_ai.output.messages",
+  "gen_ai.output.type",
+  "gen_ai.provider.name",
+  "gen_ai.request.model",
+  "gen_ai.response.model",
+  "gen_ai.token.type",
+  "gen_ai.tool.call.arguments",
+  "gen_ai.tool.call.id",
+  "gen_ai.tool.call.result",
+  "gen_ai.tool.name",
+  "gen_ai.usage.cache_creation.input_tokens",
+  "gen_ai.usage.cache_read.input_tokens",
+  "gen_ai.usage.input_tokens",
+  "gen_ai.usage.output_tokens",
+]);
+
+function setIfMissing(
+  target: Record<string, string | number | boolean | undefined>,
+  key: string,
+  value: string | number | boolean | undefined,
+) {
+  if (value === undefined || value === "") {
+    return;
+  }
+  if (target[key] === undefined || target[key] === "") {
+    target[key] = value;
+  }
+}
+
+function mapGenAiOperationName(
+  value: string | number | boolean | undefined,
+  options?: { allowCustom?: boolean },
+): string | undefined {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return undefined;
+  }
+  switch (normalized) {
+    case "model":
+      return "chat";
+    case "tool":
+    case "skill":
+      return "execute_tool";
+    case "agent":
+      return "invoke_agent";
+    case "request":
+      return "invoke_workflow";
+    case "agent_plan":
+    case "planning":
+      return "plan";
+    default:
+      return options?.allowCustom === false ? undefined : normalized;
+  }
+}
+
+function inferGenAiOperationName(
+  attrs: Record<string, string | number | boolean | undefined>,
+): string | undefined {
+  const explicit = mapGenAiOperationName(attrs["gen_ai.operation.name"]);
+  if (explicit) {
+    return explicit;
+  }
+  const metricOperation = mapGenAiOperationName(attrs.operation_name);
+  if (metricOperation) {
+    return metricOperation;
+  }
+  const spanKind = typeof attrs["span.kind"] === "string" ? attrs["span.kind"] : undefined;
+  if (spanKind) {
+    const spanOperation = mapGenAiOperationName(spanKind, { allowCustom: false });
+    if (spanOperation) {
+      return spanOperation;
+    }
+  }
+  const runtimePhase = mapGenAiOperationName(attrs.runtime_phase, { allowCustom: false });
+  return runtimePhase === "plan" ? runtimePhase : undefined;
+}
+
+function normalizeGenAiTokenType(value: string | number | boolean | undefined): string | undefined {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function mapGenAiOutputType(value: string | number | boolean | undefined): string | undefined {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (normalized === "text" || normalized === "json" || normalized === "image" || normalized === "speech") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function stringifyGenAiJson(value: unknown): string | undefined {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function stringValue(value: string | number | boolean | undefined): string | undefined {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  return String(value);
+}
+
+function inferGenAiFinishReason(
+  attrs: Record<string, string | number | boolean | undefined>,
+): string {
+  const status = stringValue(attrs.final_status ?? attrs.outcome ?? attrs.tool_result_status)?.toLowerCase();
+  if (status === "error" || status === "timeout" || status === "cancelled" || status === "canceled") {
+    return "error";
+  }
+  if (attrs.output_kind === "tool_call" || attrs.tool_call_id || attrs.tool_name) {
+    return "tool_call";
+  }
+  return "stop";
+}
+
+function buildGenAiInputMessages(
+  attrs: Record<string, string | number | boolean | undefined>,
+): string | undefined {
+  const content = stringValue(attrs.input_preview);
+  if (!content) {
+    return undefined;
+  }
+  return stringifyGenAiJson([{
+    role: "user",
+    parts: [{ type: "text", content }],
+  }]);
+}
+
+function buildGenAiOutputMessages(
+  attrs: Record<string, string | number | boolean | undefined>,
+): string | undefined {
+  const outputPreview = stringValue(attrs.output_preview);
+  const outputSummary = stringValue(attrs.output_summary);
+  if (!outputPreview && !outputSummary) {
+    return undefined;
+  }
+
+  const parts: Array<Record<string, string | null | Record<string, string>>> = [];
+  const toolName = stringValue(attrs.tool_name);
+  if (attrs.output_kind === "tool_call" && toolName) {
+    parts.push({
+      type: "tool_call",
+      id: stringValue(attrs.tool_call_id) ?? null,
+      name: toolName,
+      arguments: stringValue(attrs.tool_args_preview) ?? outputPreview ?? "",
+    });
+  } else if (outputPreview) {
+    parts.push({ type: "text", content: outputPreview });
+  }
+  if (outputSummary) {
+    parts.push({ type: "reasoning", content: outputSummary });
+  }
+  if (parts.length === 0) {
+    return undefined;
+  }
+  return stringifyGenAiJson([{
+    role: "assistant",
+    parts,
+    finish_reason: inferGenAiFinishReason(attrs),
+  }]);
+}
+
+function withOfficialGenAiSemanticAttrs(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean | undefined> {
+  const next = { ...attrs };
+  const responseModel = next.response_model ?? next.request_model;
+
+  setIfMissing(next, "gen_ai.operation.name", inferGenAiOperationName(next));
+  setIfMissing(next, "gen_ai.provider.name", next.provider_name);
+  setIfMissing(next, "gen_ai.request.model", next.request_model);
+  setIfMissing(next, "gen_ai.response.model", responseModel);
+  setIfMissing(next, "gen_ai.conversation.id", next.session_id);
+  setIfMissing(next, "gen_ai.token.type", normalizeGenAiTokenType(next.token_type));
+  setIfMissing(next, "gen_ai.output.type", mapGenAiOutputType(next.output_kind));
+  setIfMissing(next, "gen_ai.input.messages", buildGenAiInputMessages(next));
+  setIfMissing(next, "gen_ai.output.messages", buildGenAiOutputMessages(next));
+  setIfMissing(next, "gen_ai.usage.input_tokens", next.usage_input_tokens);
+  setIfMissing(next, "gen_ai.usage.output_tokens", next.usage_output_tokens);
+  setIfMissing(next, "gen_ai.usage.cache_read.input_tokens", next.usage_cache_read_input_tokens);
+  setIfMissing(next, "gen_ai.usage.cache_creation.input_tokens", next.usage_cache_write_input_tokens);
+  setIfMissing(next, "gen_ai.tool.name", next.tool_name);
+  setIfMissing(next, "gen_ai.tool.call.id", next.tool_call_id);
+  setIfMissing(next, "gen_ai.tool.call.arguments", next.tool_args_preview);
+  setIfMissing(next, "gen_ai.tool.call.result", next.tool_result_preview);
+
+  if (next["gen_ai.agent.version"] === undefined || next["gen_ai.agent.version"] === "") {
+    setIfMissing(next, "gen_ai.agent.version", next.agent_version);
+  }
+
+  return next;
+}
+
 function promotePrefixedKeys(
   target: Record<string, string | number | boolean | undefined>,
   prefix: string,
@@ -680,6 +884,9 @@ function normalizeGenAiKeys(
   const next = { ...attrs };
   for (const [key, value] of Object.entries({ ...next })) {
     if (!key.startsWith("gen_ai.") || value === undefined || value === "") {
+      continue;
+    }
+    if (OFFICIAL_GEN_AI_ATTR_KEYS.has(key)) {
       continue;
     }
     const flattened = flattenGenAiKey(key);
@@ -832,7 +1039,7 @@ export function stringAttrs(
     withGlobalRuntime.agent_runtime = "openclaw";
   }
   return Object.fromEntries(
-    Object.entries(stripOpenClawNamespace(withCanonicalAliases(withGlobalRuntime)))
+    Object.entries(stripOpenClawNamespace(withOfficialGenAiSemanticAttrs(withCanonicalAliases(withGlobalRuntime))))
       .filter(([key, value]) => (
         !OMITTED_AGENT_IDENTITY_ATTR_KEYS.has(key)
         && key !== "trace_id"
@@ -950,6 +1157,15 @@ export function traceAttrs(
 export function setError(span: any, spanStatusCode: number, message?: string) {
   const safeMessage = message ? redactSensitiveText(message) : "unknown";
   span.setStatus({ code: spanStatusCode, message: safeMessage });
+  const attrs = traceAttrs({ "error.type": "error" });
+  if (typeof span.setAttributes === "function") {
+    span.setAttributes(attrs);
+  } else if (typeof span.setAttribute === "function") {
+    span.setAttribute("error.type", attrs["error.type"]);
+  }
+  if (span.attributes && typeof span.attributes === "object") {
+    Object.assign(span.attributes, attrs);
+  }
 }
 
 export function addEvent(span: any, name: string, attrs?: Record<string, string | number | boolean>) {
