@@ -8,6 +8,7 @@ import type {
   SessionSnapshotStore,
   SessionRunState,
   SkillCatalogEntry,
+  SkillSourceType,
   TranscriptAssistantTurn,
   TranscriptToolCall,
 } from "./service-types.js";
@@ -16,6 +17,7 @@ import {
   buildSkillCatalogEntry,
   extractContentText,
   extractFrontmatter,
+  extractSkillDescription,
   extractMentionedSkillNames,
   extractToolTarget,
   inferSkillNameFromToolIdentity,
@@ -87,6 +89,87 @@ function resolveMessageRunId(message: Record<string, unknown>): string | undefin
     return runId || undefined;
   }
   return undefined;
+}
+
+function normalizeSkillSourceType(value: unknown): SkillSourceType | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "system" || normalized === "user" || normalized === "workspace") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function inferSkillSourceTypeFromPath(stateDir: string, skillPath?: string): SkillSourceType | undefined {
+  if (!skillPath?.trim()) {
+    return undefined;
+  }
+  const resolvedPath = path.resolve(skillPath);
+  const workspaceSkillsRoot = path.resolve(path.join(stateDir, "workspace", "skills")) + path.sep;
+  if (resolvedPath.startsWith(workspaceSkillsRoot)) {
+    return "workspace";
+  }
+  if (
+    resolvedPath.includes(`${path.sep}.system${path.sep}`)
+    || resolvedPath.includes(`${path.sep}node_modules${path.sep}openclaw${path.sep}`)
+  ) {
+    return "system";
+  }
+  return "user";
+}
+
+function readPackageVersion(packageJsonPath: string): string | undefined {
+  try {
+    if (!fs.existsSync(packageJsonPath)) {
+      return undefined;
+    }
+    const raw = fs.readFileSync(packageJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" && parsed.version.trim() ? parsed.version.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseSkillCatalogEntryFromResolvedSkill(
+  stateDir: string,
+  skill: Record<string, unknown>,
+): SkillCatalogEntry | undefined {
+  const skillName = typeof skill.name === "string" ? skill.name.trim() : "";
+  if (!skillName) {
+    return undefined;
+  }
+  const skillPath = typeof skill.path === "string"
+    ? skill.path.trim()
+    : typeof skill.skillPath === "string"
+      ? skill.skillPath.trim()
+      : typeof skill.entryPath === "string"
+        ? skill.entryPath.trim()
+        : "";
+  const sourceField = skill.source;
+  const sourceType = normalizeSkillSourceType(skill.sourceType)
+    ?? normalizeSkillSourceType(
+      sourceField && typeof sourceField === "object" && !Array.isArray(sourceField)
+        ? (sourceField as Record<string, unknown>).type
+        : sourceField,
+    )
+    ?? inferSkillSourceTypeFromPath(stateDir, skillPath || undefined);
+  const version = typeof skill.version === "string" && skill.version.trim()
+    ? skill.version.trim()
+    : skillPath
+      ? readPackageVersion(path.join(path.dirname(skillPath), "package.json"))
+      : undefined;
+  const description = typeof skill.description === "string" && skill.description.trim()
+    ? skill.description.trim()
+    : undefined;
+  return buildSkillCatalogEntry(skillName, {
+    description,
+    path: skillPath || undefined,
+    sourceType,
+    version,
+  });
 }
 
 export function resolveConfiguredAgents(stateDir: string): ConfiguredAgent[] {
@@ -499,6 +582,10 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       merged.set(entry.name, {
         name: entry.name,
         aliases: uniqStrings([...existing.aliases, ...entry.aliases]),
+        description: entry.description ?? existing.description,
+        path: entry.path ?? existing.path,
+        sourceType: entry.sourceType ?? existing.sourceType,
+        version: entry.version ?? existing.version,
       });
     }
     sessionSkillsBySessionKey.set(sessionKey, Array.from(merged.values()));
@@ -520,8 +607,17 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         const raw = fs.readFileSync(skillFile, "utf8");
         const frontmatter = extractFrontmatter(raw);
         const skillName = frontmatter.name?.trim() || dirent.name;
+        const description = extractSkillDescription(raw, frontmatter);
+        const version = frontmatter.version?.trim()
+          || readPackageVersion(path.join(skillDir, "package.json"));
         workspaceEntries.push(
-          buildSkillCatalogEntry(skillName, frontmatter.description, [dirent.name]),
+          buildSkillCatalogEntry(skillName, {
+            description,
+            path: skillFile,
+            sourceType: "workspace",
+            version,
+            extraAliases: [dirent.name],
+          }),
         );
       }
       if (workspaceEntries.length > 0) {
@@ -553,7 +649,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             origin?: { provider?: string; surface?: string };
             modelProvider?: string;
             model?: string;
-            skillsSnapshot?: { resolvedSkills?: Array<{ name?: string; description?: string }> };
+            skillsSnapshot?: { resolvedSkills?: Array<Record<string, unknown>> };
           }>;
           const agentDir = getAgentNameFromSessionsIndexPath(sessionsIndexPath);
           const configuredAgent = agentDir ? configuredAgentsById.get(agentDir) : undefined;
@@ -568,12 +664,11 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             }
             if (Array.isArray(sessionState?.skillsSnapshot?.resolvedSkills)) {
               const skillEntries = sessionState.skillsSnapshot.resolvedSkills
-                .map((skill) => {
-                  const skillName = typeof skill?.name === "string" ? skill.name.trim() : "";
-                  const description =
-                    typeof skill?.description === "string" ? skill.description.trim() : undefined;
-                  return skillName ? buildSkillCatalogEntry(skillName, description) : undefined;
-                })
+                .map((skill) => (
+                  skill && typeof skill === "object"
+                    ? parseSkillCatalogEntryFromResolvedSkill(stateDir, skill)
+                    : undefined
+                ))
                 .filter(Boolean) as SkillCatalogEntry[];
               if (skillEntries.length > 0) {
                 sessionSkillsBySessionKey.set(sessionKey, skillEntries);
@@ -886,6 +981,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         originSurface: sessionMetaBySessionKey.get(sessionKey)?.originSurface,
         sessionCwd,
         sessionSkills: (sessionSkillsBySessionKey.get(sessionKey) ?? []).map((skill) => skill.name),
+        sessionSkillCatalog: sessionSkillsBySessionKey.get(sessionKey) ?? [],
         mentionedSkillNames: Array.from(mentionedSkillNames),
         invokedSkillNames: Array.from(currentRunInvokedSkillNames),
         toolCallSkillNamesById: currentRunToolCallSkillNamesById,

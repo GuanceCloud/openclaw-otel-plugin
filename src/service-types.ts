@@ -15,6 +15,9 @@ export type ActiveSkillSpan = {
   ctx: any;
   startedAt: number;
   source: "runtime" | "transcript";
+  metadata?: SkillCatalogEntry;
+  resultStatus?: "completed" | "error";
+  lastCallId?: string;
 };
 
 export type ActiveSkillInvocationSpan = {
@@ -25,6 +28,8 @@ export type ActiveSkillInvocationSpan = {
   startedAt: number;
   source: "runtime";
   toolName?: string;
+  metadata?: SkillCatalogEntry;
+  resultStatus?: "completed" | "error";
 };
 
 export type ActiveToolSpan = {
@@ -42,6 +47,7 @@ export type ActiveToolSpan = {
   namespace?: string;
   mcpToolName?: string;
   mcpHost?: string;
+  skillMetadata?: SkillCatalogEntry;
 };
 
 export type RunAggregate = {
@@ -224,6 +230,7 @@ export type SessionSnapshot = {
   originSurface?: string;
   sessionCwd?: string;
   sessionSkills?: string[];
+  sessionSkillCatalog?: SkillCatalogEntry[];
   mentionedSkillNames?: string[];
   invokedSkillNames?: string[];
   toolCallSkillNamesById?: Record<string, string>;
@@ -276,9 +283,15 @@ export type CompletedTrajectoryRun = {
   usage?: RunUsageTotals;
 };
 
+export type SkillSourceType = "system" | "user" | "workspace";
+
 export type SkillCatalogEntry = {
   name: string;
   aliases: string[];
+  description?: string;
+  path?: string;
+  sourceType?: SkillSourceType;
+  version?: string;
 };
 
 export type SessionSnapshotStore = {

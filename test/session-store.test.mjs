@@ -84,6 +84,24 @@ test("session store reads sessions index from agents/main and extracts invoked s
     "call-monitor": "monitor",
     "call-dql": "dql",
   });
+  assert.deepEqual(snapshot.sessionSkillCatalog, [
+    {
+      name: "monitor",
+      aliases: ["monitor", "生成监控器"],
+      description: "生成监控器",
+      path: path.join(workspaceSkillsDir, "monitor", "SKILL.md"),
+      sourceType: "workspace",
+      version: undefined,
+    },
+    {
+      name: "dql",
+      aliases: ["dql", "校验 DQL"],
+      description: "校验 DQL",
+      path: path.join(workspaceSkillsDir, "dql", "SKILL.md"),
+      sourceType: "workspace",
+      version: undefined,
+    },
+  ]);
   assert.deepEqual(snapshot.lastRunAssistantTurns, [
     {
       startedAt: undefined,

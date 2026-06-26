@@ -9,6 +9,7 @@ import type {
   RuntimeMetadata,
   SessionSnapshot,
   SkillCatalogEntry,
+  SkillSourceType,
 } from "./service-types.js";
 
 const PREVIEW_LIMIT = 1200;
@@ -886,7 +887,7 @@ function normalizeGenAiKeys(
     if (!key.startsWith("gen_ai.") || value === undefined || value === "") {
       continue;
     }
-    if (OFFICIAL_GEN_AI_ATTR_KEYS.has(key)) {
+    if (OFFICIAL_GEN_AI_ATTR_KEYS.has(key) || key.startsWith("gen_ai.skill1.")) {
       continue;
     }
     const flattened = flattenGenAiKey(key);
@@ -1064,7 +1065,6 @@ const OMITTED_AGENT_IDENTITY_ATTR_KEYS = new Set([
 
 const LEGACY_TRACE_CONTEXT_KEYS = new Set([
   "skill.call_id",
-  "skill.name",
   "skill.kind",
   "skill.source",
   "output.kind",
@@ -1587,6 +1587,9 @@ export function buildToolAttrs(
     phase?: string;
     outcome?: string;
     skillName?: string;
+    skill?: SkillCatalogEntry;
+    skillCallId?: string;
+    skillResultStatus?: "completed" | "error";
   },
 ): Record<string, string | number | boolean | undefined> {
   const toolIdentity = inferMcpToolIdentity(
@@ -1612,6 +1615,16 @@ export function buildToolAttrs(
     "openclaw.tool.name": toolName,
     "openclaw.tool.call_id": toolCallId,
     "openclaw.skill.name": options?.skillName,
+    "openclaw.skill.description": options?.skill?.description,
+    "openclaw.skill.path": options?.skill?.path,
+    "openclaw.skill.source.type": options?.skill?.sourceType,
+    skill_result_status: options?.skillResultStatus,
+    "gen_ai.skill1.name": options?.skillName,
+    "gen_ai.skill1.description": options?.skill?.description,
+    "gen_ai.skill1.path": options?.skill?.path,
+    "gen_ai.skill1.source.type": options?.skill?.sourceType,
+    "gen_ai.skill1.result_status": options?.skillResultStatus,
+    "gen_ai.skill1.version": options?.skill?.version,
     "openclaw.tool.phase": options?.phase,
     "openclaw.tool.result_status": options?.outcome,
     "openclaw.tool.arg_keys": summarizeToolArgKeys(options?.args),
@@ -1625,6 +1638,39 @@ export function buildToolAttrs(
     "openclaw.tool.meta.preview": clipValuePreview(options?.meta),
     "openclaw.tool.result.preview": clipValuePreview(options?.result),
     "openclaw.tool.partial_result.preview": clipValuePreview(options?.partialResult),
+    ...(options?.skillCallId ? { "openclaw.skill.call_id": options.skillCallId } : {}),
+  };
+}
+
+export function buildSkillSpanAttrs(
+  skillName: string,
+  options?: {
+    kind?: "call";
+    source?: "runtime" | "transcript";
+    skill?: SkillCatalogEntry;
+    callId?: string;
+    toolName?: string;
+    resultStatus?: "completed" | "error";
+  },
+): Record<string, string | number | boolean | undefined> {
+  return {
+    "span.kind": "skill",
+    "openclaw.skill.name": skillName,
+    "openclaw.skill.kind": options?.kind,
+    "openclaw.skill.source": options?.source,
+    "openclaw.skill.description": options?.skill?.description,
+    "openclaw.skill.path": options?.skill?.path,
+    "openclaw.skill.source.type": options?.skill?.sourceType,
+    "openclaw.skill.call_id": options?.callId,
+    skill_result_status: options?.resultStatus,
+    "openclaw.tool.call_id": options?.callId,
+    "openclaw.tool.name": options?.toolName,
+    "gen_ai.skill1.name": skillName,
+    "gen_ai.skill1.path": options?.skill?.path,
+    "gen_ai.skill1.source.type": options?.skill?.sourceType,
+    "gen_ai.skill1.result_status": options?.resultStatus,
+    "gen_ai.skill1.description": options?.skill?.description,
+    "gen_ai.skill1.version": options?.skill?.version,
   };
 }
 
@@ -2122,14 +2168,45 @@ export function extractFrontmatter(source: string): Record<string, string> {
   return record;
 }
 
+export function extractSkillDescription(source: string, frontmatter?: Record<string, string>): string | undefined {
+  const frontmatterDescription = frontmatter?.description?.trim();
+  if (frontmatterDescription) {
+    return frontmatterDescription;
+  }
+  const body = source.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+  if (!body) {
+    return undefined;
+  }
+  for (const paragraph of body.split(/\n\s*\n/g)) {
+    const normalized = paragraph
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"));
+    if (normalized.length === 0) {
+      continue;
+    }
+    return clipPreview(normalized.join(" "));
+  }
+  return undefined;
+}
+
 export function buildSkillCatalogEntry(
   name: string,
-  description?: string,
-  extraAliases?: string[],
+  options?: {
+    description?: string;
+    path?: string;
+    sourceType?: SkillSourceType;
+    version?: string;
+    extraAliases?: string[];
+  },
 ): SkillCatalogEntry {
   return {
     name,
-    aliases: uniqStrings([name, ...(extraAliases ?? []), ...splitAliasCandidates(description)]),
+    aliases: uniqStrings([name, ...(options?.extraAliases ?? []), ...splitAliasCandidates(options?.description)]),
+    description: options?.description,
+    path: options?.path,
+    sourceType: options?.sourceType,
+    version: options?.version,
   };
 }
 

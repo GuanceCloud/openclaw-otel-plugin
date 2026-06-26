@@ -128,6 +128,9 @@ test("skill file reads create a dedicated skill call span", () => {
   );
 
   assert.equal(skillCallSpan.ended, true);
+  assert.equal(skillSummarySpan.attributes.skill_result_status, "completed");
+  assert.equal(skillCallSpan.attributes.skill_result_status, "completed");
+  assert.equal(toolSpan.attributes.skill_result_status, "completed");
   assert.equal(run.skillInvocationSpans.size, 0);
 });
 
@@ -609,6 +612,16 @@ test("tool and skill spans backfill session attrs from the snapshot", () => {
         sessionFile: "session.jsonl",
         sessionId: "sess-1",
         lastChannel: "cli",
+        sessionSkillCatalog: [
+          {
+            name: "monitor",
+            aliases: ["monitor"],
+            description: "生成监控器",
+            path: "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md",
+            sourceType: "workspace",
+            version: "1.2.3",
+          },
+        ],
         mtimeMs: 1,
       };
     },
@@ -678,6 +691,25 @@ test("tool and skill spans backfill session attrs from the snapshot", () => {
   assert.equal(toolSpan.attributes.channel, "cli");
   assert.equal(toolSpan.attributes["gen_ai.session_id"], undefined);
   assert.equal(toolSpan.attributes["gen_ai.agent_channel"], undefined);
+  assert.equal(skillSummarySpan.attributes["skill.name"], "monitor");
+  assert.equal(skillSummarySpan.attributes["skill.description"], "生成监控器");
+  assert.equal(skillSummarySpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
+  assert.equal(skillSummarySpan.attributes["skill.source.type"], "workspace");
+  assert.equal(skillSummarySpan.attributes.skill_result_status, "completed");
+  assert.equal(skillSummarySpan.attributes["gen_ai.skill1.name"], "monitor");
+  assert.equal(skillSummarySpan.attributes["gen_ai.skill1.version"], "1.2.3");
+  assert.equal(skillCallSpan.attributes["skill.name"], "monitor");
+  assert.equal(skillCallSpan.attributes["skill.description"], "生成监控器");
+  assert.equal(skillCallSpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
+  assert.equal(skillCallSpan.attributes["skill.source.type"], "workspace");
+  assert.equal(skillCallSpan.attributes.skill_result_status, "completed");
+  assert.equal(toolSpan.attributes["skill.name"], "monitor");
+  assert.equal(toolSpan.attributes["skill.description"], "生成监控器");
+  assert.equal(toolSpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
+  assert.equal(toolSpan.attributes["skill.source.type"], "workspace");
+  assert.equal(toolSpan.attributes.skill_result_status, "completed");
+  assert.equal(toolSpan.attributes["gen_ai.skill1.name"], "monitor");
+  assert.equal(toolSpan.attributes["gen_ai.skill1.version"], "1.2.3");
 });
 
 test("tool completion records separate tool and skill agent operation metrics", () => {
@@ -733,6 +765,16 @@ test("tool completion records separate tool and skill agent operation metrics", 
         mtimeMs: 1,
         sessionId: "sid-1",
         lastModel: "gpt-5",
+        sessionSkillCatalog: [
+          {
+            name: "dashboard",
+            aliases: ["dashboard"],
+            description: "生成 Dashboard",
+            path: "/home/liurui/.openclaw/workspace/skills/dashboard/SKILL.md",
+            sourceType: "workspace",
+            version: "0.4.1",
+          },
+        ],
         toolCallSkillNamesById: {
           "call-1": "dashboard",
         },

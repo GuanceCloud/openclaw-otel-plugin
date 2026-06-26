@@ -35,7 +35,12 @@
 - `tool:<name>` 仍然表示最终落到外部操作 / 本地执行 / MCP 调用的那一步
 - transcript 回放时，如果只能确认“这个 skill 被使用过”，会补 `skill:<name>`；只有能和具体 tool call 对上时，才会落 `skill_call:<name>`
 - 如果无法可靠推断 skill 身份，插件只保留 `tool:*`，不会凭空制造泛化 skill span
-- 在官方 GenAI 语义里，当前实现 **不会** 额外发明 `gen_ai.skill.*` 字段；skill 仍通过兼容字段和 span 层级表达，并统一映射到 `gen_ai.operation.name=execute_tool`
+- 截至当前 OpenTelemetry GenAI 语义，`skill` 仍没有稳定的一等标准字段
+- 当前实现因此分三层表达同一组 skill 语义：
+  - 兼容短字段：`skill_name`、`skill_call_id`、`skill_source`、`skill_type`
+  - 推荐 trace 字段：`skill.name`、`skill.description`、`skill.path`、`skill.source.type`、`skill_result_status`
+  - 项目扩展字段：`gen_ai.skill1.*`
+- skill / skill_call / tool 的 GenAI operation 仍统一映射到 `gen_ai.operation.name=execute_tool`
 
 ## 最终 Span 规范
 
@@ -284,8 +289,10 @@
 补充说明：
 
 - 当前实现没有独立输出官方 `gen_ai.skill.*` 字段
-- skill 相关信息仍通过：
+- skill 相关信息当前通过：
   - span 名称：`skill:<name>`、`skill_call:<name>`
+  - 推荐 trace 字段：`skill.*`
+  - 项目扩展字段：`gen_ai.skill1.*`
   - 兼容字段：`skill_name`、`skill_call_id`、`skill_source`、`skill_type`
   - operation 语义：`gen_ai.operation.name=execute_tool`
   来共同表达
@@ -352,15 +359,28 @@
 
 ## Skill 相关字段
 
+截至 2026-06-26，`skill` 仍没有 OpenTelemetry GenAI 已落地的一等字段。当前插件保留兼容短字段，同时统一补齐 `skill.*` 与项目扩展字段 `gen_ai.skill1.*`。
+
+| 字段 | 含义 | 常见 span |
+| --- | --- | --- |
+| `skill.name` | skill 名称，来自 `SKILL.md` 所在目录名或 frontmatter `name` | `skill:*`、`skill_call:*`、`tool:*` |
+| `skill.description` | skill 描述；优先取 `SKILL.md` frontmatter `description`，没有时回退正文首段 | `skill:*`、`skill_call:*`、`tool:*` |
+| `skill.path` | skill 入口文件绝对路径，当前识别到的 `.../SKILL.md` | `skill:*`、`skill_call:*`、`tool:*` |
+| `skill_call_id` | skill 对应的 tool call ID，用于把 `skill:*` / `skill_call:*` 与触发它的工具调用关联起来 | `skill:*`、`skill_call:*`、`tool:*` |
+| `skill.source.type` | skill 来源类型；当前取值为 `system`、`user`、`workspace` | `skill:*`、`skill_call:*`、`tool:*` |
+| `skill_result_status` | skill 结果状态；当前按关联 tool 是否报错映射为 `completed` 或 `error` | `skill:*`、`skill_call:*`、`tool:*` |
+| `gen_ai.skill1.name` | skill 名称的 `gen_ai.*` 项目扩展字段 | `skill:*`、`skill_call:*`、`tool:*` |
+| `gen_ai.skill1.path` | skill 入口文件绝对路径的 `gen_ai.*` 项目扩展字段 | `skill:*`、`skill_call:*`、`tool:*` |
+| `gen_ai.skill1.source.type` | skill 来源类型的 `gen_ai.*` 项目扩展字段 | `skill:*`、`skill_call:*`、`tool:*` |
+| `gen_ai.skill1.result_status` | skill 结果状态的 `gen_ai.*` 项目扩展字段 | `skill:*`、`skill_call:*`、`tool:*` |
+| `gen_ai.skill1.description` | skill 描述；与 `skill.description` 对齐 | `skill:*`、`skill_call:*`、`tool:*` |
+| `gen_ai.skill1.version` | skill 版本；优先取 `SKILL.md` frontmatter `version`，其次取同目录 `package.json.version` | `skill:*`、`skill_call:*`、`tool:*` |
+
+兼容字段仍然保留：
+
 | 字段 | 描述 |
 | --- | --- |
-| `skill_call_id` | skill call 标识；当前与具体 `tool_call_id` 对齐 |
-| `skill_name` | skill 名称；例如 `dashboard`、`dql`、`monitor` |
-| `skill_type` | skill 类型；当前 `skill_call:*` 固定为 `call`，`skill:*` 汇总 span 不强制写该字段 |
-| `skill_source` | skill 来源；当前可能值为 `runtime`、`transcript` |
-
-补充说明：
-
-- `skill_name` 会同时落在 `skill:*`、`skill_call:*`，以及已归因的 `tool:*` 上
-- `skill_call_id` 主要落在 `skill_call:*`，并与关联 `tool:*` 共享同一个 call id
-- 当前 skill 字段属于插件兼容字段，不代表官方 OTEL 已定义独立 skill 属性集
+| `skill_name` | 兼容短字段；与 `skill.name` 表达同一 skill 身份 |
+| `skill_call_id` | 兼容短字段；与上表相同 |
+| `skill_source` | 兼容短字段；保留运行期归因来源，当前主要为 `runtime` / `transcript` |
+| `skill_type` | 兼容短字段；当前 `skill_call:*` 一般为 `call` |

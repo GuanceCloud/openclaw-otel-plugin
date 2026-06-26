@@ -6,6 +6,7 @@ import type {
   ActiveToolSpan,
   MetricInstruments,
   SessionSnapshot,
+  SkillCatalogEntry,
 } from "./service-types.js";
 import {
   addEvent,
@@ -15,6 +16,7 @@ import {
   buildGenAiClientModelMetricAttrs,
   buildGenAiClientSkillMetricAttrs,
   buildGenAiClientToolMetricAttrs,
+  buildSkillSpanAttrs,
   buildToolAttrs,
   clipPreview,
   clipValuePreview,
@@ -166,6 +168,38 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     };
   };
 
+  const mergeSkillMetadata = (
+    current: SkillCatalogEntry | undefined,
+    incoming: SkillCatalogEntry | undefined,
+  ): SkillCatalogEntry | undefined => {
+    if (!incoming) {
+      return current;
+    }
+    if (!current) {
+      return incoming;
+    }
+    return {
+      name: incoming.name || current.name,
+      aliases: Array.from(new Set([...(current.aliases ?? []), ...(incoming.aliases ?? [])])),
+      description: incoming.description ?? current.description,
+      path: incoming.path ?? current.path,
+      sourceType: incoming.sourceType ?? current.sourceType,
+      version: incoming.version ?? current.version,
+    };
+  };
+
+  const resolveSkillMetadata = (
+    evt: SessionEvent,
+    skillName: string | undefined,
+  ): SkillCatalogEntry | undefined => {
+    const normalizedSkillName = skillName?.trim();
+    if (!normalizedSkillName) {
+      return undefined;
+    }
+    const snapshot = loadSessionSnapshot(evt.sessionKey);
+    return snapshot?.sessionSkillCatalog?.find((entry) => entry.name === normalizedSkillName);
+  };
+
   const recordGenAiAgentTokenUsage = (
     provider: string | undefined,
     model: string | undefined,
@@ -290,6 +324,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (!normalizedSkillName) {
       return undefined;
     }
+    const resolvedMetadata = resolveSkillMetadata(evt, normalizedSkillName);
     run.usedSkillNames.add(normalizedSkillName);
     const existing = run.skillSpans.get(normalizedSkillName);
     if (existing) {
@@ -297,11 +332,15 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       if (existing.source !== "runtime" && source === "runtime") {
         existing.source = "runtime";
       }
+      existing.metadata = mergeSkillMetadata(existing.metadata, resolvedMetadata);
       existing.span.setAttributes(traceAttrs({
         ...buildSessionSpanAttrs(evt),
-        "span.kind": "skill",
-        "openclaw.skill.name": normalizedSkillName,
-        "openclaw.skill.source": existing.source,
+        ...buildSkillSpanAttrs(normalizedSkillName, {
+          source: existing.source,
+          skill: existing.metadata,
+          callId: existing.lastCallId,
+          resultStatus: existing.resultStatus,
+        }),
       }));
       return existing;
     }
@@ -319,9 +358,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         kind: SpanKind.INTERNAL,
         attributes: traceAttrs({
           ...buildSessionSpanAttrs(evt),
-          "span.kind": "skill",
-          "openclaw.skill.name": normalizedSkillName,
-          "openclaw.skill.source": source,
+          ...buildSkillSpanAttrs(normalizedSkillName, {
+            source,
+            skill: resolvedMetadata,
+          }),
         }),
       },
       run.ctx,
@@ -333,6 +373,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       ctx: trace.setSpan(run.ctx, span),
       startedAt: startTs,
       source,
+      metadata: resolvedMetadata,
     };
     run.skillSpans.set(normalizedSkillName, skillState);
     run.activeSkillName = normalizedSkillName;
@@ -364,20 +405,23 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (!normalizedSkillName || !normalizedToolCallId) {
       return undefined;
     }
+    const resolvedMetadata = resolveSkillMetadata(evt, normalizedSkillName);
     const existing = run.skillInvocationSpans.get(normalizedToolCallId);
     if (existing) {
       if (toolName?.trim()) {
         existing.toolName = toolName.trim();
       }
+      existing.metadata = mergeSkillMetadata(existing.metadata, resolvedMetadata);
       existing.span.setAttributes(traceAttrs({
         ...buildSessionSpanAttrs(evt),
-        "span.kind": "skill",
-        "openclaw.skill.name": normalizedSkillName,
-        "openclaw.skill.kind": "call",
-        "openclaw.skill.source": existing.source,
-        "openclaw.skill.call_id": normalizedToolCallId,
-        "openclaw.tool.call_id": normalizedToolCallId,
-        "openclaw.tool.name": existing.toolName,
+        ...buildSkillSpanAttrs(normalizedSkillName, {
+          kind: "call",
+          source: existing.source,
+          skill: existing.metadata,
+          callId: normalizedToolCallId,
+          toolName: existing.toolName,
+          resultStatus: existing.resultStatus,
+        }),
       }));
       return existing;
     }
@@ -392,13 +436,13 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         kind: SpanKind.INTERNAL,
         attributes: traceAttrs({
           ...buildSessionSpanAttrs(evt),
-          "span.kind": "skill",
-          "openclaw.skill.name": normalizedSkillName,
-          "openclaw.skill.kind": "call",
-          "openclaw.skill.source": "runtime",
-          "openclaw.skill.call_id": normalizedToolCallId,
-          "openclaw.tool.call_id": normalizedToolCallId,
-          "openclaw.tool.name": toolName,
+          ...buildSkillSpanAttrs(normalizedSkillName, {
+            kind: "call",
+            source: "runtime",
+            skill: resolvedMetadata,
+            callId: normalizedToolCallId,
+            toolName,
+          }),
         }),
       },
       summaryCtx,
@@ -411,8 +455,23 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       startedAt: startTs,
       source: "runtime",
       toolName: toolName?.trim() || undefined,
+      metadata: resolvedMetadata,
     };
     run.skillInvocationSpans.set(normalizedToolCallId, skillInvocation);
+    const summarySpan = run.skillSpans.get(normalizedSkillName);
+    if (summarySpan) {
+      summarySpan.lastCallId = normalizedToolCallId;
+      summarySpan.metadata = mergeSkillMetadata(summarySpan.metadata, resolvedMetadata);
+      summarySpan.span.setAttributes(traceAttrs({
+        ...buildSessionSpanAttrs(evt),
+        ...buildSkillSpanAttrs(normalizedSkillName, {
+          source: summarySpan.source,
+          skill: summarySpan.metadata,
+          callId: summarySpan.lastCallId,
+          resultStatus: summarySpan.resultStatus,
+        }),
+      }));
+    }
     return skillInvocation;
   };
 
@@ -434,16 +493,33 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (!invocation) {
       return;
     }
+    invocation.resultStatus = isError ? "error" : "completed";
     invocation.span.setAttributes(traceAttrs({
       ...buildSessionSpanAttrs(evt),
-      "span.kind": "skill",
-      "openclaw.skill.name": invocation.name,
-      "openclaw.skill.kind": "call",
-      "openclaw.skill.source": invocation.source,
-      "openclaw.skill.call_id": invocation.callId,
-      "openclaw.tool.call_id": invocation.callId,
-      "openclaw.tool.name": invocation.toolName,
+      ...buildSkillSpanAttrs(invocation.name, {
+        kind: "call",
+        source: invocation.source,
+        skill: invocation.metadata,
+        callId: invocation.callId,
+        toolName: invocation.toolName,
+        resultStatus: invocation.resultStatus,
+      }),
     }));
+    const summarySpan = run.skillSpans.get(invocation.name);
+    if (summarySpan) {
+      summarySpan.lastCallId = invocation.callId;
+      summarySpan.metadata = mergeSkillMetadata(summarySpan.metadata, invocation.metadata);
+      summarySpan.resultStatus = isError ? "error" : summarySpan.resultStatus ?? "completed";
+      summarySpan.span.setAttributes(traceAttrs({
+        ...buildSessionSpanAttrs(evt),
+        ...buildSkillSpanAttrs(summarySpan.name, {
+          source: summarySpan.source,
+          skill: summarySpan.metadata,
+          callId: summarySpan.lastCallId,
+          resultStatus: summarySpan.resultStatus,
+        }),
+      }));
+    }
     if (isError) {
       setError(invocation.span, SpanStatusCode.ERROR, "skill call error");
     } else {
@@ -511,17 +587,23 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       attrs?.["openclaw.tool.target"] as string | undefined,
       attrs?.["openclaw.tool.command"] as string | undefined,
     );
+    const skillMetadata = resolveSkillMetadata(evt, skillName);
     if (skillName) {
       ensureSkillSpan(evt, skillName, "runtime");
       ensureSkillInvocationSpan(evt, skillName, normalizedToolCallId, normalizedToolName);
     }
     const existing = run.toolSpans.get(normalizedToolCallId);
     if (existing) {
+      existing.skillName = existing.skillName ?? skillName;
+      existing.skillMetadata = mergeSkillMetadata(existing.skillMetadata, skillMetadata);
       const merged = mergeToolIdentity(existing);
       existing.span.setAttributes(traceAttrs({
         ...buildSessionSpanAttrs(evt),
         ...buildToolAttrs(normalizedToolName, normalizedToolCallId, {
           skillName: existing.skillName,
+          skill: existing.skillMetadata,
+          skillCallId: existing.skillName ? normalizedToolCallId : undefined,
+          skillResultStatus: existing.hasError ? "error" : undefined,
         }),
         "openclaw.tool.arg_keys": merged.argKeys,
         "openclaw.tool.target": merged.target,
@@ -577,6 +659,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           ...buildSessionSpanAttrs(evt),
           ...buildToolAttrs(normalizedToolName, normalizedToolCallId, {
             skillName,
+            skill: skillMetadata,
+            skillCallId: skillName ? normalizedToolCallId : undefined,
           }),
           ...attrs,
         }),
@@ -590,6 +674,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       ctx: trace.setSpan(parentCtx, span),
       startedAt: startTs,
       skillName,
+      skillMetadata,
       argKeys: merged.argKeys,
       target: merged.target,
       command: merged.command,
@@ -627,6 +712,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         ...buildSessionSpanAttrs(evt),
         ...buildToolAttrs(tool.name, tool.toolCallId, {
           skillName: tool.skillName,
+          skill: tool.skillMetadata,
+          skillCallId: tool.skillName ? tool.toolCallId : undefined,
           partialResult,
         }),
         "openclaw.tool.arg_keys": tool.argKeys,
@@ -694,6 +781,9 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       ...buildSessionSpanAttrs(evt),
       ...buildToolAttrs(tool.name, tool.toolCallId, {
         skillName: tool.skillName,
+        skill: tool.skillMetadata,
+        skillCallId: tool.skillName ? tool.toolCallId : undefined,
+        skillResultStatus: finalResultStatus,
         meta: payload?.meta,
         result: payload?.result,
         outcome: isError ? "error" : "completed",
@@ -1194,11 +1284,15 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     }
     syncToolSummaryAttrs({ sessionKey }, run);
     if (skillName) {
-      run.skillSpans.get(skillName)?.span.setAttributes(traceAttrs({
+      const skill = run.skillSpans.get(skillName);
+      skill?.span.setAttributes(traceAttrs({
         ...buildSessionSpanAttrs({ sessionKey, sessionId, channel }),
-        "span.kind": "skill",
-        "openclaw.skill.name": skillName,
-        "openclaw.skill.source": "runtime",
+        ...buildSkillSpanAttrs(skillName, {
+          source: "runtime",
+          skill: skill?.metadata,
+          callId: skill?.lastCallId,
+          resultStatus: skill?.resultStatus,
+        }),
         "openclaw.tools": Array.from(run.usedToolNames).join(", "),
         "openclaw.tool.count": run.usedToolNames.size,
       }));
@@ -1213,6 +1307,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           args: evt.data.args,
           phase: "start",
           skillName,
+          skill: resolveSkillMetadata(toolEvt, skillName),
+          skillCallId: skillName ? toolCallId : undefined,
         }),
       });
       return;
@@ -1233,6 +1329,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       ...buildToolAttrs(toolName, toolCallId, {
         phase: String(evt.data.phase ?? "unknown"),
         skillName,
+        skill: resolveSkillMetadata(toolEvt, skillName),
+        skillCallId: skillName ? toolCallId : undefined,
       }),
     });
   };
@@ -1242,6 +1340,9 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       tool.span.setAttributes(traceAttrs({
         ...buildToolAttrs(tool.name, tool.toolCallId, {
           skillName: tool.skillName,
+          skill: tool.skillMetadata,
+          skillCallId: tool.skillName ? tool.toolCallId : undefined,
+          skillResultStatus: tool.hasError ? "error" : "completed",
           outcome: tool.hasError ? "error" : "completed",
         }),
         "openclaw.tool.arg_keys": tool.argKeys,
@@ -1259,24 +1360,30 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     }
     current.toolSpans.clear();
     for (const invocation of current.skillInvocationSpans.values()) {
+      invocation.resultStatus = invocation.resultStatus ?? "completed";
       invocation.span.setAttributes(traceAttrs({
-        "span.kind": "skill",
-        "openclaw.skill.name": invocation.name,
-        "openclaw.skill.kind": "call",
-        "openclaw.skill.source": invocation.source,
-        "openclaw.skill.call_id": invocation.callId,
-        "openclaw.tool.call_id": invocation.callId,
-        "openclaw.tool.name": invocation.toolName,
+        ...buildSkillSpanAttrs(invocation.name, {
+          kind: "call",
+          source: invocation.source,
+          skill: invocation.metadata,
+          callId: invocation.callId,
+          toolName: invocation.toolName,
+          resultStatus: invocation.resultStatus,
+        }),
       }));
       invocation.span.setStatus({ code: SpanStatusCode.OK });
       endSpanSafely(invocation.span, endTime);
     }
     current.skillInvocationSpans.clear();
     for (const skill of current.skillSpans.values()) {
+      skill.resultStatus = skill.resultStatus ?? "completed";
       skill.span.setAttributes(traceAttrs({
-        "span.kind": "skill",
-        "openclaw.skill.name": skill.name,
-        "openclaw.skill.source": skill.source,
+        ...buildSkillSpanAttrs(skill.name, {
+          source: skill.source,
+          skill: skill.metadata,
+          callId: skill.lastCallId,
+          resultStatus: skill.resultStatus,
+        }),
       }));
       skill.span.setStatus({ code: SpanStatusCode.OK });
       endSpanSafely(skill.span, endTime);
