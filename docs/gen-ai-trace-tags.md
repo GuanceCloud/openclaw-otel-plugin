@@ -16,11 +16,26 @@
   - `openclaw_request`：一条用户消息对应的一次完整请求
   - `invoke_agent`：这次请求里的 agent 主执行窗口
   - `llm`：agent 在执行过程中发起的一次模型调用
-  - `skill:* / tool:*`：agent 在执行过程中使用的能力与外部操作
+  - `skill:* / skill_call:* / tool:*`：agent 在执行过程中使用的能力层与外部操作
 - 因此：
   - `llm` 不等于 `agent`
   - `invoke_agent` 才是最接近 `AI Agent execution` 的 span
   - 多轮 `llm`、`tool:*`、`skill:*` 共同构成一次 agent 执行
+
+## Skill 语义边界
+
+- 当前代码把 OpenClaw `skill` 定义为 **agent 执行中的能力层 / orchestration context**，不是一次独立的模型调用
+- skill 相关 span 分成两层：
+  - `skill:<name>`：本轮请求内某个 skill 的汇总 span
+  - `skill_call:<name>`：某次实际 skill 调用的执行 span
+- 当 tool 能归因到某个 skill 时，父子关系为：
+  - `invoke_agent -> skill:<name> -> skill_call:<name> -> tool:<name>`
+- `skill:<name>` 主要表达“本轮 agent 用到了哪个能力”
+- `skill_call:<name>` 主要表达“这次具体的能力调用窗口”
+- `tool:<name>` 仍然表示最终落到外部操作 / 本地执行 / MCP 调用的那一步
+- transcript 回放时，如果只能确认“这个 skill 被使用过”，会补 `skill:<name>`；只有能和具体 tool call 对上时，才会落 `skill_call:<name>`
+- 如果无法可靠推断 skill 身份，插件只保留 `tool:*`，不会凭空制造泛化 skill span
+- 在官方 GenAI 语义里，当前实现 **不会** 额外发明 `gen_ai.skill.*` 字段；skill 仍通过兼容字段和 span 层级表达，并统一映射到 `gen_ai.operation.name=execute_tool`
 
 ## 最终 Span 规范
 
@@ -102,6 +117,43 @@
   - 输入预览
   - 输出预览
   - token 使用量
+
+### `skill:<name>`
+
+表示“本轮 agent 请求里，某个 skill 被激活并参与执行”。
+
+用途：
+
+- 作为 `invoke_agent` 下的能力层汇总 span
+- 汇总一个 skill 在本轮请求内的存在与持续时间
+- 表达 skill 来源，例如：
+  - `runtime`
+  - `transcript`
+- 作为 `skill_call:<name>` 和相关 `tool:*` 的父级上下文
+
+补充说明：
+
+- 同一个 skill 在同一轮请求里默认只保留一个 `skill:<name>` 汇总 span
+- 该 span 代表“这个能力被用到了”，不是某一次具体 tool 调用
+
+### `skill_call:<name>`
+
+表示“一次具体的 skill 调用窗口”。
+
+用途：
+
+- 作为 `skill:<name>` 下的子 span
+- 按具体 `tool_call_id` 记录一次 skill 调用
+- 承载本次 skill 调用关联的：
+  - `skill_call_id`
+  - `tool_call_id`
+  - `tool_name`
+
+补充说明：
+
+- 当前 `skill_call:<name>` 和具体 `tool_call_id` 一一对应
+- 一次 skill 可能触发多个 tool call，因此同一个 `skill:<name>` 下可能出现多个 `skill_call:<name>`
+- skill call 完成后会单独计入 `gen_ai.agent.operation.*`，其 `operation_name=skill`
 
 ## 状态字段说明
 
@@ -211,7 +263,7 @@
 
 | 字段 | 描述 |
 | --- | --- |
-| `gen_ai.operation.name` | 官方 GenAI operation 名，例如 `chat`、`invoke_agent`、`invoke_workflow`、`execute_tool`、`plan` |
+| `gen_ai.operation.name` | 官方 GenAI operation 名，例如 `chat`、`invoke_agent`、`invoke_workflow`、`execute_tool`、`plan`；当前 `tool` 与 `skill` span 都映射为 `execute_tool` |
 | `error.type` | 错误 span 的低基数错误类型，当前统一为 `error` |
 | `gen_ai.provider.name` | 模型或 Agent 调用的 GenAI provider |
 | `gen_ai.request.model` | 请求模型名 |
@@ -228,6 +280,15 @@
 | `gen_ai.tool.call.arguments` | tool 参数 preview，当前为字符串 |
 | `gen_ai.tool.call.result` | tool 结果 preview，当前为字符串 |
 | `gen_ai.output.type` | 输出类型；当前只在值符合官方枚举时输出 |
+
+补充说明：
+
+- 当前实现没有独立输出官方 `gen_ai.skill.*` 字段
+- skill 相关信息仍通过：
+  - span 名称：`skill:<name>`、`skill_call:<name>`
+  - 兼容字段：`skill_name`、`skill_call_id`、`skill_source`、`skill_type`
+  - operation 语义：`gen_ai.operation.name=execute_tool`
+  来共同表达
 
 ### `request_type` 结果语义
 
@@ -293,7 +354,13 @@
 
 | 字段 | 描述 |
 | --- | --- |
-| `skill_call_id` | skill call 标识 |
-| `skill_name` | skill 名称 |
-| `skill_type` | skill 类型 |
-| `skill_source` | skill 来源 |
+| `skill_call_id` | skill call 标识；当前与具体 `tool_call_id` 对齐 |
+| `skill_name` | skill 名称；例如 `dashboard`、`dql`、`monitor` |
+| `skill_type` | skill 类型；当前 `skill_call:*` 固定为 `call`，`skill:*` 汇总 span 不强制写该字段 |
+| `skill_source` | skill 来源；当前可能值为 `runtime`、`transcript` |
+
+补充说明：
+
+- `skill_name` 会同时落在 `skill:*`、`skill_call:*`，以及已归因的 `tool:*` 上
+- `skill_call_id` 主要落在 `skill_call:*`，并与关联 `tool:*` 共享同一个 call id
+- 当前 skill 字段属于插件兼容字段，不代表官方 OTEL 已定义独立 skill 属性集
