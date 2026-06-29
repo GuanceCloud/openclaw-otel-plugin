@@ -65,7 +65,6 @@ export function buildOtelResourceAttrs(
         ? configuredResourceAttrs.agent_runtime
         : "openclaw",
     agent_version: runtimeMetadata?.openclawVersion,
-    runtime_environment: runtimeMetadata?.runtimeEnvironment,
     ...configuredResourceAttrs,
   });
 }
@@ -163,11 +162,6 @@ function collectTracePayloadSummary(
           ? String(attrs.agent_version)
           : typeof resourceAttrs.agent_version === "string"
             ? String(resourceAttrs.agent_version)
-            : undefined,
-        runtime_environment: typeof attrs.runtime_environment === "string"
-          ? String(attrs.runtime_environment)
-          : typeof resourceAttrs.runtime_environment === "string"
-            ? String(resourceAttrs.runtime_environment)
             : undefined,
       };
       return summary;

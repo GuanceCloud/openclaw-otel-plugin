@@ -23,7 +23,7 @@ Trace notes:
 - One inbound user message maps to one trace
 - `message.processed` replays transcript turns first; trailing `session.state idle` only acts as a fallback close path
 - Transcript replay emits one `llm` per assistant turn so multi-tool sessions show `model -> tool -> model` loops instead of one oversized model span
-- Spans keep compatibility query fields such as `session_id`, `provider_name`, and `request_model`, and also emit official OpenTelemetry GenAI fields such as `gen_ai.conversation.id`, `gen_ai.provider.name`, and `gen_ai.request.model`
+- Spans keep compatibility query fields such as `session_id`, `provider_name`, and `tool_name`, and also emit official OpenTelemetry GenAI fields such as `gen_ai.conversation.id`, `gen_ai.provider.name`, and `gen_ai.tool.name`
 
 ### Metrics
 
@@ -216,7 +216,6 @@ Resource attributes are resolved in this order:
 Runtime metadata may contribute:
 
 - `agent_version`
-- `runtime_environment`
 
 ## Dataway Example
 
@@ -299,7 +298,7 @@ Then send a test message in OpenClaw and query by:
 - Transcript-derived skill spans prefer actually invoked skills over merely mentioned skills
 - If no skill identity can be inferred, the plugin will keep tool spans without fabricating a generic skill span.
 - Tool loop diagnostics are attached to the active tool span when possible; critical loops mark the tool span as error
-- Compatibility query fields such as `session_id`, `session_key`, `tool_name`, `tool_call_id`, `provider_name`, and `request_model` are emitted alongside official GenAI fields such as `gen_ai.conversation.id`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.provider.name`, and `gen_ai.request.model`
+- Compatibility query fields such as `session_id`, `session_key`, `tool_name`, `tool_call_id`, and `provider_name` are emitted alongside official GenAI fields such as `gen_ai.conversation.id`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, and `gen_ai.provider.name`
 
 ## Common Issues
 

@@ -4,6 +4,13 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 ## 2026-06-26
 
+### Request And Agent Span Hygiene
+
+- Stopped writing `request_model`, `response_model`, and `usage_*` summary attributes onto `openclaw_request` and `invoke_agent`; these fields now stay on `llm` spans and metrics only.
+- Kept request / agent summary spans focused on request context, final status, tools, and skills, instead of model-token aggregates.
+- Removed `session_key` from session-scoped metrics and stopped emitting global `runtime_environment` resource attributes.
+- Removed `session_namespace`, `session_agent`, and `session_channel` trace tags derived from `session_key`, and stopped writing `session_state` on GenAI request/runtime metrics.
+
 ### Skill Trace Tags
 
 - Unified skill trace attributes around `skill.*` on `skill:*` / `skill_call:*` / `tool:*`, including `skill.name`, `skill.description`, `skill.path`, `skill.source.type`, and `skill_result_status`.

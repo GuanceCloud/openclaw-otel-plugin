@@ -23,7 +23,7 @@ Trace 说明：
 - 一条入站用户消息对应一条 trace
 - `message.processed` 会优先按 transcript 回放完整 turn；后续 `session.state idle` 只作为 fallback 收尾
 - transcript 回放会按 assistant turn 逐个产出 `llm`，多工具会话会显示成 `model -> tool -> model` 循环，而不是一个超长模型 span
-- Span 会保留 `session_id`、`provider_name`、`request_model` 等兼容查询字段，并同步输出 `gen_ai.conversation.id`、`gen_ai.provider.name`、`gen_ai.request.model` 等官方 OpenTelemetry GenAI 字段
+- Span 会保留 `session_id`、`provider_name`、`tool_name` 等兼容查询字段，并同步输出 `gen_ai.conversation.id`、`gen_ai.provider.name`、`gen_ai.tool.name` 等官方 OpenTelemetry GenAI 字段
 
 ### Metrics
 
@@ -216,7 +216,6 @@ resource attributes 合并顺序：
 运行时元数据可能补充这些字段：
 
 - `agent_version`
-- `runtime_environment`
 
 ## Dataway 配置示例
 
@@ -299,7 +298,7 @@ tail -n 50 ~/.openclaw/logs/gateway.log
 - transcript 推导 skill 时，优先使用“实际调用过的 skill”，而不是只在文本里提到过的 skill
 - 如果无法推导出 skill 身份，插件会保留 tool spans，但不会凭空制造一个通用 skill span
 - `tool.loop` 事件如果能命中活跃 tool span，会直接回写到该 tool span；`critical` 级别会把 tool span 标记为 error
-- 导出时会同时输出兼容查询字段和官方 GenAI 字段，例如 `session_id` / `gen_ai.conversation.id`、`tool_name` / `gen_ai.tool.name`、`tool_call_id` / `gen_ai.tool.call.id`、`provider_name` / `gen_ai.provider.name`、`request_model` / `gen_ai.request.model`
+- 导出时会同时输出兼容查询字段和官方 GenAI 字段，例如 `session_id` / `gen_ai.conversation.id`、`tool_name` / `gen_ai.tool.name`、`tool_call_id` / `gen_ai.tool.call.id`、`provider_name` / `gen_ai.provider.name`
 
 ## 常见问题
 

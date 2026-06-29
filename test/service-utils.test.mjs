@@ -483,9 +483,9 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs.agent_runtime, "openclaw");
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs.session_key, "agent:main:feishu:direct:ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
-  assert.equal(attrs.session_namespace, "agent");
-  assert.equal(attrs.session_agent, "main");
-  assert.equal(attrs.session_channel, "feishu");
+  assert.equal(attrs.session_namespace, undefined);
+  assert.equal(attrs.session_agent, undefined);
+  assert.equal(attrs.session_channel, undefined);
   assert.equal(attrs.session_scope, "direct");
   assert.equal(attrs.session_channel_target, "ou_8f4b1d1bb3cd1cedf6003669dea4b2bf");
   assert.equal(attrs.channel, "webchat");
@@ -584,12 +584,14 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
 test("stringAttrs parses multi-agent session keys with agent name in the second segment", () => {
   const attrs = stringAttrs({
     "openclaw.sessionKey": "agent:coder:main",
+    session_agent: "override-agent",
+    session_channel: "override-channel",
   });
 
   assert.equal(attrs.agent_runtime, "openclaw");
   assert.equal(attrs.session_key, "agent:coder:main");
-  assert.equal(attrs.session_agent, "coder");
-  assert.equal(attrs.session_channel, "main");
+  assert.equal(attrs.session_agent, undefined);
+  assert.equal(attrs.session_channel, undefined);
   assert.equal(attrs["gen_ai.session_key"], undefined);
 });
 
@@ -960,7 +962,6 @@ test("buildSessionMetricAttrs prefers runtime model overrides for session metric
       lastProvider: "snapshot-provider",
       lastModel: "snapshot-model",
     },
-    "agent:main:main",
     {
       modelProvider: "runtime-provider",
       modelName: "runtime-model",
@@ -968,7 +969,7 @@ test("buildSessionMetricAttrs prefers runtime model overrides for session metric
   );
 
   assert.equal(attrs.session_id, "session-1");
-  assert.equal(attrs.session_key, "agent:main:main");
+  assert.equal(attrs.session_key, undefined);
   assert.equal(attrs.model_provider, "runtime-provider");
   assert.equal(attrs.model_name, "runtime-model");
 });
@@ -1063,7 +1064,6 @@ test("GenAI agent metric builders preserve session and request semantics", () =>
       lastProvider: "snapshot-provider",
       lastModel: "snapshot-model",
     },
-    "agent:main:main",
     {
       modelProvider: "runtime-provider",
       modelName: "runtime-model",
@@ -1078,11 +1078,11 @@ test("GenAI agent metric builders preserve session and request semantics", () =>
   assert.equal(requestAttrs["gen_ai.provider.name"], "volcengine-plan");
   assert.equal(requestAttrs["gen_ai.request.model"], "ark-code-latest");
   assert.equal(requestAttrs["gen_ai.conversation.id"], "session-1");
-  assert.equal(requestAttrs.session_state, "idle");
+  assert.equal(requestAttrs.session_state, undefined);
   assert.equal(requestAttrs.outcome, "completed");
 
   assert.equal(sessionAttrs.session_id, "session-1");
-  assert.equal(sessionAttrs.session_key, "agent:main:main");
+  assert.equal(sessionAttrs.session_key, undefined);
   assert.equal(sessionAttrs.provider_name, "runtime-provider");
   assert.equal(sessionAttrs.request_model, "runtime-model");
   assert.equal(sessionAttrs["gen_ai.provider.name"], "runtime-provider");
@@ -1116,7 +1116,7 @@ test("GenAI runtime and skill metric builders use the new namespaces", () => {
   assert.equal(queueAttrs.outcome, "dequeue");
   assert.equal(sessionAttrs.session_id, "session-1");
   assert.equal(sessionAttrs["gen_ai.conversation.id"], "session-1");
-  assert.equal(sessionAttrs.session_state, "processing");
+  assert.equal(sessionAttrs.session_state, undefined);
   assert.equal(sessionAttrs.outcome, "waiting_for_tool");
 });
 

@@ -123,7 +123,6 @@ function resolveResourceAttributes(
   const aliasGroups: Array<[string, string[]]> = [
     ["agent_runtime", ["gen_ai.agent_runtime", "gen_ai_agent_runtime"]],
     ["agent_version", ["gen_ai.agent_version", "gen_ai_agent_version"]],
-    ["runtime_environment", ["gen_ai.runtime_environment", "gen_ai_runtime_environment"]],
   ];
   for (const [canonicalKey, aliasKeys] of aliasGroups) {
     const canonicalValue = normalizeResourceAttrValue(merged[canonicalKey]);
@@ -144,6 +143,9 @@ function resolveResourceAttributes(
       delete merged[aliasKey];
     }
   }
+  delete merged.runtime_environment;
+  delete merged["gen_ai.runtime_environment"];
+  delete merged.gen_ai_runtime_environment;
   return merged;
 }
 

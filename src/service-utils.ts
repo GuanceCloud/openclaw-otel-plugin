@@ -914,15 +914,6 @@ function withCanonicalAliases(
   const sessionKeyParts = parseSessionKey(
     typeof next.session_key === "string" ? next.session_key : undefined,
   );
-  if (sessionKeyParts.sessionNamespace && (next.session_namespace === undefined || next.session_namespace === "")) {
-    next.session_namespace = sessionKeyParts.sessionNamespace;
-  }
-  if (sessionKeyParts.sessionChannel && (next.session_channel === undefined || next.session_channel === "")) {
-    next.session_channel = sessionKeyParts.sessionChannel;
-  }
-  if (sessionKeyParts.sessionAgent && (next.session_agent === undefined || next.session_agent === "")) {
-    next.session_agent = sessionKeyParts.sessionAgent;
-  }
   if (sessionKeyParts.sessionScope && (next.session_scope === undefined || next.session_scope === "")) {
     next.session_scope = sessionKeyParts.sessionScope;
   }
@@ -1061,6 +1052,10 @@ const OMITTED_AGENT_IDENTITY_ATTR_KEYS = new Set([
   "gen_ai.agent_name",
   "gen_ai_agent_id",
   "gen_ai_agent_name",
+  "session_namespace",
+  "session_agent",
+  "session_channel",
+  "session_state",
 ]);
 
 const LEGACY_TRACE_CONTEXT_KEYS = new Set([
@@ -1728,6 +1723,37 @@ export function buildRequestMetricAttrs(
   });
 }
 
+export function stripAgentSummaryModelUsageAttrs(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean | undefined> {
+  const next = { ...attrs };
+  for (const key of [
+    "request_model",
+    "response_model",
+    "usage_input_tokens",
+    "usage_output_tokens",
+    "usage_total_tokens",
+    "usage_cache_read_input_tokens",
+    "usage_cache_write_input_tokens",
+    "usage_cache_total_tokens",
+    "gen_ai.request.model",
+    "gen_ai.response.model",
+    "gen_ai.usage.input_tokens",
+    "gen_ai.usage.output_tokens",
+    "gen_ai.usage.cache_read.input_tokens",
+    "gen_ai.usage.cache_creation.input_tokens",
+    "openclaw.model",
+    "openclaw.tokens.input",
+    "openclaw.tokens.output",
+    "openclaw.tokens.total",
+    "openclaw.tokens.cache_read",
+    "openclaw.tokens.cache_write",
+  ]) {
+    delete next[key];
+  }
+  return next;
+}
+
 export function buildGenAiAgentRequestMetricAttrs(
   snapshot: SessionSnapshot | undefined,
   summaryAttrs?: Record<string, string | number | boolean>,
@@ -1737,12 +1763,6 @@ export function buildGenAiAgentRequestMetricAttrs(
     session_id: snapshot?.sessionId,
     provider_name: snapshot?.lastProvider,
     request_model: snapshot?.lastModel,
-    session_state:
-      typeof summaryAttrs?.["openclaw.final_state"] === "string"
-        ? summaryAttrs["openclaw.final_state"]
-        : typeof summaryAttrs?.["openclaw.state"] === "string"
-          ? summaryAttrs["openclaw.state"]
-          : undefined,
     outcome:
       typeof summaryAttrs?.["openclaw.outcome"] === "string"
         ? summaryAttrs["openclaw.outcome"]
@@ -1875,7 +1895,6 @@ export function resolveSessionMetricTotals(snapshot: SessionSnapshot | undefined
 
 export function buildSessionMetricAttrs(
   snapshot: SessionSnapshot | undefined,
-  sessionKey: string,
   overrides?: {
     modelProvider?: string;
     modelName?: string;
@@ -1883,7 +1902,6 @@ export function buildSessionMetricAttrs(
 ) {
   return stringAttrs({
     session_id: snapshot?.sessionId,
-    session_key: sessionKey,
     model_provider: overrides?.modelProvider ?? snapshot?.lastProvider,
     model_name: overrides?.modelName ?? snapshot?.lastModel,
   });
@@ -1891,7 +1909,6 @@ export function buildSessionMetricAttrs(
 
 export function buildGenAiAgentSessionMetricAttrs(
   snapshot: SessionSnapshot | undefined,
-  sessionKey: string,
   overrides?: {
     modelProvider?: string;
     modelName?: string;
@@ -1900,7 +1917,6 @@ export function buildGenAiAgentSessionMetricAttrs(
 ) {
   return stringAttrs({
     session_id: snapshot?.sessionId,
-    session_key: sessionKey,
     provider_name: overrides?.modelProvider ?? snapshot?.lastProvider,
     request_model: overrides?.modelName ?? snapshot?.lastModel,
     token_type: overrides?.tokenType,
@@ -2034,14 +2050,13 @@ export function buildDiagnosticsSessionMetricAttrs(
 }
 
 export function buildGenAiRuntimeSessionMetricAttrs(
-  state?: string,
+  _state?: string,
   reason?: string,
   sessionId?: string,
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
   return stringAttrs({
     session_id: sessionId,
-    session_state: state,
     outcome: reason,
     ...(extra ?? {}),
   });

@@ -67,7 +67,6 @@ test("resolveOtelPluginConfig keeps explicitly configured agent identity resourc
     "gen_ai.agent_name": "legacy-agent",
     "gen_ai.agent_id": "agent-02",
     agent_version: "2026.5.11",
-    runtime_environment: "prod",
   });
 });
 
@@ -146,7 +145,6 @@ test("buildOtelResourceAttrs keeps configured agent identity tags but does not a
     "service.name": "openclaw-otel-plugin",
     agent_runtime: "openclaw",
     agent_version: "2026.5.28",
-    runtime_environment: "main",
     team: "platform",
     agent_id: "configured-agent-id",
     agent_name: "configured-agent-name",
@@ -170,4 +168,29 @@ test("buildOtelResourceAttrs does not auto-fill agent identity tags from runtime
 
   assert.equal(attrs.agent_id, undefined);
   assert.equal(attrs.agent_name, undefined);
+  assert.equal(attrs.runtime_environment, undefined);
+});
+
+test("buildOtelResourceAttrs drops runtime_environment even when configured explicitly", () => {
+  const config = resolveOtelPluginConfig({
+    serviceName: "openclaw-otel-plugin",
+    resourceAttributes: {
+      team: "platform",
+      runtime_environment: "prod",
+      "gen_ai.runtime_environment": "prod",
+    },
+  });
+
+  const attrs = buildOtelResourceAttrs(config, {
+    runtimeEnvironment: "main",
+    openclawVersion: "2026.5.28",
+  });
+
+  assert.equal(attrs.runtime_environment, undefined);
+  assert.deepEqual(attrs, {
+    "service.name": "openclaw-otel-plugin",
+    agent_runtime: "openclaw",
+    agent_version: "2026.5.28",
+    team: "platform",
+  });
 });

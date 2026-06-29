@@ -220,7 +220,6 @@ root_span（一次完整请求，例如一条消息的处理）
 | `skill_name`        | Skill 名称                                     |
 | `skill_source`      | Skill 来源                                     |
 | `queue_name`        | 队列名称                                       |
-| `session_state`     | Session 状态                                   |
 
 ## 接入步骤
 

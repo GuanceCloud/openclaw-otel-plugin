@@ -1530,13 +1530,21 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(modelSpans[1].options.attributes.usage_total_tokens, 18);
   assert.equal(modelSpans[1].options.attributes.usage_cache_total_tokens, 0);
   assert.equal(modelSpans[1].options.attributes.run_id, "run-2");
-  assert.equal(run.span.attributes.usage_input_tokens, 24);
-  assert.equal(run.span.attributes.usage_output_tokens, 12);
-  assert.equal(run.span.attributes.usage_total_tokens, 36);
-  assert.equal(run.span.attributes.usage_cache_total_tokens, 0);
-  assert.equal(rootSpan.attributes.usage_input_tokens, 24);
-  assert.equal(rootSpan.attributes.usage_output_tokens, 12);
-  assert.equal(rootSpan.attributes.usage_total_tokens, 36);
+  assert.equal(run.span.attributes.usage_input_tokens, undefined);
+  assert.equal(run.span.attributes.usage_output_tokens, undefined);
+  assert.equal(run.span.attributes.usage_total_tokens, undefined);
+  assert.equal(run.span.attributes.usage_cache_total_tokens, undefined);
+  assert.equal(run.span.attributes.request_model, undefined);
+  assert.equal(run.span.attributes.response_model, undefined);
+  assert.equal(run.span.attributes["gen_ai.request.model"], undefined);
+  assert.equal(run.span.attributes["gen_ai.response.model"], undefined);
+  assert.equal(rootSpan.attributes.usage_input_tokens, undefined);
+  assert.equal(rootSpan.attributes.usage_output_tokens, undefined);
+  assert.equal(rootSpan.attributes.usage_total_tokens, undefined);
+  assert.equal(rootSpan.attributes.request_model, undefined);
+  assert.equal(rootSpan.attributes.response_model, undefined);
+  assert.equal(rootSpan.attributes["gen_ai.request.model"], undefined);
+  assert.equal(rootSpan.attributes["gen_ai.response.model"], undefined);
   assert.equal(durationRecords.length, 2);
   assert.deepEqual(
     durationRecords.map(({ value, attrs }) => ({
@@ -1741,12 +1749,20 @@ test("transcript model replay skips turns already covered by runtime model usage
   assert.equal(run.aggregate.totalTokens, 36);
   assert.equal(run.aggregate.modelCalls, 2);
   assert.equal(run.transcriptAssistantTurnsEmitted, 2);
-  assert.equal(run.span.attributes.usage_input_tokens, 24);
-  assert.equal(run.span.attributes.usage_output_tokens, 12);
-  assert.equal(run.span.attributes.usage_total_tokens, 36);
-  assert.equal(rootSpan.attributes.usage_input_tokens, 24);
-  assert.equal(rootSpan.attributes.usage_output_tokens, 12);
-  assert.equal(rootSpan.attributes.usage_total_tokens, 36);
+  assert.equal(run.span.attributes.usage_input_tokens, undefined);
+  assert.equal(run.span.attributes.usage_output_tokens, undefined);
+  assert.equal(run.span.attributes.usage_total_tokens, undefined);
+  assert.equal(run.span.attributes.request_model, undefined);
+  assert.equal(run.span.attributes.response_model, undefined);
+  assert.equal(run.span.attributes["gen_ai.request.model"], undefined);
+  assert.equal(run.span.attributes["gen_ai.response.model"], undefined);
+  assert.equal(rootSpan.attributes.usage_input_tokens, undefined);
+  assert.equal(rootSpan.attributes.usage_output_tokens, undefined);
+  assert.equal(rootSpan.attributes.usage_total_tokens, undefined);
+  assert.equal(rootSpan.attributes.request_model, undefined);
+  assert.equal(rootSpan.attributes.response_model, undefined);
+  assert.equal(rootSpan.attributes["gen_ai.request.model"], undefined);
+  assert.equal(rootSpan.attributes["gen_ai.response.model"], undefined);
   assert.deepEqual(
     tokenRecords.map(({ value, attrs }) => ({
       value,

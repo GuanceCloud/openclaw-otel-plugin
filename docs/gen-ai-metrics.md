@@ -21,7 +21,7 @@
 - 所有 duration / wait / age 相关直方图仍使用 `ms`
 - 当前指标 tags 采用双写过渡：保留短 tag，同时新增官方 OpenTelemetry GenAI 点分 tag
 - 字段变更关系见 [gen-ai-field-mapping.md](./gen-ai-field-mapping.md)
-- Resource 级属性也统一使用 canonical tag，例如 `agent_runtime`、`agent_version`、`runtime_environment`
+- Resource 级属性也统一使用 canonical tag，例如 `agent_runtime`、`agent_version`
 - 平台里如果还能看到 `gen_ai_agent_*`，通常来自历史指标点，不代表当前实现仍会继续上报
 - 旧 `openclaw.*` 指标兼容双写已移除；如果平台里还能看到，通常来自历史指标点
 
@@ -53,8 +53,6 @@
 - `token_type`
 - `channel`
 - `session_id`
-- `session_key`
-- `session_state`
 - `outcome`
 - `queue_name`
 - `webhook_name`
@@ -77,8 +75,6 @@
 | `token_type` | token 类型，当前主要为 `input` / `output` / `total` |
 | `channel` | 消息来源通道，例如 `feishu` |
 | `session_id` | OpenClaw session ID |
-| `session_key` | OpenClaw session key |
-| `session_state` | session 当前状态 |
 | `outcome` | 结果状态或结束原因 |
 | `queue_name` | 队列 lane 名称 |
 | `webhook_name` | webhook / update 类型 |
@@ -117,16 +113,16 @@
 
 | 指标名 | 类型 | 单位 | tags | 描述 |
 | --- | --- | --- | --- | --- |
-| `gen_ai.agent.request.count` | Counter | - | `agent_runtime`, `channel`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `session_state`, `outcome` | Agent request 总数。 |
-| `gen_ai.agent.request.duration` | Histogram | `ms` | `agent_runtime`, `channel`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `session_state`, `outcome` | Agent request 总耗时。 |
+| `gen_ai.agent.request.count` | Counter | - | `agent_runtime`, `channel`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `outcome` | Agent request 总数。 |
+| `gen_ai.agent.request.duration` | Histogram | `ms` | `agent_runtime`, `channel`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `outcome` | Agent request 总耗时。 |
 | `gen_ai.agent.token.usage` | Histogram | `{token}` | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `response_model`, `gen_ai.response.model`, `token_type`, `gen_ai.token.type` | Agent 侧模型 token 用量。来自 runtime `model.usage` 事件以及 transcript / synthetic fallback 回放。 |
 | `gen_ai.agent.operation.count` | Counter | - | 基础：`agent_runtime`, `operation_name`, `gen_ai.operation.name`, `outcome`<br>`operation_name=model`：`provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `response_model`, `gen_ai.response.model`<br>`operation_name=tool`：`tool_name`, `gen_ai.tool.name`, `skill_name`, `model_name`, `tool_result_status`<br>`operation_name=skill`：`skill_name`, `skill_source` | Agent 侧 operation 次数统计。当前覆盖 `model`、`tool`、`skill` 三类操作。 |
 | `gen_ai.agent.operation.duration` | Histogram | `ms` | 基础：`agent_runtime`, `operation_name`, `gen_ai.operation.name`, `outcome`<br>`operation_name=model`：`provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `response_model`, `gen_ai.response.model`<br>`operation_name=tool`：`tool_name`, `gen_ai.tool.name`, `skill_name`, `model_name`, `tool_result_status`<br>`operation_name=skill`：`skill_name`, `skill_source` | Agent 侧 operation 耗时统计。当前覆盖 `model`、`tool`、`skill` 三类操作。 |
-| `gen_ai.agent.session.token.input` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `session_key`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级输入 token 聚合值，由 active session 周期扫描产生。 |
-| `gen_ai.agent.session.token.output` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `session_key`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级输出 token 聚合值，由 active session 周期扫描产生。 |
-| `gen_ai.agent.session.token.total` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `session_key`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级总 token 聚合值，由 active session 周期扫描产生。 |
-| `gen_ai.agent.session.token.usage` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `session_key`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `token_type`, `gen_ai.token.type` | 兼容保留的 session 级 token 聚合指标，建议优先使用上面 3 个独立指标。 |
-| `gen_ai.agent.session.trace.count` | Counter | - | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `session_key`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级 trace 计数，由 active session 周期扫描产生。 |
+| `gen_ai.agent.session.token.input` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级输入 token 聚合值，由 active session 周期扫描产生。 |
+| `gen_ai.agent.session.token.output` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级输出 token 聚合值，由 active session 周期扫描产生。 |
+| `gen_ai.agent.session.token.total` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级总 token 聚合值，由 active session 周期扫描产生。 |
+| `gen_ai.agent.session.token.usage` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `token_type`, `gen_ai.token.type` | 兼容保留的 session 级 token 聚合指标，建议优先使用上面 3 个独立指标。 |
+| `gen_ai.agent.session.trace.count` | Counter | - | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级 trace 计数，由 active session 周期扫描产生。 |
 | `gen_ai.agent.skill.activation.count` | Counter | - | `agent_runtime`, `session_id`, `skill_name`, `skill_source` | Skill 激活次数。 |
 
 ### GenAI Runtime
@@ -140,9 +136,9 @@
 | `gen_ai.runtime.queue.dequeue.count` | Counter | - | `agent_runtime`, `queue_name`, `session_id`, `outcome` | 队列出队次数。 |
 | `gen_ai.runtime.queue.depth` | Histogram | 保持当前 | `agent_runtime`, `queue_name`, `session_id`, `outcome` | 队列深度。 |
 | `gen_ai.runtime.queue.wait` | Histogram | `ms` | `agent_runtime`, `queue_name`, `session_id`, `outcome` | 队列等待时长。 |
-| `gen_ai.runtime.session.state.count` | Counter | - | `agent_runtime`, `session_id`, `session_state`, `outcome` | Session 状态迁移次数。 |
-| `gen_ai.runtime.session.stuck.count` | Counter | - | `agent_runtime`, `session_id`, `session_state`, `outcome` | Stuck session 检测次数。 |
-| `gen_ai.runtime.session.stuck.age` | Histogram | `ms` | `agent_runtime`, `session_id`, `session_state`, `outcome` | Stuck session 年龄。 |
+| `gen_ai.runtime.session.state.count` | Counter | - | `agent_runtime`, `session_id`, `outcome` | Session 状态迁移次数。 |
+| `gen_ai.runtime.session.stuck.count` | Counter | - | `agent_runtime`, `session_id`, `outcome` | Stuck session 检测次数。 |
+| `gen_ai.runtime.session.stuck.age` | Histogram | `ms` | `agent_runtime`, `session_id`, `outcome` | Stuck session 年龄。 |
 | `gen_ai.runtime.webhook.received.count` | Counter | - | `agent_runtime`, `channel`, `webhook_name` | Webhook 接收次数。 |
 | `gen_ai.runtime.webhook.error.count` | Counter | - | `agent_runtime`, `channel`, `webhook_name` | Webhook 错误次数。 |
 | `gen_ai.runtime.webhook.duration` | Histogram | `ms` | `agent_runtime`, `channel`, `webhook_name` | Webhook 处理耗时。 |

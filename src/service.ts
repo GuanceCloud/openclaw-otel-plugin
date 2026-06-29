@@ -51,6 +51,7 @@ import {
   resolveUsageTokenTotals,
   sessionIdentity,
   shouldFallbackRunBoundEventToActiveRequest,
+  stripAgentSummaryModelUsageAttrs,
   stringAttrs,
   traceAttrs,
   writeReplayFinalizationState,
@@ -303,6 +304,7 @@ export function createOtelPluginService(
         const suppressSessionInputPreview = attrs.__suppress_session_input_preview === true;
         const suppressSessionOutputPreview = attrs.__suppress_session_output_preview === true;
         const suppressSessionOutputSummary = attrs.__suppress_session_output_summary === true;
+        const suppressSessionModel = attrs.__suppress_session_model === true;
         const minSnapshotUserTs = typeof attrs.__min_snapshot_user_ts === "number"
           ? attrs.__min_snapshot_user_ts
           : undefined;
@@ -312,6 +314,7 @@ export function createOtelPluginService(
         delete nextAttrs.__suppress_session_input_preview;
         delete nextAttrs.__suppress_session_output_preview;
         delete nextAttrs.__suppress_session_output_summary;
+        delete nextAttrs.__suppress_session_model;
         delete nextAttrs.__min_snapshot_user_ts;
         const snapshot = loadSessionSnapshot(sessionKey);
         const requestClassification = resolveRequestClassification({
@@ -377,9 +380,19 @@ export function createOtelPluginService(
             nextAttrs.output_text_length ??
             (suppressSessionOutputSummary ? undefined : snapshot.lastAssistantThinking?.length),
           "openclaw.provider": nextAttrs["openclaw.provider"] ?? snapshot.lastProvider,
-          "openclaw.model": nextAttrs["openclaw.model"] ?? snapshot.lastModel,
+          ...(suppressSessionModel
+            ? {}
+            : { "openclaw.model": nextAttrs["openclaw.model"] ?? snapshot.lastModel }),
         };
       };
+
+      const buildAgentSummaryTraceAttrs = (
+        sessionKey: string | undefined,
+        attrs: Record<string, string | number | boolean | undefined>,
+      ) => traceAttrs(enrichWithTranscript(sessionKey, {
+        __suppress_session_model: true,
+        ...stripAgentSummaryModelUsageAttrs(attrs),
+      }));
 
       const eventTimestamp = (evt: { ts?: number }): Date =>
         typeof evt.ts === "number" ? eventTime(evt.ts) : new Date();
@@ -1212,7 +1225,7 @@ export function createOtelPluginService(
             {
               startTime: new Date(requestStartTs),
               kind: SpanKind.SERVER,
-              attributes: traceAttrs({
+              attributes: buildAgentSummaryTraceAttrs(sessionKey, {
                 ...baseAttrs,
                 "span.kind": "request",
               }),
@@ -1225,7 +1238,7 @@ export function createOtelPluginService(
             {
               startTime: new Date(requestStartTs),
               kind: SpanKind.INTERNAL,
-              attributes: traceAttrs({
+              attributes: buildAgentSummaryTraceAttrs(sessionKey, {
                 ...baseAttrs,
                 "span.kind": "agent",
               }),
@@ -1308,23 +1321,13 @@ export function createOtelPluginService(
             runCtx,
           );
 
-          runSpan.setAttributes(traceAttrs({
+          runSpan.setAttributes(buildAgentSummaryTraceAttrs(sessionKey, {
             ...baseAttrs,
             "span.kind": "agent",
-            usage_input_tokens: usageTotals.inputTokens,
-            usage_output_tokens: usageTotals.outputTokens,
-            usage_total_tokens: usageTotals.totalTokens,
-            usage_cache_read_input_tokens: usageTotals.cacheReadTokens,
-            usage_cache_write_input_tokens: usageTotals.cacheWriteTokens,
           }));
-          rootSpan.setAttributes(traceAttrs({
+          rootSpan.setAttributes(buildAgentSummaryTraceAttrs(sessionKey, {
             ...baseAttrs,
             "span.kind": "request",
-            usage_input_tokens: usageTotals.inputTokens,
-            usage_output_tokens: usageTotals.outputTokens,
-            usage_total_tokens: usageTotals.totalTokens,
-            usage_cache_read_input_tokens: usageTotals.cacheReadTokens,
-            usage_cache_write_input_tokens: usageTotals.cacheWriteTokens,
           }));
 
           emitModelTurnDebugLog({
@@ -1429,7 +1432,7 @@ export function createOtelPluginService(
             );
             const previousTotals = reportedSessionMetrics.get(seriesKey);
             const deltaTotals = computeSessionMetricDelta(currentTotals, previousTotals);
-            const genAiSessionMetricAttrs = buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+            const genAiSessionMetricAttrs = buildGenAiAgentSessionMetricAttrs(snapshot, {
               modelProvider: tokenState?.modelProvider,
               modelName: tokenState?.modelName,
             });
@@ -1440,7 +1443,7 @@ export function createOtelPluginService(
               );
               instruments.genAiAgentSessionTokenUsage?.add(
                 deltaTotals.inputTokens,
-                buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+                buildGenAiAgentSessionMetricAttrs(snapshot, {
                   modelProvider: tokenState?.modelProvider,
                   modelName: tokenState?.modelName,
                   tokenType: "input",
@@ -1454,7 +1457,7 @@ export function createOtelPluginService(
               );
               instruments.genAiAgentSessionTokenUsage?.add(
                 deltaTotals.outputTokens,
-                buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+                buildGenAiAgentSessionMetricAttrs(snapshot, {
                   modelProvider: tokenState?.modelProvider,
                   modelName: tokenState?.modelName,
                   tokenType: "output",
@@ -1468,7 +1471,7 @@ export function createOtelPluginService(
               );
               instruments.genAiAgentSessionTokenUsage?.add(
                 deltaTotals.totalTokens,
-                buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+                buildGenAiAgentSessionMetricAttrs(snapshot, {
                   modelProvider: tokenState?.modelProvider,
                   modelName: tokenState?.modelName,
                   tokenType: "total",
@@ -1478,7 +1481,7 @@ export function createOtelPluginService(
             if (deltaTotals.traceCount > 0) {
               instruments.genAiAgentSessionTraceCount?.add(
                 deltaTotals.traceCount,
-                buildGenAiAgentSessionMetricAttrs(snapshot, sessionKey, {
+                buildGenAiAgentSessionMetricAttrs(snapshot, {
                   modelProvider: tokenState?.modelProvider,
                   modelName: tokenState?.modelName,
                 }),
@@ -1563,6 +1566,7 @@ export function createOtelPluginService(
             startTime: new Date(rootStartTs),
             kind: SpanKind.SERVER,
             attributes: traceAttrs(enrichWithTranscript(sessionKey, {
+              __suppress_session_model: true,
               "openclaw.sessionKey": evt.sessionKey,
               "openclaw.sessionId": evt.sessionId,
               ...buildRunScopeAttrs(resolveRunId(evt), resolveRunId(evt)),
@@ -1634,6 +1638,7 @@ export function createOtelPluginService(
             startTime: eventTimestamp(evt),
             kind: SpanKind.INTERNAL,
             attributes: traceAttrs(enrichWithTranscript(sessionKey, {
+              __suppress_session_model: true,
               "openclaw.sessionKey": evt.sessionKey,
               "openclaw.sessionId": evt.sessionId,
               ...buildRunScopeAttrs(resolvedRunId ?? root.runId, root.runIds, resolvedRunId),
@@ -1706,14 +1711,8 @@ export function createOtelPluginService(
         }
         const run = activeRuns.get(requestKey);
         const snapshot = loadSessionSnapshot(sessionKey);
-        const snapshotUsageTotals = resolveSnapshotUsageTotals(snapshot);
-        const rootInputTokens = run?.aggregate.inputTokens || snapshotUsageTotals.inputTokens;
-        const rootOutputTokens = run?.aggregate.outputTokens || snapshotUsageTotals.outputTokens;
-        const rootCacheReadTokens = run?.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens;
-        const rootCacheWriteTokens = run?.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens;
-        const rootTotalTokens = run?.aggregate.totalTokens || snapshotUsageTotals.totalTokens;
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
-        const finalAttrs = traceAttrs({
+        const finalAttrs = buildAgentSummaryTraceAttrs(sessionKey, {
           ...enrichWithTranscript(sessionKey, summaryAttrs),
           ...buildRunScopeAttrs(
             resolveRunId(evt) ?? current.runId ?? run?.runId,
@@ -1723,18 +1722,8 @@ export function createOtelPluginService(
           ),
           session_create_at: snapshot?.createdAt,
           session_update_time: eventTimestamp(evt).getTime(),
-          usage_input_tokens: rootInputTokens,
-          usage_output_tokens: rootOutputTokens,
-          usage_cache_read_input_tokens: rootCacheReadTokens,
-          usage_cache_write_input_tokens: rootCacheWriteTokens,
-          usage_total_tokens: rootTotalTokens,
           "openclaw.skills": run ? Array.from(run.usedSkillNames).join(", ") : undefined,
           "openclaw.skill.count": run ? run.usedSkillNames.size : undefined,
-          "openclaw.tokens.input": rootInputTokens,
-          "openclaw.tokens.output": rootOutputTokens,
-          "openclaw.tokens.cache_read": rootCacheReadTokens,
-          "openclaw.tokens.cache_write": rootCacheWriteTokens,
-          "openclaw.tokens.total": rootTotalTokens,
           "openclaw.tools": run ? Array.from(run.usedToolNames).join(", ") : undefined,
           "openclaw.tool.count": run ? run.usedToolNames.size : undefined,
           "openclaw.tool.targets": run ? Array.from(run.usedToolTargets).join(" | ") : undefined,
@@ -1795,26 +1784,10 @@ export function createOtelPluginService(
           return;
         }
         const snapshot = loadSessionSnapshot(sessionKey);
-        const snapshotUsageTotals = resolveSnapshotUsageTotals(snapshot);
-        const rootInputTokens = run.aggregate.inputTokens || snapshotUsageTotals.inputTokens;
-        const rootOutputTokens = run.aggregate.outputTokens || snapshotUsageTotals.outputTokens;
-        const rootCacheReadTokens = run.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens;
-        const rootCacheWriteTokens = run.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens;
-        const rootTotalTokens = run.aggregate.totalTokens || snapshotUsageTotals.totalTokens;
-        root.span.setAttributes(traceAttrs({
+        root.span.setAttributes(buildAgentSummaryTraceAttrs(sessionKey, {
           ...buildRunScopeAttrs(resolveRunId(evt) ?? root.runId ?? run.runId, root.runIds, run.runIds, resolveRunId(evt)),
           session_create_at: snapshot?.createdAt,
           session_update_time: run.modelEndTs ?? run.mainEndTs ?? run.lastTouchedAt ?? Date.now(),
-          usage_input_tokens: rootInputTokens,
-          usage_output_tokens: rootOutputTokens,
-          usage_cache_read_input_tokens: rootCacheReadTokens,
-          usage_cache_write_input_tokens: rootCacheWriteTokens,
-          usage_total_tokens: rootTotalTokens,
-          "openclaw.tokens.input": rootInputTokens,
-          "openclaw.tokens.output": rootOutputTokens,
-          "openclaw.tokens.cache_read": rootCacheReadTokens,
-          "openclaw.tokens.cache_write": rootCacheWriteTokens,
-          "openclaw.tokens.total": rootTotalTokens,
           "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
           "openclaw.skill.count": run.usedSkillNames.size,
           "openclaw.tools": Array.from(run.usedToolNames).join(", "),
@@ -1840,14 +1813,7 @@ export function createOtelPluginService(
           return;
         }
         const snapshot = loadSessionSnapshot(sessionKey);
-        const snapshotUsageTotals = resolveSnapshotUsageTotals(snapshot);
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
-        const sessionInputTokens =
-          current.aggregate.inputTokens || snapshotUsageTotals.inputTokens;
-        const sessionOutputTokens =
-          current.aggregate.outputTokens || snapshotUsageTotals.outputTokens;
-        const sessionTotalTokens =
-          current.aggregate.totalTokens || snapshotUsageTotals.totalTokens;
         for (const skillName of snapshot?.invokedSkillNames ?? []) {
           if (!current.skillSpans.has(skillName)) {
             ensureSkillSpan(
@@ -1861,21 +1827,11 @@ export function createOtelPluginService(
             );
           }
         }
-        const finalAttrs = traceAttrs({
+        const finalAttrs = buildAgentSummaryTraceAttrs(sessionKey, {
           ...enrichWithTranscript(sessionKey, summaryAttrs),
           ...buildRunScopeAttrs(resolveRunId(evt) ?? current.runId, current.runIds, resolveRunId(evt)),
           session_create_at: snapshot?.createdAt,
           session_update_time: eventTimestamp(evt).getTime(),
-          usage_input_tokens: sessionInputTokens,
-          usage_output_tokens: sessionOutputTokens,
-          usage_cache_read_input_tokens: current.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens,
-          usage_cache_write_input_tokens: current.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens,
-          usage_total_tokens: sessionTotalTokens,
-          "openclaw.tokens.input": sessionInputTokens,
-          "openclaw.tokens.output": sessionOutputTokens,
-          "openclaw.tokens.cache_read": current.aggregate.cacheReadTokens || snapshotUsageTotals.cacheReadTokens,
-          "openclaw.tokens.cache_write": current.aggregate.cacheWriteTokens || snapshotUsageTotals.cacheWriteTokens,
-          "openclaw.tokens.total": sessionTotalTokens,
           "openclaw.skills": Array.from(current.usedSkillNames).join(", "),
           "openclaw.skill.count": current.usedSkillNames.size,
           "openclaw.tools": Array.from(current.usedToolNames).join(", "),
@@ -2057,16 +2013,10 @@ export function createOtelPluginService(
           sessionMetricTokenState.set(sessionKey, metricState);
         }
         const summaryAttrs = traceAttrs({
-          "openclaw.tokens.input": run.aggregate.inputTokens,
-          "openclaw.tokens.output": run.aggregate.outputTokens,
-          "openclaw.tokens.cache_read": run.aggregate.cacheReadTokens,
-          "openclaw.tokens.cache_write": run.aggregate.cacheWriteTokens,
           "openclaw.tokens.prompt": run.aggregate.promptTokens,
-          "openclaw.tokens.total": run.aggregate.totalTokens,
           "openclaw.cost.usd": Number(run.aggregate.costUsd.toFixed(8)),
           "openclaw.model.calls": run.aggregate.modelCalls,
           "openclaw.provider": run.aggregate.lastProvider,
-          "openclaw.model": run.aggregate.lastModel,
           "openclaw.tools": Array.from(run.usedToolNames).join(", "),
           "openclaw.tool.count": run.usedToolNames.size,
           "openclaw.tool.targets": Array.from(run.usedToolTargets).join(" | "),
@@ -2076,7 +2026,7 @@ export function createOtelPluginService(
           "openclaw.skill.count": run.usedSkillNames.size,
         });
 
-        const transcriptAttrs = traceAttrs(enrichWithTranscript(evt.sessionKey, summaryAttrs));
+        const transcriptAttrs = buildAgentSummaryTraceAttrs(evt.sessionKey, summaryAttrs);
         run.span.setAttributes(transcriptAttrs);
         root.span.setAttributes(transcriptAttrs);
         run.modelSpanEmitted = true;

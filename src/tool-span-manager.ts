@@ -298,14 +298,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
 
   const syncRunUsageSummaryAttrs = (evt: SessionEvent, run: ActiveRunSpan) => {
     const attrs = traceAttrs({
-      "openclaw.tokens.input": run.aggregate.inputTokens,
-      "openclaw.tokens.output": run.aggregate.outputTokens,
-      "openclaw.tokens.cache_read": run.aggregate.cacheReadTokens,
-      "openclaw.tokens.cache_write": run.aggregate.cacheWriteTokens,
-      "openclaw.tokens.total": run.aggregate.totalTokens,
       "openclaw.model.calls": run.aggregate.modelCalls,
-      "openclaw.provider": run.aggregate.lastProvider,
-      "openclaw.model": run.aggregate.lastModel,
     });
     run.span?.setAttributes(attrs);
     getRoot(evt, false)?.span.setAttributes(attrs);

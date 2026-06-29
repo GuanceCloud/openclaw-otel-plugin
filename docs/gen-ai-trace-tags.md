@@ -95,6 +95,7 @@
   - 最终状态
   - 汇总输出
   - 会话创建/更新时间
+- 不汇总 `request_model` / `response_model` / `usage_*`；这些字段保留在 `llm` span
 
 ### `invoke_agent`
 
@@ -106,8 +107,8 @@
 - 承载本轮模型调用、工具调用、skill 调用的父级上下文
 - 汇总本轮 run 维度的信息，例如：
   - 使用到的 tools / skills
-  - token 汇总
   - 最终执行结果
+- 不汇总 `request_model` / `response_model` / `usage_*`；模型和 token 统计保留在 `llm` span 与 metrics
 
 ### `llm`
 
@@ -208,7 +209,6 @@
 | --- | --- |
 | `agent_runtime` | agent runtime 名称，当前为 `openclaw` |
 | `agent_version` | agent / runtime 版本 |
-| `runtime_environment` | 当前运行环境 |
 | `app_name` | 业务应用名称 |
 | `app_id` | 业务应用标识 |
 
@@ -218,7 +218,8 @@
 
 - trace 的 span / event / log tag 现在同时输出兼容短字段和官方 `gen_ai.*` 点分字段
 - 旧版扁平 `gen_ai_session_id` / `gen_ai.session_id` 这类 alias 不再恢复
-- Resource 级字段继续使用 `agent_runtime`、`agent_version`、`runtime_environment` 等短字段
+- Resource 级字段继续使用 `agent_runtime`、`agent_version` 等短字段
+- `session_key` 不再额外拆出 `session_namespace`、`session_agent`、`session_channel` 三个查询 tag；仅保留 `session_scope`、`session_channel_target` 等仍有独立价值的字段
 
 | 字段 | 描述 |
 | --- | --- |
@@ -227,9 +228,6 @@
 | `run_ids` | 同一条 trace 内观测到的全部 `run_id`，按首次出现顺序逗号拼接 |
 | `session_id` | session id，推荐用于和 metrics 侧字段对齐 |
 | `session_key` | session key，推荐主字段 |
-| `session_namespace` | session namespace |
-| `session_agent` | session 归属 agent |
-| `session_channel` | session 归属 channel |
 | `session_scope` | session scope |
 | `session_channel_target` | session 渠道目标 |
 | `session_cwd` | session 当前工作目录 |
@@ -270,16 +268,16 @@
 | --- | --- |
 | `gen_ai.operation.name` | 官方 GenAI operation 名，例如 `chat`、`invoke_agent`、`invoke_workflow`、`execute_tool`、`plan`；当前 `tool` 与 `skill` span 都映射为 `execute_tool` |
 | `error.type` | 错误 span 的低基数错误类型，当前统一为 `error` |
-| `gen_ai.provider.name` | 模型或 Agent 调用的 GenAI provider |
-| `gen_ai.request.model` | 请求模型名 |
-| `gen_ai.response.model` | 响应模型名；没有独立响应模型时沿用请求模型 |
+| `gen_ai.provider.name` | 模型或 Agent 调用的 GenAI provider；当前 `openclaw_request` / `invoke_agent` 允许保留 provider 汇总 |
+| `gen_ai.request.model` | 请求模型名；当前主要落在 `llm` |
+| `gen_ai.response.model` | 响应模型名；没有独立响应模型时沿用请求模型，当前主要落在 `llm` |
 | `gen_ai.conversation.id` | OpenClaw `session_id` 对应的 conversation id |
 | `gen_ai.input.messages` | 使用现有 `input_preview` 构造的官方 input messages JSON 字符串 |
 | `gen_ai.output.messages` | 使用现有 `output_preview` / `output_summary` / tool preview 构造的官方 output messages JSON 字符串 |
-| `gen_ai.usage.input_tokens` | 输入 token 数 |
-| `gen_ai.usage.output_tokens` | 输出 token 数 |
-| `gen_ai.usage.cache_read.input_tokens` | cache read input token 数 |
-| `gen_ai.usage.cache_creation.input_tokens` | cache creation / write input token 数 |
+| `gen_ai.usage.input_tokens` | 输入 token 数；当前主要落在 `llm` |
+| `gen_ai.usage.output_tokens` | 输出 token 数；当前主要落在 `llm` |
+| `gen_ai.usage.cache_read.input_tokens` | cache read input token 数；当前主要落在 `llm` |
+| `gen_ai.usage.cache_creation.input_tokens` | cache creation / write input token 数；当前主要落在 `llm` |
 | `gen_ai.tool.name` | tool 名称 |
 | `gen_ai.tool.call.id` | tool call 标识 |
 | `gen_ai.tool.call.arguments` | tool 参数 preview，当前为字符串 |
@@ -333,6 +331,11 @@
 | `usage_cache_read_input_tokens` | cache read token 数 |
 | `usage_cache_write_input_tokens` | cache write token 数 |
 | `usage_cache_total_tokens` | cache read + cache write token 总数 |
+
+补充说明：
+
+- `request_model`、`response_model`、`usage_*` 当前不再写入 `openclaw_request` / `invoke_agent`
+- 这些字段保留在 `llm` span；session / request 级聚合建议看 metrics
 
 ## Tool 相关字段
 
