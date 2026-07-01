@@ -53,8 +53,9 @@
 
 1. 端到端耗时看 `gen_ai.workflow.duration`。
 2. 模型、tool、skill 执行耗时看 `gen_ai.client.operation.duration`，按 `gen_ai.operation.name`、`gen_ai.tool.name`、`gen_ai.skill.name`、`gen_ai.request.model` 切分。
-3. Token 消耗看 `gen_ai.client.token.usage`，按 `gen_ai.token.type=input/output` 切分。
-4. 单会话排查优先使用 `session_id` 或 `gen_ai.conversation.id` 关联 metrics、traces 和 logs。
+3. 对能识别为 skill 的调用，trace 侧结构为 `llm -> tool:Skill -> skill:<name>`；指标侧会分别记录 `gen_ai.operation.name=execute_tool` / `gen_ai.tool.name=Skill` 和 `gen_ai.operation.name=skill` / `gen_ai.skill.name=<name>`。
+4. Token 消耗看 `gen_ai.client.token.usage`，按 `gen_ai.token.type=input/output` 切分。
+5. 单会话排查优先使用 `session_id` 或 `gen_ai.conversation.id` 关联 metrics、traces 和 logs。
 
 ## 代码入口
 

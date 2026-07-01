@@ -16,7 +16,7 @@
   - `openclaw_request`：一条用户消息对应的一次完整请求
   - `invoke_agent`：这次请求里的 agent 主执行窗口
   - `llm`：agent 在执行过程中发起的一次模型调用
-  - `skill:* / skill_call:* / tool:*`：agent 在执行过程中使用的能力层与外部操作
+  - `tool:* / skill:*`：agent 在执行过程中使用的能力层与外部操作
 - 因此：
   - `llm` 不等于 `agent`
   - `invoke_agent` 才是最接近 `AI Agent execution` 的 span
@@ -25,22 +25,22 @@
 ## Skill 语义边界
 
 - 当前代码把 OpenClaw `skill` 定义为 **agent 执行中的能力层 / orchestration context**，不是一次独立的模型调用
-- skill 相关 span 分成两层：
-  - `skill:<name>`：本轮请求内某个 skill 的汇总 span
-  - `skill_call:<name>`：某次实际 skill 调用的执行 span
+- skill 相关 span 分成两类：
+  - `skill:<name>`：skill operation span
+  - `tool:Skill`：当一次 tool call 被识别为 skill 调用时，作为 `skill:<name>` 的父级 tool span
 - 当 tool 能归因到某个 skill 时，父子关系为：
-  - `invoke_agent -> skill:<name> -> skill_call:<name> -> tool:<name>`
-- `skill:<name>` 主要表达“本轮 agent 用到了哪个能力”
-- `skill_call:<name>` 主要表达“这次具体的能力调用窗口”
-- `tool:<name>` 仍然表示最终落到外部操作 / 本地执行 / MCP 调用的那一步
-- transcript 回放时，如果只能确认“这个 skill 被使用过”，会补 `skill:<name>`；只有能和具体 tool call 对上时，才会落 `skill_call:<name>`
+  - `invoke_agent -> llm -> tool:Skill -> skill:<name>`
+- `tool:Skill` 表示“模型触发了一次 Skill 特殊 tool 调用”
+- `skill:<name>` 表示“这次具体 skill 的执行窗口”
+- OpenClaw 底层触发 skill 的原始工具名保留在 `tool_original_name`，例如 `read` / `exec` / `edit`
+- transcript 回放时，如果只能确认“这个 skill 被使用过”，仍可能在 `invoke_agent` 下补 `skill:<name>` 汇总 span；能和具体 tool call 对上时，优先落 `tool:Skill -> skill:<name>`
 - 如果无法可靠推断 skill 身份，插件只保留 `tool:*`，不会凭空制造泛化 skill span
 - 截至当前 OpenTelemetry GenAI 语义，`skill` 仍没有稳定的一等标准字段
 - 当前实现因此分三层表达同一组 skill 语义：
-  - 兼容短字段：`skill_name`、`skill_call_id`、`skill_source`、`skill_type`
+  - 兼容短字段：`skill_name`、`skill_call_id`、`skill_source`
   - 推荐 trace 字段：`skill.name`、`skill.description`、`skill.path`、`skill.source.type`、`skill_result_status`
   - 项目扩展字段：`gen_ai.skill1.*`
-- trace 侧 skill / skill_call / tool 的 GenAI operation 仍统一映射到 `gen_ai.operation.name=execute_tool`；metric 侧 skill duration 单独使用 `gen_ai.operation.name=skill`
+- trace 侧 tool span 使用 `gen_ai.operation.name=execute_tool`；metric 侧 skill duration 单独使用 `gen_ai.operation.name=skill`
 
 ## 最终 Span 规范
 
@@ -53,7 +53,6 @@
 - `runtime_orchestration`
 - `llm`
 - `skill:*`
-- `skill_call:*`
 - `tool:*`
 
 ### 不单独拆出的流程节点
@@ -128,36 +127,17 @@
 
 用途：
 
-- 作为 `invoke_agent` 下的能力层汇总 span
-- 汇总一个 skill 在本轮请求内的存在与持续时间
+- 作为 skill operation span
+- 当能和具体 tool call 对上时，作为 `tool:Skill` 的子 span
+- 当 transcript 只能确认 skill 被使用过时，可能作为 `invoke_agent` 下的汇总 span
 - 表达 skill 来源，例如：
   - `runtime`
   - `transcript`
-- 作为 `skill_call:<name>` 和相关 `tool:*` 的父级上下文
 
 补充说明：
 
-- 同一个 skill 在同一轮请求里默认只保留一个 `skill:<name>` 汇总 span
-- 该 span 代表“这个能力被用到了”，不是某一次具体 tool 调用
-
-### `skill_call:<name>`
-
-表示“一次具体的 skill 调用窗口”。
-
-用途：
-
-- 作为 `skill:<name>` 下的子 span
-- 按具体 `tool_call_id` 记录一次 skill 调用
-- 承载本次 skill 调用关联的：
-  - `skill_call_id`
-  - `tool_call_id`
-  - `tool_name`
-
-补充说明：
-
-- 当前 `skill_call:<name>` 和具体 `tool_call_id` 一一对应
-- 一次 skill 可能触发多个 tool call，因此同一个 `skill:<name>` 下可能出现多个 `skill_call:<name>`
-- skill call 完成后会按 `gen_ai.client.operation.duration` 记录执行耗时，指标侧使用 `gen_ai.operation.name=skill` 和 `gen_ai.skill.name`
+- runtime skill 调用完成后会按 `gen_ai.client.operation.duration` 记录执行耗时，指标侧使用 `gen_ai.operation.name=skill` 和 `gen_ai.skill.name`
+- `skill_call:*` span 已不再单独输出；调用关联继续通过 `skill_call_id` / `tool_call_id` 字段表达
 
 ## 状态字段说明
 
@@ -286,10 +266,10 @@
 
 - 当前实现没有独立输出官方 `gen_ai.skill.*` 字段
 - skill 相关信息当前通过：
-  - span 名称：`skill:<name>`、`skill_call:<name>`
+  - span 名称：`tool:Skill`、`skill:<name>`
   - 推荐 trace 字段：`skill.*`
   - 项目扩展字段：`gen_ai.skill1.*`
-  - 兼容字段：`skill_name`、`skill_call_id`、`skill_source`、`skill_type`
+  - 兼容字段：`skill_name`、`skill_call_id`、`skill_source`
   - operation 语义：`gen_ai.operation.name=execute_tool`
   来共同表达
 
@@ -364,18 +344,18 @@
 
 | 字段 | 含义 | 常见 span |
 | --- | --- | --- |
-| `skill.name` | skill 名称，来自 `SKILL.md` 所在目录名或 frontmatter `name` | `skill:*`、`skill_call:*`、`tool:*` |
-| `skill.description` | skill 描述；优先取 `SKILL.md` frontmatter `description`，没有时回退正文首段 | `skill:*`、`skill_call:*`、`tool:*` |
-| `skill.path` | skill 入口文件绝对路径，当前识别到的 `.../SKILL.md` | `skill:*`、`skill_call:*`、`tool:*` |
-| `skill_call_id` | skill 对应的 tool call ID，用于把 `skill:*` / `skill_call:*` 与触发它的工具调用关联起来 | `skill:*`、`skill_call:*`、`tool:*` |
-| `skill.source.type` | skill 来源类型；当前取值为 `system`、`user`、`workspace` | `skill:*`、`skill_call:*`、`tool:*` |
-| `skill_result_status` | skill 结果状态；当前按关联 tool 是否报错映射为 `completed` 或 `error` | `skill:*`、`skill_call:*`、`tool:*` |
-| `gen_ai.skill1.name` | skill 名称的 `gen_ai.*` 项目扩展字段 | `skill:*`、`skill_call:*`、`tool:*` |
-| `gen_ai.skill1.path` | skill 入口文件绝对路径的 `gen_ai.*` 项目扩展字段 | `skill:*`、`skill_call:*`、`tool:*` |
-| `gen_ai.skill1.source.type` | skill 来源类型的 `gen_ai.*` 项目扩展字段 | `skill:*`、`skill_call:*`、`tool:*` |
-| `gen_ai.skill1.result_status` | skill 结果状态的 `gen_ai.*` 项目扩展字段 | `skill:*`、`skill_call:*`、`tool:*` |
-| `gen_ai.skill1.description` | skill 描述；与 `skill.description` 对齐 | `skill:*`、`skill_call:*`、`tool:*` |
-| `gen_ai.skill1.version` | skill 版本；优先取 `SKILL.md` frontmatter `version`，其次取同目录 `package.json.version` | `skill:*`、`skill_call:*`、`tool:*` |
+| `skill.name` | skill 名称，来自 `SKILL.md` 所在目录名或 frontmatter `name` | `skill:*`、`tool:*` |
+| `skill.description` | skill 描述；优先取 `SKILL.md` frontmatter `description`，没有时回退正文首段 | `skill:*`、`tool:*` |
+| `skill.path` | skill 入口文件绝对路径，当前识别到的 `.../SKILL.md` | `skill:*`、`tool:*` |
+| `skill_call_id` | skill 对应的 tool call ID，用于把 `tool:Skill` 与 `skill:*` 关联起来 | `skill:*`、`tool:*` |
+| `skill.source.type` | skill 来源类型；当前取值为 `system`、`user`、`workspace` | `skill:*`、`tool:*` |
+| `skill_result_status` | skill 结果状态；当前按关联 tool 是否报错映射为 `completed` 或 `error` | `skill:*`、`tool:*` |
+| `gen_ai.skill1.name` | skill 名称的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
+| `gen_ai.skill1.path` | skill 入口文件绝对路径的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
+| `gen_ai.skill1.source.type` | skill 来源类型的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
+| `gen_ai.skill1.result_status` | skill 结果状态的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
+| `gen_ai.skill1.description` | skill 描述；与 `skill.description` 对齐 | `skill:*`、`tool:*` |
+| `gen_ai.skill1.version` | skill 版本；优先取 `SKILL.md` frontmatter `version`，其次取同目录 `package.json.version` | `skill:*`、`tool:*` |
 
 兼容字段仍然保留：
 
@@ -384,4 +364,3 @@
 | `skill_name` | 兼容短字段；与 `skill.name` 表达同一 skill 身份 |
 | `skill_call_id` | 兼容短字段；与上表相同 |
 | `skill_source` | 兼容短字段；保留运行期归因来源，当前主要为 `runtime` / `transcript` |
-| `skill_type` | 兼容短字段；当前 `skill_call:*` 一般为 `call` |

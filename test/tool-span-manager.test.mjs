@@ -40,7 +40,7 @@ function createFakeTracer(spans) {
   };
 }
 
-test("skill file reads create a dedicated skill call span", () => {
+test("skill file reads create a nested Skill tool span", () => {
   const spans = [];
   const tracer = createFakeTracer(spans);
   const trace = {
@@ -105,20 +105,18 @@ test("skill file reads create a dedicated skill call span", () => {
   );
 
   assert.ok(tool);
-  const skillSummarySpan = spans.find((span) => span.name === "skill:monitor");
-  const skillCallSpan = spans.find((span) => span.name === "skill_call:monitor");
-  const toolSpan = spans.find((span) => span.name === "tool:read");
+  const skillToolSpan = spans.find((span) => span.name === "tool:Skill");
+  const skillSpan = spans.find((span) => span.name === "skill:monitor");
 
-  assert.ok(skillSummarySpan);
-  assert.ok(skillCallSpan);
-  assert.ok(toolSpan);
-  assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
-  assert.equal(skillSummarySpan.options.attributes.run_id, "run-1");
-  assert.equal(skillCallSpan.options.attributes.run_id, "run-1");
-  assert.equal(toolSpan.options.attributes.run_id, "run-1");
-  assert.equal(skillSummarySpan.options.attributes.agent_id, undefined);
-  assert.equal(skillCallSpan.options.attributes.agent_name, undefined);
-  assert.equal(toolSpan.options.attributes.agent_id, undefined);
+  assert.ok(skillToolSpan);
+  assert.ok(skillSpan);
+  assert.equal(skillSpan.parentCtx.span.name, skillToolSpan.name);
+  assert.equal(skillToolSpan.options.attributes.run_id, "run-1");
+  assert.equal(skillSpan.options.attributes.run_id, "run-1");
+  assert.equal(skillToolSpan.options.attributes.agent_id, undefined);
+  assert.equal(skillSpan.options.attributes.agent_name, undefined);
+  assert.equal(skillToolSpan.options.attributes.tool_name, "Skill");
+  assert.equal(skillToolSpan.options.attributes.tool_original_name, "read");
 
   manager.endToolSpan(
     { sessionKey: "s1", ts: 2200 },
@@ -127,11 +125,9 @@ test("skill file reads create a dedicated skill call span", () => {
     { result: { ok: true } },
   );
 
-  assert.equal(skillCallSpan.ended, true);
-  assert.equal(skillSummarySpan.attributes.skill_result_status, "completed");
-  assert.equal(skillCallSpan.attributes.skill_result_status, "completed");
-  assert.equal(toolSpan.attributes.skill_result_status, "completed");
-  assert.equal(run.skillInvocationSpans.size, 0);
+  assert.equal(skillSpan.ended, true);
+  assert.equal(skillSpan.attributes.skill_result_status, "completed");
+  assert.equal(skillToolSpan.attributes.skill_result_status, "completed");
 });
 
 test("tool events from skill file reads create skill spans through the event handler", () => {
@@ -214,16 +210,13 @@ test("tool events from skill file reads create skill spans through the event han
     },
   });
 
-  const skillSummarySpan = spans.find((span) => span.name === "skill:monitor");
-  const skillCallSpan = spans.find((span) => span.name === "skill_call:monitor");
-  const toolSpan = spans.find((span) => span.name === "tool:read");
+  const skillToolSpan = spans.find((span) => span.name === "tool:Skill");
+  const skillSpan = spans.find((span) => span.name === "skill:monitor");
 
-  assert.ok(skillSummarySpan);
-  assert.ok(skillCallSpan);
-  assert.ok(toolSpan);
-  assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
-  assert.equal(skillCallSpan.ended, true);
-  assert.equal(run.skillInvocationSpans.size, 0);
+  assert.ok(skillToolSpan);
+  assert.ok(skillSpan);
+  assert.equal(skillSpan.parentCtx.span.name, skillToolSpan.name);
+  assert.equal(skillSpan.ended, true);
 });
 
 test("tool lifecycle events no longer export redundant event_tool_* attributes", () => {
@@ -402,14 +395,13 @@ test("exec commands inside a skill directory create the matching skill span", ()
     },
   });
 
-  const skillSummarySpan = spans.find((span) => span.name === "skill:dql");
-  const skillCallSpan = spans.find((span) => span.name === "skill_call:dql");
-  const toolSpan = spans.find((span) => span.name === "tool:exec");
+  const skillToolSpan = spans.find((span) => span.name === "tool:Skill");
+  const skillSpan = spans.find((span) => span.name === "skill:dql");
 
-  assert.ok(skillSummarySpan);
-  assert.ok(skillCallSpan);
-  assert.ok(toolSpan);
-  assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
+  assert.ok(skillToolSpan);
+  assert.ok(skillSpan);
+  assert.equal(skillSpan.parentCtx.span.name, skillToolSpan.name);
+  assert.equal(skillToolSpan.options.attributes.tool_original_name, "exec");
 });
 
 test("dashboard workspace paths infer the dashboard skill span", () => {
@@ -480,17 +472,16 @@ test("dashboard workspace paths infer the dashboard skill span", () => {
     },
   });
 
-  const skillSummarySpan = spans.find((span) => span.name === "skill:dashboard");
-  const skillCallSpan = spans.find((span) => span.name === "skill_call:dashboard");
-  const toolSpan = spans.find((span) => span.name === "tool:write");
+  const skillToolSpan = spans.find((span) => span.name === "tool:Skill");
+  const skillSpan = spans.find((span) => span.name === "skill:dashboard");
 
-  assert.ok(skillSummarySpan);
-  assert.ok(skillCallSpan);
-  assert.ok(toolSpan);
-  assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
+  assert.ok(skillToolSpan);
+  assert.ok(skillSpan);
+  assert.equal(skillSpan.parentCtx.span.name, skillToolSpan.name);
+  assert.equal(skillToolSpan.options.attributes.tool_original_name, "write");
 });
 
-test("dashboard edit tools create a skill call span and preserve skill attrs", () => {
+test("dashboard edit tools create a nested Skill tool span and preserve skill attrs", () => {
   const spans = [];
   const tracer = createFakeTracer(spans);
   const trace = {
@@ -559,17 +550,15 @@ test("dashboard edit tools create a skill call span and preserve skill attrs", (
     },
   });
 
-  const skillSummarySpan = spans.find((span) => span.name === "skill:dashboard");
-  const skillCallSpan = spans.find((span) => span.name === "skill_call:dashboard");
-  const toolSpan = spans.find((span) => span.name === "tool:edit");
+  const skillToolSpan = spans.find((span) => span.name === "tool:Skill");
+  const skillSpan = spans.find((span) => span.name === "skill:dashboard");
 
-  assert.ok(skillSummarySpan);
-  assert.ok(skillCallSpan);
-  assert.ok(toolSpan);
-  assert.equal(toolSpan.parentCtx.span.name, skillCallSpan.name);
-  assert.equal(skillSummarySpan.options.attributes.skill_name, "dashboard");
-  assert.equal(skillCallSpan.options.attributes.skill_name, "dashboard");
-  assert.equal(toolSpan.options.attributes.skill_name, "dashboard");
+  assert.ok(skillToolSpan);
+  assert.ok(skillSpan);
+  assert.equal(skillSpan.parentCtx.span.name, skillToolSpan.name);
+  assert.equal(skillSpan.options.attributes.skill_name, "dashboard");
+  assert.equal(skillToolSpan.options.attributes.skill_name, "dashboard");
+  assert.equal(skillToolSpan.options.attributes.tool_original_name, "edit");
 });
 
 test("tool and skill spans backfill session attrs from the snapshot", () => {
@@ -665,50 +654,44 @@ test("tool and skill spans backfill session attrs from the snapshot", () => {
     },
   });
 
-  const skillSummarySpan = spans.find((span) => span.name === "skill:monitor");
-  const skillCallSpan = spans.find((span) => span.name === "skill_call:monitor");
-  const toolSpan = spans.find((span) => span.name === "tool:read");
+  const skillToolSpan = spans.find((span) => span.name === "tool:Skill");
+  const skillSpan = spans.find((span) => span.name === "skill:monitor");
 
-  assert.ok(skillSummarySpan);
-  assert.ok(skillCallSpan);
-  assert.ok(toolSpan);
+  assert.ok(skillToolSpan);
+  assert.ok(skillSpan);
+  assert.equal(skillSpan.parentCtx.span.name, skillToolSpan.name);
 
-  assert.equal(skillSummarySpan.options.attributes.session_id, "sess-1");
-  assert.equal(skillSummarySpan.options.attributes.session_key, "agent:runtime:scope:target");
-  assert.equal(skillSummarySpan.options.attributes.channel, "cli");
-  assert.equal(skillSummarySpan.options.attributes["gen_ai.session_id"], undefined);
-  assert.equal(skillSummarySpan.options.attributes["gen_ai.agent_channel"], undefined);
+  assert.equal(skillSpan.options.attributes.session_id, "sess-1");
+  assert.equal(skillSpan.options.attributes.session_key, "agent:runtime:scope:target");
+  assert.equal(skillSpan.options.attributes.channel, "cli");
+  assert.equal(skillSpan.options.attributes["gen_ai.session_id"], undefined);
+  assert.equal(skillSpan.options.attributes["gen_ai.agent_channel"], undefined);
 
-  assert.equal(skillCallSpan.attributes.session_id, "sess-1");
-  assert.equal(skillCallSpan.attributes.session_key, "agent:runtime:scope:target");
-  assert.equal(skillCallSpan.attributes.channel, "cli");
-  assert.equal(skillCallSpan.attributes["gen_ai.session_id"], undefined);
-  assert.equal(skillCallSpan.attributes["gen_ai.agent_channel"], undefined);
+  assert.equal(skillSpan.attributes.session_id, "sess-1");
+  assert.equal(skillSpan.attributes.session_key, "agent:runtime:scope:target");
+  assert.equal(skillSpan.attributes.channel, "cli");
+  assert.equal(skillSpan.attributes["gen_ai.session_id"], undefined);
+  assert.equal(skillSpan.attributes["gen_ai.agent_channel"], undefined);
 
-  assert.equal(toolSpan.attributes.session_id, "sess-1");
-  assert.equal(toolSpan.attributes.session_key, "agent:runtime:scope:target");
-  assert.equal(toolSpan.attributes.channel, "cli");
-  assert.equal(toolSpan.attributes["gen_ai.session_id"], undefined);
-  assert.equal(toolSpan.attributes["gen_ai.agent_channel"], undefined);
-  assert.equal(skillSummarySpan.attributes["skill.name"], "monitor");
-  assert.equal(skillSummarySpan.attributes["skill.description"], "生成监控器");
-  assert.equal(skillSummarySpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
-  assert.equal(skillSummarySpan.attributes["skill.source.type"], "workspace");
-  assert.equal(skillSummarySpan.attributes.skill_result_status, "completed");
-  assert.equal(skillSummarySpan.attributes["gen_ai.skill1.name"], "monitor");
-  assert.equal(skillSummarySpan.attributes["gen_ai.skill1.version"], "1.2.3");
-  assert.equal(skillCallSpan.attributes["skill.name"], "monitor");
-  assert.equal(skillCallSpan.attributes["skill.description"], "生成监控器");
-  assert.equal(skillCallSpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
-  assert.equal(skillCallSpan.attributes["skill.source.type"], "workspace");
-  assert.equal(skillCallSpan.attributes.skill_result_status, "completed");
-  assert.equal(toolSpan.attributes["skill.name"], "monitor");
-  assert.equal(toolSpan.attributes["skill.description"], "生成监控器");
-  assert.equal(toolSpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
-  assert.equal(toolSpan.attributes["skill.source.type"], "workspace");
-  assert.equal(toolSpan.attributes.skill_result_status, "completed");
-  assert.equal(toolSpan.attributes["gen_ai.skill1.name"], "monitor");
-  assert.equal(toolSpan.attributes["gen_ai.skill1.version"], "1.2.3");
+  assert.equal(skillToolSpan.attributes.session_id, "sess-1");
+  assert.equal(skillToolSpan.attributes.session_key, "agent:runtime:scope:target");
+  assert.equal(skillToolSpan.attributes.channel, "cli");
+  assert.equal(skillToolSpan.attributes["gen_ai.session_id"], undefined);
+  assert.equal(skillToolSpan.attributes["gen_ai.agent_channel"], undefined);
+  assert.equal(skillSpan.attributes["skill.name"], "monitor");
+  assert.equal(skillSpan.attributes["skill.description"], "生成监控器");
+  assert.equal(skillSpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
+  assert.equal(skillSpan.attributes["skill.source.type"], "workspace");
+  assert.equal(skillSpan.attributes.skill_result_status, "completed");
+  assert.equal(skillSpan.attributes["gen_ai.skill1.name"], "monitor");
+  assert.equal(skillSpan.attributes["gen_ai.skill1.version"], "1.2.3");
+  assert.equal(skillToolSpan.attributes["skill.name"], "monitor");
+  assert.equal(skillToolSpan.attributes["skill.description"], "生成监控器");
+  assert.equal(skillToolSpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
+  assert.equal(skillToolSpan.attributes["skill.source.type"], "workspace");
+  assert.equal(skillToolSpan.attributes.skill_result_status, "completed");
+  assert.equal(skillToolSpan.attributes["gen_ai.skill1.name"], "monitor");
+  assert.equal(skillToolSpan.attributes["gen_ai.skill1.version"], "1.2.3");
 });
 
 test("tool completion records tool and skill client operation durations", () => {
@@ -826,7 +809,7 @@ test("tool completion records tool and skill client operation durations", () => 
     {
       value: 0.38,
       operation_name: "execute_tool",
-      tool_name: "exec",
+      tool_name: "Skill",
       gen_ai_skill_name: undefined,
       skill_name: "dashboard",
       model_name: undefined,
@@ -926,10 +909,13 @@ test("tool events use transcript tool call mappings when runtime args are absent
   });
 
   const skillSummaryNames = spans.filter((span) => span.name.startsWith("skill:")).map((span) => span.name).sort();
-  const skillCallNames = spans.filter((span) => span.name.startsWith("skill_call:")).map((span) => span.name).sort();
+  const skillToolNames = spans.filter((span) => span.name === "tool:Skill").map((span) => span.name).sort();
 
   assert.deepEqual(skillSummaryNames, ["skill:dql", "skill:monitor"]);
-  assert.deepEqual(skillCallNames, ["skill_call:dql", "skill_call:monitor"]);
+  assert.deepEqual(skillToolNames, ["tool:Skill", "tool:Skill"]);
+  for (const skillSpan of spans.filter((span) => span.name.startsWith("skill:"))) {
+    assert.equal(skillSpan.parentCtx.span.name, "tool:Skill");
+  }
 });
 
 test("transcript tool calls can be replayed into tool spans", () => {

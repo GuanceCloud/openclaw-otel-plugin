@@ -106,7 +106,6 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
     usedToolCommands: new Set<string>(),
     usedToolResultStatuses: new Set<string>(),
     skillSpans: new Map(),
-    skillInvocationSpans: new Map(),
     toolSpans: new Map(),
   };
 }
@@ -1584,6 +1583,7 @@ export function buildToolAttrs(
     skill?: SkillCatalogEntry;
     skillCallId?: string;
     skillResultStatus?: "completed" | "error";
+    originalToolName?: string;
   },
 ): Record<string, string | number | boolean | undefined> {
   const toolIdentity = inferMcpToolIdentity(
@@ -1607,6 +1607,7 @@ export function buildToolAttrs(
   return {
     "span.kind": "tool",
     "openclaw.tool.name": toolName,
+    "openclaw.tool.original_name": options?.originalToolName,
     "openclaw.tool.call_id": toolCallId,
     "openclaw.skill.name": options?.skillName,
     "openclaw.skill.description": options?.skill?.description,
@@ -2166,10 +2167,6 @@ export function buildSkillCatalogEntry(
 
 export function skillSpanName(skillName: string): string {
   return `skill:${skillName}`;
-}
-
-export function skillCallSpanName(skillName: string): string {
-  return `skill_call:${skillName}`;
 }
 
 export function extractMentionedSkillNames(

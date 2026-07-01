@@ -39,16 +39,15 @@
 | `tool_call_id` | `gen_ai.tool.call.id` | `tool:*` span | tool call 标识。 |
 | `tool_args_preview` | `gen_ai.tool.call.arguments` | `tool:*` span | tool 参数预览；当前为字符串 preview。 |
 | `tool_result_preview` | `gen_ai.tool.call.result` | `tool:*` span | tool 结果预览；当前为字符串 preview。 |
-| `skill_name` | `skill.name` | `skill:*`、`skill_call:*`、`tool:*` | skill 名称；`skill_name` 继续保留为兼容短字段。 |
-| `skill_call_id` | - | `skill:*`、`skill_call:*`、`tool:*` | skill 调用标识；当前与具体 `tool_call_id` 对齐。 |
-| `skill_source` | - | `skill:*`、`skill_call:*`、tool / skill duration metrics | 兼容短字段；保留运行期归因来源，当前主要为 `runtime` / `transcript`。 |
-| `skill_type` | - | `skill_call:*` | 兼容短字段；当前主要为 `call`。 |
-| `skill_result_status` | `gen_ai.skill1.result_status`（项目扩展） | `skill:*`、`skill_call:*`、`tool:*` | skill 结果状态；按关联 tool 是否报错映射为 `completed` / `error`。 |
-| `skill.description` | `gen_ai.skill1.description`（项目扩展） | `skill:*`、`skill_call:*`、`tool:*` | skill 描述；优先来自 `SKILL.md` frontmatter。 |
-| `skill.path` | `gen_ai.skill1.path`（项目扩展） | `skill:*`、`skill_call:*`、`tool:*` | skill 入口 `SKILL.md` 的绝对路径。 |
-| `skill.source.type` | `gen_ai.skill1.source.type`（项目扩展） | `skill:*`、`skill_call:*`、`tool:*` | skill 来源类型；当前取值为 `system` / `user` / `workspace`。 |
-| - | `gen_ai.skill1.name`（项目扩展） | `skill:*`、`skill_call:*`、`tool:*` | `skill.name` 的 `gen_ai.*` 扩展镜像。 |
-| - | `gen_ai.skill1.version`（项目扩展） | `skill:*`、`skill_call:*`、`tool:*` | skill 版本；优先取 frontmatter `version`，其次取同目录 `package.json.version`。 |
+| `skill_name` | `skill.name` | `skill:*`、`tool:*` | skill 名称；`skill_name` 继续保留为兼容短字段。 |
+| `skill_call_id` | - | `skill:*`、`tool:*` | skill 调用标识；当前与具体 `tool_call_id` 对齐，用于关联 `tool:Skill` 与 `skill:<name>`。 |
+| `skill_source` | - | `skill:*`、tool / skill duration metrics | 兼容短字段；保留运行期归因来源，当前主要为 `runtime` / `transcript`。 |
+| `skill_result_status` | `gen_ai.skill1.result_status`（项目扩展） | `skill:*`、`tool:*` | skill 结果状态；按关联 tool 是否报错映射为 `completed` / `error`。 |
+| `skill.description` | `gen_ai.skill1.description`（项目扩展） | `skill:*`、`tool:*` | skill 描述；优先来自 `SKILL.md` frontmatter。 |
+| `skill.path` | `gen_ai.skill1.path`（项目扩展） | `skill:*`、`tool:*` | skill 入口 `SKILL.md` 的绝对路径。 |
+| `skill.source.type` | `gen_ai.skill1.source.type`（项目扩展） | `skill:*`、`tool:*` | skill 来源类型；当前取值为 `system` / `user` / `workspace`。 |
+| - | `gen_ai.skill1.name`（项目扩展） | `skill:*`、`tool:*` | `skill.name` 的 `gen_ai.*` 扩展镜像。 |
+| - | `gen_ai.skill1.version`（项目扩展） | `skill:*`、`tool:*` | skill 版本；优先取 frontmatter `version`，其次取同目录 `package.json.version`。 |
 | `token_type` | `gen_ai.token.type` | token 相关指标 | token 类型。当前指标只上报 `input` / `output`。 |
 | `output_kind=text` | `gen_ai.output.type=text` | 模型 / egress 相关 span | 仅当值符合官方枚举时输出，`tool_call` 仍保留在 `output_kind`。 |
 | `agent_version` | `gen_ai.agent.version` | 显式带 agent version 的 span / log attrs | 与 resource 级 `agent_version` 保持兼容。 |

@@ -18,6 +18,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 - Stopped emitting standalone `channel_ingress` and `channel_egress` spans; ingress and egress context now stays on request / agent summary fields, logs, and the remaining runtime lifecycle spans.
 - Updated trace documentation and tests to keep the retained span set focused on `openclaw_request`, `invoke_agent`, `dispatch_queue`, `session_processing`, `runtime_orchestration`, `llm`, skill, and tool spans.
+- Aligned skill trace shape with `claude-otel-plugin` by replacing the runtime `skill_call:*` wrapper with `tool:Skill -> skill:<name>`; the original OpenClaw low-level tool name is retained as `tool_original_name`.
 
 ## 2026-06-26
 
