@@ -91,17 +91,9 @@ export type ActiveRunSpan = {
   mainStartTs: number;
   messageQueuedTs?: number;
   orchestrationCursorTs?: number;
-  channelIngressEmitted?: boolean;
   dispatchQueueEmitted?: boolean;
   sessionProcessingEmitted?: boolean;
-  channelEgressEmitted?: boolean;
   runtimeLifecycleSpans?: any[];
-  pendingChannelIngressWindow?: {
-    startTs: number;
-    endTs: number;
-    channel?: string;
-    source?: string;
-  };
   pendingDispatchQueueWindow?: {
     startTs: number;
     endTs: number;

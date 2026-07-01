@@ -14,6 +14,11 @@ Current work is recorded by calendar day. Historical entries before the current 
 - Split skill duration metrics from generic tool duration metrics with `gen_ai.operation.name=skill` and `gen_ai.skill.name`, while regular tools continue to use `gen_ai.operation.name=execute_tool` and `gen_ai.tool.name`.
 - Updated metrics documentation, field mapping notes, trace tag notes, and GTrace protocol docs to reflect the new metric set.
 
+### Trace Span Simplification
+
+- Stopped emitting standalone `channel_ingress` and `channel_egress` spans; ingress and egress context now stays on request / agent summary fields, logs, and the remaining runtime lifecycle spans.
+- Updated trace documentation and tests to keep the retained span set focused on `openclaw_request`, `invoke_agent`, `dispatch_queue`, `session_processing`, `runtime_orchestration`, `llm`, skill, and tool spans.
+
 ## 2026-06-26
 
 ### Request And Agent Span Hygiene

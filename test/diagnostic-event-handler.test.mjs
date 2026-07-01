@@ -120,7 +120,7 @@ test("message.processed does not emit standalone thinking span", () => {
   );
 });
 
-test("message.processed requests channel_egress lifecycle span", () => {
+test("message.processed syncs lifecycle without requesting an output lifecycle span", () => {
   const lifecycleCalls = [];
   const run = {
     ctx: { ctx: "run" },
@@ -205,7 +205,13 @@ test("message.processed requests channel_egress lifecycle span", () => {
   assert.equal(lifecycleCalls.length, 1);
   assert.equal(lifecycleCalls[0].type, "lifecycle");
   assert.equal(lifecycleCalls[0].evt.ts, 1000);
-  assert.equal(lifecycleCalls[0].options.emitEgress, true);
+  assert.deepEqual(Object.keys(lifecycleCalls[0].options).sort(), [
+    "createIfMissing",
+    "outcome",
+    "outputLength",
+    "outputPreview",
+    "snapshot",
+  ]);
   assert.equal(lifecycleCalls[0].options.outcome, "completed");
 });
 
@@ -2350,7 +2356,7 @@ test("message.queued rotates a completed active run before starting the next req
   assert.equal(endRootCalls[0].evt.ts, 1999);
 });
 
-test("message.queued rotates an active run that only reached terminal lifecycle spans", () => {
+test("message.queued rotates an active run with a terminal pending outcome", () => {
   const oldRun = {
     ctx: { ctx: "old-run" },
     mainStartTs: 1000,
@@ -2358,7 +2364,6 @@ test("message.queued rotates an active run that only reached terminal lifecycle 
     modelSpanEmitted: false,
     aggregate: { modelCalls: 0 },
     usedToolNames: new Set(),
-    channelEgressEmitted: true,
     pendingFinalOutcome: "completed",
   };
   const newRun = {

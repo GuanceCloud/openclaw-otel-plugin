@@ -687,7 +687,7 @@ export function createOtelPluginService(
         const run = activeRuns.get(requestKey);
         const effectiveStartTs = Math.max(
           startTs,
-          phase === "channel_ingress" || phase === "dispatch_queue"
+          phase === "dispatch_queue"
             ? root?.startedAt ?? startTs
             : run?.mainStartTs ?? startTs,
         );
@@ -696,14 +696,10 @@ export function createOtelPluginService(
           return undefined;
         }
         const span = tracer.startSpan(
-          phase === "channel_ingress"
-            ? "channel_ingress"
-            : phase === "dispatch_queue"
+          phase === "dispatch_queue"
               ? "dispatch_queue"
             : phase === "session_processing"
               ? "session_processing"
-              : phase === "channel_egress"
-                ? "channel_egress"
               : "runtime_orchestration",
           {
             startTime: new Date(effectiveStartTs),
@@ -712,8 +708,7 @@ export function createOtelPluginService(
               __suppress_session_input_preview: true,
               __suppress_session_output_preview: true,
               __suppress_session_output_summary:
-                phase === "channel_ingress"
-                || phase === "dispatch_queue"
+                phase === "dispatch_queue"
                 || phase === "session_processing",
               ...buildRunScopeAttrs(
                 resolveRunId(evt) ?? run?.runId ?? root?.runId,
@@ -727,7 +722,7 @@ export function createOtelPluginService(
               "span.kind": "runtime",
               "openclaw.runtime.phase": phase,
               __min_snapshot_user_ts:
-                phase === "channel_ingress" || phase === "dispatch_queue" || phase === "session_processing"
+                phase === "dispatch_queue" || phase === "session_processing"
                   ? effectiveStartTs
                   : undefined,
               ...attrs,
@@ -742,7 +737,7 @@ export function createOtelPluginService(
           run.runtimeLifecycleSpans.push(span);
           patchRuntimeLifecycleRunScopeAttrs(run, root, resolveRunId(evt));
         }
-        if (run && phase !== "channel_ingress" && phase !== "session_processing" && phase !== "channel_egress") {
+        if (run && phase !== "session_processing") {
           run.orchestrationCursorTs = effectiveEndTs;
         }
         return span;
@@ -763,7 +758,6 @@ export function createOtelPluginService(
           startTsHint?: number;
           processingStartTs?: number;
           nextActionTs?: number;
-          emitEgress?: boolean;
           snapshot?: ReturnType<typeof loadSessionSnapshot>;
           outputPreview?: string;
           outputLength?: number;
@@ -796,21 +790,6 @@ export function createOtelPluginService(
           : run.mainStartTs;
 
         if (resolvedSessionId) {
-          if (!run.channelIngressEmitted && run.pendingChannelIngressWindow) {
-            emitRuntimeOrchestrationSpan(
-              { ...lifecycleEvt, sessionId: resolvedSessionId },
-              run.pendingChannelIngressWindow.startTs,
-              run.pendingChannelIngressWindow.endTs,
-              "channel_ingress",
-              {
-                "openclaw.channel": run.pendingChannelIngressWindow.channel,
-                "openclaw.source": run.pendingChannelIngressWindow.source,
-              },
-              root?.ctx,
-            );
-            run.channelIngressEmitted = true;
-            run.pendingChannelIngressWindow = undefined;
-          }
           if (!run.dispatchQueueEmitted && run.pendingDispatchQueueWindow) {
             emitRuntimeOrchestrationSpan(
               { ...lifecycleEvt, sessionId: resolvedSessionId },
@@ -847,32 +826,6 @@ export function createOtelPluginService(
           }
         }
 
-        if (!run.channelIngressEmitted && typeof ingressStartTs === "number") {
-          const { ingressEndTs } = resolveIngressLifecycleWindows(ingressStartTs, processingStartTs);
-          if (resolvedSessionId) {
-            emitRuntimeOrchestrationSpan(
-              { ...lifecycleEvt, sessionId: resolvedSessionId },
-              ingressStartTs,
-              ingressEndTs,
-              "channel_ingress",
-              {
-                "openclaw.channel": evt.channel ?? snapshot?.lastChannel,
-                "openclaw.source": evt.source,
-              },
-              root?.ctx,
-            );
-            run.channelIngressEmitted = true;
-          } else {
-            run.pendingChannelIngressWindow = {
-              startTs: ingressStartTs,
-              endTs: ingressEndTs,
-              channel: evt.channel ?? snapshot?.lastChannel,
-              source: evt.source,
-            };
-          }
-          run.messageQueuedTs = undefined;
-        }
-
         if (!run.dispatchQueueEmitted && typeof ingressStartTs === "number") {
           const { queueStartTs, queueEndTs } = resolveIngressLifecycleWindows(ingressStartTs, processingStartTs);
           if (typeof queueStartTs === "number" && typeof queueEndTs === "number") {
@@ -902,6 +855,9 @@ export function createOtelPluginService(
           if (resolvedSessionId || typeof queueStartTs !== "number" || typeof queueEndTs !== "number") {
             run.dispatchQueueEmitted = true;
           }
+          if (run.dispatchQueueEmitted) {
+            run.messageQueuedTs = undefined;
+          }
         }
 
         if (!run.sessionProcessingEmitted && typeof processingStartTs === "number") {
@@ -930,23 +886,6 @@ export function createOtelPluginService(
               endTs: processingEndTs,
             };
           }
-        }
-
-        if (options?.emitEgress && !run.channelEgressEmitted && typeof evt.ts === "number") {
-          emitRuntimeOrchestrationSpan(
-            evt,
-            evt.ts,
-            evt.ts + MIN_VISIBLE_CHILD_MS,
-            "channel_egress",
-            {
-              "openclaw.channel": evt.channel ?? snapshot?.lastChannel,
-              "openclaw.outcome": options.outcome ?? evt.outcome,
-              "openclaw.output.preview": options.outputPreview,
-              "openclaw.output.length": options.outputLength,
-            },
-            run.ctx,
-          );
-          run.channelEgressEmitted = true;
         }
 
         return run;
@@ -1047,7 +986,6 @@ export function createOtelPluginService(
         markReplayFinalization(sessionKey, snapshot);
         ensureRuntimeLifecycleSpans(transcriptEvt, {
           createIfMissing: true,
-          emitEgress: true,
           snapshot,
           outputPreview: clipPreview(snapshot.lastAssistantText),
           outputLength: snapshot.lastAssistantText?.length,
@@ -1166,7 +1104,6 @@ export function createOtelPluginService(
             ?? trajectoryRun.userTs
             ?? trajectoryRun.completedAt
             ?? Date.now();
-          const ingressStartTs = requestStartTs;
           const processingStartTs = trajectoryRun.userTs ?? requestStartTs;
           const modelStartTs = trajectoryRun.userTs ?? processingStartTs;
           const rawModelEndTs = trajectoryRun.assistantTs
@@ -1174,10 +1111,6 @@ export function createOtelPluginService(
             ?? (modelStartTs + MIN_VISIBLE_MODEL_MS);
           const modelEndTs = Math.max(rawModelEndTs, modelStartTs + 1);
           const egressEndTs = Math.max(trajectoryRun.completedAt ?? modelEndTs, modelEndTs + MIN_VISIBLE_CHILD_MS);
-          const ingressEndTs = Math.max(
-            Math.min(ingressStartTs + MIN_VISIBLE_CHILD_MS, processingStartTs),
-            ingressStartTs + 1,
-          );
           const processingEndTs = Math.max(
             Math.min(processingStartTs + MIN_VISIBLE_CHILD_MS, modelStartTs),
             processingStartTs + 1,
@@ -1245,18 +1178,6 @@ export function createOtelPluginService(
           const runCtx = trace.setSpan(rootCtx, runSpan);
 
           createImmediateSpan(
-            "channel_ingress",
-            ingressStartTs,
-            ingressEndTs,
-            SpanKind.INTERNAL,
-            {
-              ...baseAttrs,
-              "span.kind": "runtime",
-              "openclaw.runtime.phase": "channel_ingress",
-            },
-            rootCtx,
-          );
-          createImmediateSpan(
             "session_processing",
             processingStartTs,
             processingEndTs,
@@ -1303,21 +1224,6 @@ export function createOtelPluginService(
             },
             runCtx,
           );
-          createImmediateSpan(
-            "channel_egress",
-            modelEndTs,
-            egressEndTs,
-            SpanKind.INTERNAL,
-            {
-              ...baseAttrs,
-              "span.kind": "runtime",
-              "openclaw.runtime.phase": "channel_egress",
-              "openclaw.output.preview": outputPreview,
-              "openclaw.output.length": assistantText?.length,
-            },
-            runCtx,
-          );
-
           runSpan.setAttributes(buildAgentSummaryTraceAttrs(sessionKey, {
             ...baseAttrs,
             "span.kind": "agent",

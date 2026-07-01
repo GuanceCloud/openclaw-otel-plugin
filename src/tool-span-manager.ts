@@ -108,7 +108,6 @@ type ToolSpanManagerDeps = {
       startTsHint?: number;
       processingStartTs?: number;
       nextActionTs?: number;
-      emitEgress?: boolean;
       snapshot?: SessionSnapshot | undefined;
       outputPreview?: string;
       outputLength?: number;

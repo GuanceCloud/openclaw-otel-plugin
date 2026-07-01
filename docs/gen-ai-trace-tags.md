@@ -47,7 +47,6 @@
 ### 保留的 Span
 
 - `openclaw_request`
-- `channel_ingress`
 - `dispatch_queue`
 - `invoke_agent`
 - `session_processing`
@@ -56,7 +55,6 @@
 - `skill:*`
 - `skill_call:*`
 - `tool:*`
-- `channel_egress`
 
 ### 不单独拆出的流程节点
 
@@ -69,7 +67,7 @@
 说明：
 
 - 这些节点当前通过已有 span 的走向、属性或结果来表达，不额外创建独立 span
-- `Final Answer` 由最后一个 `llm` 与 `channel_egress` 共同表示
+- `Final Answer` 由最后一个 `llm` 以及 request / agent 汇总属性共同表示
 - `Decision Router` 由 `llm` 之后进入 `skill/tool/finish` 的分支体现
 
 ### 设计边界
@@ -166,7 +164,7 @@
 - `status`
   - 表示当前 span 自身的执行状态
   - 用于判断某个具体 span 是否报错
-  - 例如 `tool:*`、`llm`、`channel_egress` 是否执行失败
+  - 例如 `tool:*`、`llm` 是否执行失败
 
   当前推荐按以下语义理解：
 
@@ -355,7 +353,7 @@
 
 补充说明：
 
-- `runtime_orchestration` / `channel_egress` 当前允许携带 `output_summary`
+- `runtime_orchestration` 当前允许携带 `output_summary`
 - `runtime` 生命周期 span 仍默认不携带 `input_preview` / `output_preview`
 - 与 Agent 计划最相关的 runtime 编排窗口当前统一落在 `runtime_orchestration`，并使用 `runtime_phase=agent_plan` 表达，而不是新增独立 `agent_plan` span
 - MCP 调用当前不新增独立 span 类型；仍落在 `tool:*`，通过 `tool_provider=mcp` 与 `tool_namespace=<server>` 区分

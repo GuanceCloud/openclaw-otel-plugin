@@ -112,7 +112,6 @@ type DiagnosticEventHandlerDeps = {
       startTsHint?: number;
       processingStartTs?: number;
       nextActionTs?: number;
-      emitEgress?: boolean;
       snapshot?: SessionSnapshot | undefined;
       outputPreview?: string;
       outputLength?: number;
@@ -265,10 +264,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       run.modelSpanEmitted
       || typeof run.modelEndTs === "number"
       || (typeof run.orchestrationCursorTs === "number" && run.orchestrationCursorTs > run.mainStartTs)
-      || run.channelIngressEmitted
       || run.dispatchQueueEmitted
       || run.sessionProcessingEmitted
-      || run.channelEgressEmitted
       || (typeof run.pendingFinalOutcome === "string" && run.pendingFinalOutcome.length > 0)
       || run.finalAttrsApplied
       || (run.usedToolNames?.size ?? 0) > 0
@@ -405,7 +402,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             },
             {
               createIfMissing: true,
-              emitEgress: true,
               snapshot: replaySnapshotIsFresh ? snapshot : undefined,
               outputPreview: replaySnapshotIsFresh ? clipPreview(snapshot?.lastAssistantText) : undefined,
               outputLength: replaySnapshotIsFresh ? snapshot?.lastAssistantText?.length : undefined,
@@ -730,7 +726,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         }
         const run = ensureRuntimeLifecycleSpans(evt, {
           createIfMissing: true,
-          emitEgress: true,
           snapshot: replaySnapshotIsFresh ? snapshot : undefined,
           outputPreview: replaySnapshotOutputPreview,
           outputLength: replaySnapshotIsFresh ? snapshot?.lastAssistantText?.length : undefined,

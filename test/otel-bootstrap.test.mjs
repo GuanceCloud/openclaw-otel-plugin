@@ -129,7 +129,7 @@ test("RootBufferedTraceSpanProcessor exports buffered child attribute patches be
     traceId: "trace-3",
     spanId: "child-1",
     parentSpanId: "root-3",
-    name: "channel_ingress",
+    name: "session_processing",
     startTime: 2_000,
     endTime: 2_050,
   });
@@ -148,6 +148,6 @@ test("RootBufferedTraceSpanProcessor exports buffered child attribute patches be
   await processor.forceFlush();
 
   assert.equal(exports.length, 1);
-  const exportedChild = exports[0].find((span) => span.name === "channel_ingress");
+  const exportedChild = exports[0].find((span) => span.name === "session_processing");
   assert.equal(exportedChild.attributes.run_id, "run-3");
 });
