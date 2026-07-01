@@ -120,7 +120,7 @@ type DiagnosticEventHandlerDeps = {
   ): ActiveRunSpan | undefined;
   emitModelTurnDebugLog(payload: Record<string, unknown>): void;
   getActiveSkillCtx(run: ActiveRunSpan | undefined): any;
-  ensureTranscriptSkillSpans(evt: { sessionKey?: string; sessionId?: string; ts?: number }): void;
+  syncTranscriptSkillSummary(evt: { sessionKey?: string; sessionId?: string; ts?: number }): void;
   emitTranscriptModelSpans(evt: SessionEvent): boolean;
   emitSyntheticModelSpan(evt: SessionEvent): void;
   emitTranscriptToolSpans(evt: SessionEvent): void;
@@ -155,7 +155,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     ensureRuntimeLifecycleSpans,
     emitModelTurnDebugLog,
     getActiveSkillCtx,
-    ensureTranscriptSkillSpans,
+    syncTranscriptSkillSummary,
     emitTranscriptModelSpans,
     emitSyntheticModelSpan,
     emitTranscriptToolSpans,
@@ -710,7 +710,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           && (hasActiveTrace || replaySnapshotCompleted)
         );
         if (shouldAttemptReplay) {
-          ensureTranscriptSkillSpans(evt);
+          syncTranscriptSkillSummary(evt);
           const emittedTranscriptModelSpans = emitTranscriptModelSpans(evt);
           if (emittedTranscriptModelSpans) {
             emitTranscriptToolSpans(evt);

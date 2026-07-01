@@ -17,7 +17,7 @@ function createFakeSpan(name) {
   };
 }
 
-test("transcript skill spans use invoked skills instead of mentioned skills", () => {
+test("transcript skill summaries use invoked skills instead of mentioned skills", () => {
   const spans = [];
   const run = createRunState({ active: true }, 1000, 1000);
   run.span = createFakeSpan("run");
@@ -75,15 +75,13 @@ test("transcript skill spans use invoked skills instead of mentioned skills", ()
     emitModelTurnDebugLog() {},
   });
 
-  manager.ensureTranscriptSkillSpans({ sessionKey: "s1", ts: 2000 });
+  manager.syncTranscriptSkillSummary({ sessionKey: "s1", ts: 2000 });
 
-  assert.deepEqual(
-    spans.map((span) => span.name),
-    ["skill:dql"],
-  );
+  assert.deepEqual(spans.map((span) => span.name), []);
+  assert.deepEqual(Array.from(run.usedSkillNames), ["dql"]);
 });
 
-test("transcript skill summary is skipped when a concrete skill tool call exists", () => {
+test("transcript skill summary does not create spans when a concrete skill tool call exists", () => {
   const spans = [];
   const run = createRunState({ active: true }, 1000, 1000);
   run.span = createFakeSpan("run");
@@ -138,13 +136,13 @@ test("transcript skill summary is skipped when a concrete skill tool call exists
     emitModelTurnDebugLog() {},
   });
 
-  manager.ensureTranscriptSkillSpans({ sessionKey: "s1", ts: 2000 });
+  manager.syncTranscriptSkillSummary({ sessionKey: "s1", ts: 2000 });
 
   assert.deepEqual(spans.map((span) => span.name), []);
   assert.deepEqual(Array.from(run.usedSkillNames), ["dashboard"]);
 });
 
-test("transcript skill summary is skipped when the run already used the skill", () => {
+test("transcript skill summary does not create spans when the run already used the skill", () => {
   const spans = [];
   const run = createRunState({ active: true }, 1000, 1000);
   run.span = createFakeSpan("run");
@@ -197,7 +195,7 @@ test("transcript skill summary is skipped when the run already used the skill", 
     emitModelTurnDebugLog() {},
   });
 
-  manager.ensureTranscriptSkillSpans({ sessionKey: "s1", ts: 2000 });
+  manager.syncTranscriptSkillSummary({ sessionKey: "s1", ts: 2000 });
 
   assert.deepEqual(spans.map((span) => span.name), []);
   assert.deepEqual(Array.from(run.usedSkillNames), ["dashboard"]);

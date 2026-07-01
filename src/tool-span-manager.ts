@@ -385,32 +385,19 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     return skillState;
   };
 
-  const ensureTranscriptSkillSpans = (evt: SessionEvent) => {
+  const syncTranscriptSkillSummary = (evt: SessionEvent) => {
     const snapshot = loadSessionSnapshot(evt.sessionKey);
     const run = getRun(evt, false);
-    const concreteSkillNames = new Set(
-      [...(run?.usedSkillNames ?? []), ...Object.values(snapshot?.toolCallSkillNamesById ?? {})]
-        .map((skillName) => skillName.trim())
-        .filter(Boolean),
-    );
-    for (const toolCall of snapshot?.lastRunToolCalls ?? []) {
-      const summary = collectToolSummaryValues(toolCall.name, {
-        args: toolCall.args,
-        meta: toolCall.meta,
-        result: toolCall.result,
-      });
-      const skillName = inferSkillNameFromToolIdentity(toolCall.name, summary.target, summary.command);
-      if (skillName) {
-        concreteSkillNames.add(skillName);
-      }
+    if (!run) {
+      return;
     }
     for (const skillName of snapshot?.invokedSkillNames ?? []) {
-      if (concreteSkillNames.has(skillName)) {
-        run?.usedSkillNames.add(skillName);
-        continue;
+      const normalizedSkillName = skillName.trim();
+      if (normalizedSkillName) {
+        run.usedSkillNames.add(normalizedSkillName);
       }
-      ensureSkillSpan(evt, skillName, "transcript");
     }
+    syncToolSummaryAttrs(evt, run);
   };
 
   const resolveSkillName = (
@@ -1010,7 +997,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       },
     );
     if (run.usedSkillNames.size === 0) {
-      ensureTranscriptSkillSpans(evt);
+      syncTranscriptSkillSummary(evt);
     }
     const totalDuration = Math.max(
       typeof evt.durationMs === "number" ? evt.durationMs : 0,
@@ -1333,7 +1320,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     endToolSpan,
     ensureSkillSpan,
     ensureToolSpan,
-    ensureTranscriptSkillSpans,
+    syncTranscriptSkillSummary,
     finalizeToolAndSkillSpans,
     getActiveSkillCtx,
     handleAgentEvent,

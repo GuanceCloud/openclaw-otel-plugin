@@ -91,7 +91,7 @@ test("message.processed does not emit standalone thinking span", () => {
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -182,7 +182,7 @@ test("message.processed syncs lifecycle without requesting an output lifecycle s
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -282,7 +282,7 @@ test("message.processed keeps the active trace open for later transcript growth"
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return true;
     },
@@ -377,7 +377,7 @@ test("message.processed prefers transcript replay and marks replay watermark for
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       transcriptCalls += 1;
       return true;
@@ -491,7 +491,7 @@ test("message.processed finalizes active trace without replaying stale transcrip
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {
+    syncTranscriptSkillSummary() {
       skillCalls += 1;
     },
     emitTranscriptModelSpans() {
@@ -598,7 +598,7 @@ test("message.processed does not synthesize replay traces for incomplete snapsho
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       transcriptCalls += 1;
       return false;
@@ -692,7 +692,7 @@ test("message.processed replays completed transcript snapshots even without an a
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       transcriptCalls += 1;
       return true;
@@ -804,7 +804,7 @@ test("message.processed does not replay stale snapshots while a new trace is act
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {
+    syncTranscriptSkillSummary() {
       skillCalls += 1;
     },
     emitTranscriptModelSpans() {
@@ -909,7 +909,7 @@ test("session.state processing requests lifecycle shell spans", () => {
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -1004,7 +1004,7 @@ test("session.state processing backfills trace start from transcript snapshot", 
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -1103,7 +1103,7 @@ test("session.state processing ignores stale transcript snapshots from an older 
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -1196,7 +1196,7 @@ test("session.state processing strips stale snapshot runId while keeping backfil
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -1290,7 +1290,7 @@ test("session.state processing never backfills earlier than the queued message s
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -1384,7 +1384,7 @@ test("session.state idle skips duplicate replay after the transcript has already
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       transcriptCalls += 1;
       return true;
@@ -1488,7 +1488,7 @@ test("session.state idle marks replay-only completed transcript traces", () => {
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       transcriptCalls += 1;
       return true;
@@ -1599,7 +1599,7 @@ test("session.state idle skips stale transcript snapshots from an older request 
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       transcriptCalls += 1;
       return true;
@@ -1716,7 +1716,7 @@ test("session.state idle closes active trace without replaying stale transcript"
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       transcriptCalls += 1;
       return true;
@@ -1827,7 +1827,7 @@ test("session.state idle falls back to completed final_status when message.proce
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return true;
     },
@@ -1925,7 +1925,7 @@ test("session.state idle prefers trajectory final status over idle", () => {
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return true;
     },
@@ -2018,7 +2018,7 @@ test("session.state idle leaves final_status empty when no business outcome is a
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return true;
     },
@@ -2110,7 +2110,7 @@ test("model.usage emits llm span and preserves model context", () => {
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -2219,7 +2219,7 @@ test("model.usage uses snapshot sessionId for gen_ai client metrics when event s
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -2328,7 +2328,7 @@ test("message.queued rotates a completed active run before starting the next req
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -2428,7 +2428,7 @@ test("message.queued rotates an active run with a terminal pending outcome", () 
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -2528,7 +2528,7 @@ test("message.queued rotates an active run once session processing has started",
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -2620,7 +2620,7 @@ test("message.queued reuses the current trace when execution has not started yet
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -2704,7 +2704,7 @@ test("message.queued skips internal heartbeat requests", () => {
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -2792,7 +2792,7 @@ test("message.queued skips internal heartbeat requests when only sessionId is pr
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -2887,7 +2887,7 @@ test("message.queued keeps runtime continue requests on the active trace", () =>
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },
@@ -2970,7 +2970,7 @@ test("message.processed skips internal heartbeat requests", () => {
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       transcriptModelCalls += 1;
       return false;
@@ -3068,7 +3068,7 @@ test("queue lane diagnostics only emit logs without standalone spans or runtime 
     getActiveSkillCtx() {
       return undefined;
     },
-    ensureTranscriptSkillSpans() {},
+    syncTranscriptSkillSummary() {},
     emitTranscriptModelSpans() {
       return false;
     },

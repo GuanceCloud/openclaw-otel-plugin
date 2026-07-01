@@ -973,7 +973,7 @@ export function createOtelPluginService(
         const replaySummaryAttrs = !hasActiveTrace
           ? buildReplaySummaryAttrs("transcript")
           : undefined;
-        ensureTranscriptSkillSpans(transcriptEvt);
+        syncTranscriptSkillSummary(transcriptEvt);
         const emittedTranscriptModelSpans = emitTranscriptModelSpans(transcriptEvt);
         if (emittedTranscriptModelSpans) {
           emitTranscriptToolSpans(transcriptEvt);
@@ -1659,7 +1659,7 @@ export function createOtelPluginService(
         }
         const snapshot = loadSessionSnapshot(sessionKey);
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
-        ensureTranscriptSkillSpans({
+        syncTranscriptSkillSummary({
           sessionKey,
           sessionId: evt.sessionId,
           runId: evt.runId,
@@ -1895,7 +1895,7 @@ export function createOtelPluginService(
         emitSyntheticModelSpan,
         emitTranscriptToolSpans,
         ensureSkillSpan,
-        ensureTranscriptSkillSpans,
+        syncTranscriptSkillSummary,
         getActiveSkillCtx,
         handleAgentEvent,
       } = toolSpanManager;
@@ -1938,7 +1938,7 @@ export function createOtelPluginService(
         emitModelTurnDebugLog,
         SeverityNumber,
         getActiveSkillCtx,
-        ensureTranscriptSkillSpans,
+        syncTranscriptSkillSummary,
         emitTranscriptModelSpans,
         emitSyntheticModelSpan,
         emitTranscriptToolSpans,
