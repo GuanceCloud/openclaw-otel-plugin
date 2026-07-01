@@ -848,6 +848,9 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
 
     for (const [offset, turn] of pendingTurns.entries()) {
       const index = replayStartIndex + offset;
+      const isLastTurn = index === turns.length - 1;
+      const outputPreview = turn.outputPreview ?? (isLastTurn ? clipPreview(snapshot?.lastAssistantText) : undefined);
+      const outputKind = turn.outputKind ?? (outputPreview ? "text" : undefined);
       if (offset === 0 && typeof run.orchestrationCursorTs === "number") {
         emitRuntimeOrchestrationSpan(
           evt,
@@ -879,8 +882,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
             turn_index: index + 1,
             "span.kind": "model",
             "openclaw.input.preview": turn.inputPreview,
-            "openclaw.output.preview": turn.outputPreview,
-            "openclaw.output.kind": turn.outputKind,
+            "openclaw.output.preview": outputPreview,
+            "openclaw.output.kind": outputKind,
             output_summary: clipPreview(turn.thinking?.trim()),
             output_text_length: turn.thinking?.length,
             "openclaw.provider": turn.provider ?? snapshot?.lastProvider,
@@ -944,8 +947,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         usage_cache_read_input_tokens: usageTotals.cacheReadTokens,
         usage_cache_write_input_tokens: usageTotals.cacheWriteTokens,
         input_preview: turn.inputPreview,
-        output_preview: turn.outputPreview,
-        output_kind: turn.outputKind,
+        output_preview: outputPreview,
+        output_kind: outputKind,
         thinking_summary: clipPreview(turn.thinking?.trim()),
       });
     }

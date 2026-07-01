@@ -1856,7 +1856,7 @@ test("transcript model replay only appends turns that were not emitted yet", () 
   assert.equal(modelSpans[1].options.startTime.getTime(), 2300);
 });
 
-test("transcript model spans do not inherit session output preview without turn text", () => {
+test("transcript model spans backfill final output messages from session assistant text", () => {
   const spans = [];
   const tracer = createFakeTracer(spans);
   const trace = {
@@ -1933,6 +1933,10 @@ test("transcript model spans do not inherit session output preview without turn 
   const modelSpan = spans.find((span) => span.name === "llm");
   assert.ok(modelSpan);
   assert.equal(modelSpan.options.attributes.input_preview, "search result payload");
-  assert.equal("output_preview" in modelSpan.options.attributes, false);
-  assert.equal("output_summary" in modelSpan.options.attributes, false);
+  assert.equal(modelSpan.options.attributes.output_preview, "final answer");
+  assert.deepEqual(JSON.parse(modelSpan.options.attributes["gen_ai.output.messages"]), [{
+    role: "assistant",
+    parts: [{ type: "text", content: "final answer" }],
+    finish_reason: "stop",
+  }]);
 });
