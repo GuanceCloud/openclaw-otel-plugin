@@ -70,6 +70,7 @@ type DiagnosticEventHandlerDeps = {
   endRun(evt: SessionEvent, attrs?: Record<string, string | number | boolean>): void;
   endRoot(evt: SessionEvent, attrs?: Record<string, string | number | boolean>): void;
   clearRun(evt: SessionEvent): void;
+  discardActiveRequest?(evt: SessionEvent): void;
   updateAggregateTokens(evt: Extract<DiagnosticEventPayload, { type: "model.usage" }>): void;
   loadSessionSnapshot(sessionKey: string | undefined): SessionSnapshot | undefined;
   resolveSessionKey?: (evt: SessionEvent) => string | undefined;
@@ -145,6 +146,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     endRun,
     endRoot,
     clearRun,
+    discardActiveRequest,
     updateAggregateTokens,
     loadSessionSnapshot,
     resolveSessionKey,
@@ -269,6 +271,24 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       || (typeof run.pendingFinalOutcome === "string" && run.pendingFinalOutcome.length > 0)
       || run.finalAttrsApplied
       || (run.usedToolNames?.size ?? 0) > 0
+      || (run.aggregate?.modelCalls ?? 0) > 0
+    );
+  };
+
+  const hasRunTelemetryPayload = (run: ActiveRunSpan | undefined): boolean => {
+    if (!run) {
+      return false;
+    }
+    return Boolean(
+      run.modelSpanEmitted
+      || run.modelSpan
+      || run.modelCtx
+      || typeof run.modelEndTs === "number"
+      || (run.usedToolNames?.size ?? 0) > 0
+      || (run.toolSpans?.size ?? 0) > 0
+      || (run.transcriptAssistantTurnsEmitted ?? 0) > 0
+      || (run.transcriptToolCallIds?.size ?? 0) > 0
+      || (run.observedToolCallIds?.size ?? 0) > 0
       || (run.aggregate?.modelCalls ?? 0) > 0
     );
   };
@@ -709,13 +729,16 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           && replaySnapshotIsFresh
           && (hasActiveTrace || replaySnapshotCompleted)
         );
+        let emittedReplayPayload = false;
         if (shouldAttemptReplay) {
           syncTranscriptSkillSummary(evt);
           const emittedTranscriptModelSpans = emitTranscriptModelSpans(evt);
           if (emittedTranscriptModelSpans) {
             emitTranscriptToolSpans(evt);
+            emittedReplayPayload = true;
           } else {
             emitSyntheticModelSpan(evt);
+            emittedReplayPayload = true;
           }
         }
         if (replayAlreadyFinalized && !hasActiveTrace) {
@@ -742,6 +765,14 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         if (run) {
           run.pendingFinalOutcome = evt.outcome;
           run.lastTouchedAt = Date.now();
+        }
+        if (
+          evt.outcome === "completed"
+          && !emittedReplayPayload
+          && !hasRunTelemetryPayload(run)
+        ) {
+          discardActiveRequest?.(evt);
+          break;
         }
         if (replaySnapshotIsFresh && snapshot?.runCompleted === true) {
           markReplayWatermark(replaySessionKey, snapshot);

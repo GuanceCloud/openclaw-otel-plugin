@@ -1704,6 +1704,21 @@ export function createOtelPluginService(
         releaseRequestKey(sessionKey, requestKey);
       };
 
+      const discardActiveRequest = (evt: { sessionKey?: string; sessionId?: string; runId?: string }) => {
+        const sessionKey = resolveSessionKey(evt);
+        const requestKey = resolveRequestKey(evt, false);
+        if (!sessionKey || !requestKey) {
+          return;
+        }
+        activeRuns.delete(requestKey);
+        activeRoots.delete(requestKey);
+        const metricState = sessionMetricTokenState.get(sessionKey);
+        if (metricState) {
+          metricState.active = false;
+        }
+        releaseRequestKey(sessionKey, requestKey);
+      };
+
       const concludeActiveRequest = (
         evt: { sessionKey?: string; sessionId?: string; runId?: string; ts?: number },
         attrs: Record<string, string | number | boolean>,
@@ -1927,6 +1942,7 @@ export function createOtelPluginService(
         endRun,
         endRoot,
         clearRun,
+        discardActiveRequest,
         updateAggregateTokens,
         loadSessionSnapshot,
         resolveSessionKey,

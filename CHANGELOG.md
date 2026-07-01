@@ -23,6 +23,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 - Backfilled `skill.description` / `gen_ai.skill.description` from the local `SKILL.md` when runtime skill inference happens before session skill metadata is available.
 - Backfilled `gen_ai.output.messages` on replayed final `llm` spans from the session assistant text when the transcript turn lacks an explicit output preview.
 - Stopped creating transcript-only `skill:*` summary spans from `invokedSkillNames`; transcript skill names now update request/run summary fields only, while real skill spans are emitted only from concrete runtime or transcript tool calls.
+- Dropped completed shell traces that contain only request/session lifecycle spans and no model, tool, or transcript replay payload, preventing reset/stale-session events from appearing as separate short traces.
 
 ## 2026-06-26
 

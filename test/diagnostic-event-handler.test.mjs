@@ -534,6 +534,118 @@ test("message.processed finalizes active trace without replaying stale transcrip
   assert.equal(logAttrs["openclaw.provider"], undefined);
 });
 
+test("message.processed discards completed shell traces without model or tool payload", () => {
+  let lifecycleCalls = 0;
+  let syncCalls = 0;
+  let endRunCalls = 0;
+  let endRootCalls = 0;
+  let discardCalls = 0;
+  const run = {
+    ctx: { ctx: "run" },
+    messageQueuedTs: 2_000,
+    mainStartTs: 2_000,
+    usedToolNames: new Set(),
+    toolSpans: new Map(),
+    aggregate: { modelCalls: 0 },
+  };
+
+  const handler = createDiagnosticEventHandler({
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    instruments: {
+      diagnosticsMessageProcessedCounter: { add() {} },
+      diagnosticsMessageDurationMs: { record() {} },
+    },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    beginRequestTrace() {},
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    getRun() {
+      return run;
+    },
+    ensureUserSpan() {
+      return run;
+    },
+    syncRootFromRun() {
+      syncCalls += 1;
+    },
+    endRun() {
+      endRunCalls += 1;
+    },
+    endRoot() {
+      endRootCalls += 1;
+    },
+    clearRun() {},
+    discardActiveRequest() {
+      discardCalls += 1;
+    },
+    updateAggregateTokens() {},
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        lastUserTs: 1_000,
+        lastAssistantTs: 1_500,
+        lastAssistantText: "old answer",
+        lastRunAssistantTurns: [{ startedAt: 1_200, endedAt: 1_500 }],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    emitDiagnosticLog() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {
+      lifecycleCalls += 1;
+      return run;
+    },
+    emitModelTurnDebugLog() {},
+    getActiveSkillCtx() {
+      return undefined;
+    },
+    syncTranscriptSkillSummary() {},
+    emitTranscriptModelSpans() {
+      throw new Error("not expected");
+    },
+    emitSyntheticModelSpan() {
+      throw new Error("not expected");
+    },
+    emitTranscriptToolSpans() {
+      throw new Error("not expected");
+    },
+    emitFallbackThinkingSpan() {},
+    annotateToolLoop() {
+      return false;
+    },
+    hasReplayWatermark() {
+      return false;
+    },
+  });
+
+  handler({
+    type: "message.processed",
+    sessionKey: "s1",
+    ts: 3_000,
+    channel: "chat",
+    outcome: "completed",
+  });
+
+  assert.equal(lifecycleCalls, 1);
+  assert.equal(syncCalls, 1);
+  assert.equal(discardCalls, 1);
+  assert.equal(endRunCalls, 0);
+  assert.equal(endRootCalls, 0);
+});
+
 test("message.processed does not synthesize replay traces for incomplete snapshots without an active trace", () => {
   let transcriptCalls = 0;
   let toolReplayCalls = 0;
