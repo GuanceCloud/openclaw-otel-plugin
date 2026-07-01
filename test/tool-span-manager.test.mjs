@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { createToolSpanManager } from "../dist/src/tool-span-manager.js";
 import { createRunState } from "../dist/src/service-utils.js";
@@ -128,6 +131,96 @@ test("skill file reads create a nested Skill tool span", () => {
   assert.equal(skillSpan.ended, true);
   assert.equal(skillSpan.attributes.skill_result_status, "completed");
   assert.equal(skillToolSpan.attributes.skill_result_status, "completed");
+});
+
+test("skill spans load description from SKILL.md when snapshot metadata is missing", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-skill-span-"));
+  try {
+    const skillDir = path.join(tmpDir, "workspace", "skills", "monitor");
+    fs.mkdirSync(skillDir, { recursive: true });
+    const skillFile = path.join(skillDir, "SKILL.md");
+    fs.writeFileSync(skillFile, [
+      "---",
+      "name: monitor",
+      "description: 生成监控器",
+      "version: 1.2.3",
+      "---",
+      "",
+      "从指标生成观测云监控器。",
+    ].join("\n"));
+
+    const spans = [];
+    const tracer = createFakeTracer(spans);
+    const trace = {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    };
+    const run = createRunState({ active: true }, 1000, 1000);
+    run.span = createFakeSpan("run");
+    run.ctx = { ctx: "run" };
+
+    const manager = createToolSpanManager({
+      tracer,
+      trace,
+      SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+      SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+      instruments: {},
+      getRun() {
+        return run;
+      },
+      getRoot() {
+        return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+      },
+      ensureUserSpan() {
+        return run;
+      },
+      loadSessionSnapshot() {
+        return undefined;
+      },
+      enrichWithTranscript(_sessionKey, attrs) {
+        return attrs;
+      },
+      createChildSpan() {
+        throw new Error("not expected");
+      },
+      eventTimestamp(evt) {
+        return new Date(evt.ts ?? 1000);
+      },
+      setLatestAssistantText() {},
+      emitRuntimeOrchestrationSpan() {},
+      ensureRuntimeLifecycleSpans() {},
+      emitModelTurnDebugLog() {},
+    });
+
+    manager.ensureToolSpan(
+      { sessionKey: "s1", ts: 2000 },
+      "read",
+      "call-1",
+      {
+        "openclaw.tool.target": skillFile,
+        "openclaw.tool.command": `cat ${skillFile}`,
+      },
+    );
+
+    const skillSpan = spans.find((span) => span.name === "skill:monitor");
+    assert.ok(skillSpan);
+    assert.equal(skillSpan.options.attributes["skill.description"], "生成监控器");
+    assert.equal(skillSpan.options.attributes["gen_ai.skill.description"], "生成监控器");
+    assert.equal(skillSpan.options.attributes["gen_ai.skill.version"], "1.2.3");
+
+    manager.endToolSpan(
+      { sessionKey: "s1", ts: 2200 },
+      "read",
+      "call-1",
+      { result: { ok: true } },
+    );
+
+    assert.equal(skillSpan.attributes["skill.description"], "生成监控器");
+    assert.equal(skillSpan.attributes["gen_ai.skill.description"], "生成监控器");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("tool events from skill file reads create skill spans through the event handler", () => {

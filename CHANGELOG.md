@@ -20,6 +20,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 - Updated trace documentation and tests to keep the retained span set focused on `openclaw_request`, `invoke_agent`, `dispatch_queue`, `session_processing`, `runtime_orchestration`, `llm`, skill, and tool spans.
 - Aligned skill trace shape with `claude-otel-plugin` by replacing the runtime `skill_call:*` wrapper with `tool:Skill -> skill:<name>`; the original OpenClaw low-level tool name is retained as `tool_original_name`.
 - Replaced the incorrect `gen_ai.skill1.*` trace tags with `gen_ai.skill.*`, matching `claude-otel-plugin` skill tag naming.
+- Backfilled `skill.description` / `gen_ai.skill.description` from the local `SKILL.md` when runtime skill inference happens before session skill metadata is available.
 
 ## 2026-06-26
 

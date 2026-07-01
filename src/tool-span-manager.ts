@@ -27,6 +27,7 @@ import {
   MIN_VISIBLE_CHILD_MS,
   MIN_VISIBLE_MODEL_MS,
   redactSensitiveText,
+  resolveSkillCatalogEntryFromToolIdentity,
   resolveUsageTokenTotals,
   setError,
   skillSpanName,
@@ -188,13 +189,23 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
   const resolveSkillMetadata = (
     evt: SessionEvent,
     skillName: string | undefined,
+    identity?: {
+      target?: string;
+      command?: string;
+    },
   ): SkillCatalogEntry | undefined => {
     const normalizedSkillName = skillName?.trim();
     if (!normalizedSkillName) {
       return undefined;
     }
     const snapshot = loadSessionSnapshot(evt.sessionKey);
-    return snapshot?.sessionSkillCatalog?.find((entry) => entry.name === normalizedSkillName);
+    return snapshot?.sessionSkillCatalog?.find((entry) => (
+      entry.name === normalizedSkillName || entry.aliases.includes(normalizedSkillName)
+    )) ?? resolveSkillCatalogEntryFromToolIdentity(
+      normalizedSkillName,
+      identity?.target,
+      identity?.command,
+    );
   };
 
   const recordGenAiAgentTokenUsage = (
@@ -404,7 +415,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (!normalizedSkillName || tool.skillSpan) {
       return;
     }
-    const metadata = tool.skillMetadata ?? resolveSkillMetadata(evt, normalizedSkillName);
+    const metadata = tool.skillMetadata ?? resolveSkillMetadata(evt, normalizedSkillName, {
+      target: tool.target,
+      command: tool.command,
+    });
     tool.skillMetadata = mergeSkillMetadata(tool.skillMetadata, metadata);
     run.usedSkillNames.add(normalizedSkillName);
     const startTs = Math.max(tool.startedAt, run.mainStartTs + MIN_VISIBLE_CHILD_MS);
@@ -462,7 +476,11 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       attrs?.["openclaw.tool.target"] as string | undefined,
       attrs?.["openclaw.tool.command"] as string | undefined,
     );
-    const skillMetadata = resolveSkillMetadata(evt, skillName);
+    const identity = {
+      target: attrs?.["openclaw.tool.target"] as string | undefined,
+      command: attrs?.["openclaw.tool.command"] as string | undefined,
+    };
+    const skillMetadata = resolveSkillMetadata(evt, skillName, identity);
     const spanToolName = skillName ? "Skill" : normalizedToolName;
     if (skillName) {
       run.usedSkillNames.add(skillName);
@@ -1189,7 +1207,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           args: evt.data.args,
           phase: "start",
           skillName,
-          skill: resolveSkillMetadata(toolEvt, skillName),
+          skill: resolveSkillMetadata(toolEvt, skillName, {
+            target: summary.target,
+            command: summary.command,
+          }),
           skillCallId: skillName ? toolCallId : undefined,
         }),
       });
@@ -1211,7 +1232,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       ...buildToolAttrs(toolName, toolCallId, {
         phase: String(evt.data.phase ?? "unknown"),
         skillName,
-        skill: resolveSkillMetadata(toolEvt, skillName),
+        skill: resolveSkillMetadata(toolEvt, skillName, {
+          target: summary.target,
+          command: summary.command,
+        }),
         skillCallId: skillName ? toolCallId : undefined,
       }),
     });

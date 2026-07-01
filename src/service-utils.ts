@@ -2079,6 +2079,62 @@ export function inferSkillNameFromToolIdentity(
   );
 }
 
+function readPackageJsonVersion(packageJsonPath: string): string | undefined {
+  try {
+    const raw = fs.readFileSync(packageJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" && parsed.version.trim()
+      ? parsed.version.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveSkillDirFromIdentityText(text: string | undefined, skillName: string): string | undefined {
+  if (!text?.trim() || !skillName.trim()) {
+    return undefined;
+  }
+  const normalizedText = text.replace(/\\/g, "/");
+  const escapedName = skillName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = normalizedText.match(new RegExp(`([^\\s"'\\\`]*\\/workspace\\/skills\\/${escapedName})(?:\\/[^\\s"'\\\`]*)?`, "i"));
+  return match?.[1];
+}
+
+export function resolveSkillCatalogEntryFromToolIdentity(
+  skillName: string | undefined,
+  target?: string,
+  command?: string,
+): SkillCatalogEntry | undefined {
+  const normalizedSkillName = skillName?.trim();
+  if (!normalizedSkillName) {
+    return undefined;
+  }
+  const skillDir = resolveSkillDirFromIdentityText(target, normalizedSkillName)
+    ?? resolveSkillDirFromIdentityText(command, normalizedSkillName);
+  if (!skillDir) {
+    return undefined;
+  }
+  const skillFile = path.join(skillDir, "SKILL.md");
+  if (!fs.existsSync(skillFile)) {
+    return undefined;
+  }
+  try {
+    const raw = fs.readFileSync(skillFile, "utf8");
+    const frontmatter = extractFrontmatter(raw);
+    const resolvedName = frontmatter.name?.trim() || normalizedSkillName;
+    return buildSkillCatalogEntry(resolvedName, {
+      description: extractSkillDescription(raw, frontmatter),
+      path: skillFile,
+      sourceType: "workspace",
+      version: frontmatter.version?.trim() || readPackageJsonVersion(path.join(skillDir, "package.json")),
+      extraAliases: [normalizedSkillName],
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 export function uniqStrings(values: Array<string | undefined>): string[] {
   const seen = new Set<string>();
   for (const value of values) {
