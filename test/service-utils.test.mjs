@@ -465,12 +465,12 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
     "openclaw.skill.source": "runtime",
     "openclaw.skill.source.type": "workspace",
     skill_result_status: "completed",
-    "gen_ai.skill1.name": "monitor",
-    "gen_ai.skill1.description": "生成监控器",
-    "gen_ai.skill1.path": "/tmp/workspace/skills/monitor/SKILL.md",
-    "gen_ai.skill1.source.type": "workspace",
-    "gen_ai.skill1.result_status": "completed",
-    "gen_ai.skill1.version": "1.2.3",
+    "gen_ai.skill.name": "monitor",
+    "gen_ai.skill.description": "生成监控器",
+    "gen_ai.skill.path": "/tmp/workspace/skills/monitor/SKILL.md",
+    "gen_ai.skill.source.type": "workspace",
+    "gen_ai.skill.result_status": "completed",
+    "gen_ai.skill.version": "1.2.3",
     "openclaw.outcome": "completed",
     "openclaw.output.kind": "tool_call",
   });
@@ -543,12 +543,12 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs["skill.description"], "生成监控器");
   assert.equal(attrs["skill.path"], "/tmp/workspace/skills/monitor/SKILL.md");
   assert.equal(attrs["skill.source.type"], "workspace");
-  assert.equal(attrs["gen_ai.skill1.name"], "monitor");
-  assert.equal(attrs["gen_ai.skill1.description"], "生成监控器");
-  assert.equal(attrs["gen_ai.skill1.path"], "/tmp/workspace/skills/monitor/SKILL.md");
-  assert.equal(attrs["gen_ai.skill1.source.type"], "workspace");
-  assert.equal(attrs["gen_ai.skill1.result_status"], "completed");
-  assert.equal(attrs["gen_ai.skill1.version"], "1.2.3");
+  assert.equal(attrs["gen_ai.skill.name"], "monitor");
+  assert.equal(attrs["gen_ai.skill.description"], "生成监控器");
+  assert.equal(attrs["gen_ai.skill.path"], "/tmp/workspace/skills/monitor/SKILL.md");
+  assert.equal(attrs["gen_ai.skill.source.type"], "workspace");
+  assert.equal(attrs["gen_ai.skill.result_status"], "completed");
+  assert.equal(attrs["gen_ai.skill.version"], "1.2.3");
   assert.equal(attrs.final_status, "completed");
   assert.equal(attrs.sessionId, undefined);
   assert.equal(attrs.sessionKey, undefined);
@@ -641,12 +641,12 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
     "skill.path": "/tmp/workspace/skills/dashboard/SKILL.md",
     "skill.source.type": "workspace",
     skill_result_status: "completed",
-    "gen_ai.skill1.name": "dashboard",
-    "gen_ai.skill1.description": "生成 Dashboard",
-    "gen_ai.skill1.path": "/tmp/workspace/skills/dashboard/SKILL.md",
-    "gen_ai.skill1.source.type": "workspace",
-    "gen_ai.skill1.result_status": "completed",
-    "gen_ai.skill1.version": "0.4.1",
+    "gen_ai.skill.name": "dashboard",
+    "gen_ai.skill.description": "生成 Dashboard",
+    "gen_ai.skill.path": "/tmp/workspace/skills/dashboard/SKILL.md",
+    "gen_ai.skill.source.type": "workspace",
+    "gen_ai.skill.result_status": "completed",
+    "gen_ai.skill.version": "0.4.1",
     final_status: "completed",
     "output.kind": "tool_call",
     app_name: "虾大侠",
@@ -747,12 +747,12 @@ test("traceAttrs keeps canonical context fields while dropping redundant legacy 
   assert.equal(attrs["skill.kind"], undefined);
   assert.equal(attrs["skill.source"], undefined);
   assert.equal(attrs.skill_result_status, "completed");
-  assert.equal(attrs["gen_ai.skill1.name"], "dashboard");
-  assert.equal(attrs["gen_ai.skill1.description"], "生成 Dashboard");
-  assert.equal(attrs["gen_ai.skill1.path"], "/tmp/workspace/skills/dashboard/SKILL.md");
-  assert.equal(attrs["gen_ai.skill1.source.type"], "workspace");
-  assert.equal(attrs["gen_ai.skill1.result_status"], "completed");
-  assert.equal(attrs["gen_ai.skill1.version"], "0.4.1");
+  assert.equal(attrs["gen_ai.skill.name"], "dashboard");
+  assert.equal(attrs["gen_ai.skill.description"], "生成 Dashboard");
+  assert.equal(attrs["gen_ai.skill.path"], "/tmp/workspace/skills/dashboard/SKILL.md");
+  assert.equal(attrs["gen_ai.skill.source.type"], "workspace");
+  assert.equal(attrs["gen_ai.skill.result_status"], "completed");
+  assert.equal(attrs["gen_ai.skill.version"], "0.4.1");
   assert.equal(attrs.final_status, "completed");
   assert.equal(attrs.agent_version, undefined);
   assert.equal(attrs.runtime_environment, undefined);

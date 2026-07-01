@@ -39,7 +39,7 @@
 - 当前实现因此分三层表达同一组 skill 语义：
   - 兼容短字段：`skill_name`、`skill_call_id`、`skill_source`
   - 推荐 trace 字段：`skill.name`、`skill.description`、`skill.path`、`skill.source.type`、`skill_result_status`
-  - 项目扩展字段：`gen_ai.skill1.*`
+  - 项目扩展字段：`gen_ai.skill.*`
 - trace 侧 tool span 使用 `gen_ai.operation.name=execute_tool`；metric 侧 skill duration 单独使用 `gen_ai.operation.name=skill`
 
 ## 最终 Span 规范
@@ -264,11 +264,11 @@
 
 补充说明：
 
-- 当前实现没有独立输出官方 `gen_ai.skill.*` 字段
+- 当前实现会按 `claude-otel-plugin` 口径输出 `gen_ai.skill.*` 项目扩展字段
 - skill 相关信息当前通过：
   - span 名称：`tool:Skill`、`skill:<name>`
   - 推荐 trace 字段：`skill.*`
-  - 项目扩展字段：`gen_ai.skill1.*`
+  - 项目扩展字段：`gen_ai.skill.*`
   - 兼容字段：`skill_name`、`skill_call_id`、`skill_source`
   - operation 语义：`gen_ai.operation.name=execute_tool`
   来共同表达
@@ -340,7 +340,7 @@
 
 ## Skill 相关字段
 
-截至 2026-06-26，`skill` 仍没有 OpenTelemetry GenAI 已落地的一等字段。当前插件保留兼容短字段，同时统一补齐 `skill.*` 与项目扩展字段 `gen_ai.skill1.*`。
+截至 2026-06-26，`skill` 仍没有 OpenTelemetry GenAI 已落地的一等字段。当前插件保留兼容短字段，同时统一补齐 `skill.*` 与项目扩展字段 `gen_ai.skill.*`。
 
 | 字段 | 含义 | 常见 span |
 | --- | --- | --- |
@@ -350,12 +350,12 @@
 | `skill_call_id` | skill 对应的 tool call ID，用于把 `tool:Skill` 与 `skill:*` 关联起来 | `skill:*`、`tool:*` |
 | `skill.source.type` | skill 来源类型；当前取值为 `system`、`user`、`workspace` | `skill:*`、`tool:*` |
 | `skill_result_status` | skill 结果状态；当前按关联 tool 是否报错映射为 `completed` 或 `error` | `skill:*`、`tool:*` |
-| `gen_ai.skill1.name` | skill 名称的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
-| `gen_ai.skill1.path` | skill 入口文件绝对路径的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
-| `gen_ai.skill1.source.type` | skill 来源类型的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
-| `gen_ai.skill1.result_status` | skill 结果状态的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
-| `gen_ai.skill1.description` | skill 描述；与 `skill.description` 对齐 | `skill:*`、`tool:*` |
-| `gen_ai.skill1.version` | skill 版本；优先取 `SKILL.md` frontmatter `version`，其次取同目录 `package.json.version` | `skill:*`、`tool:*` |
+| `gen_ai.skill.name` | skill 名称的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
+| `gen_ai.skill.path` | skill 入口文件绝对路径的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
+| `gen_ai.skill.source.type` | skill 来源类型的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
+| `gen_ai.skill.result_status` | skill 结果状态的 `gen_ai.*` 项目扩展字段 | `skill:*`、`tool:*` |
+| `gen_ai.skill.description` | skill 描述；与 `skill.description` 对齐 | `skill:*`、`tool:*` |
+| `gen_ai.skill.version` | skill 版本；优先取 `SKILL.md` frontmatter `version`，其次取同目录 `package.json.version` | `skill:*`、`tool:*` |
 
 兼容字段仍然保留：
 

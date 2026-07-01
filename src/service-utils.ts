@@ -885,7 +885,7 @@ function normalizeGenAiKeys(
     if (!key.startsWith("gen_ai.") || value === undefined || value === "") {
       continue;
     }
-    if (OFFICIAL_GEN_AI_ATTR_KEYS.has(key) || key.startsWith("gen_ai.skill1.")) {
+    if (OFFICIAL_GEN_AI_ATTR_KEYS.has(key) || key.startsWith("gen_ai.skill.")) {
       continue;
     }
     const flattened = flattenGenAiKey(key);
@@ -1614,12 +1614,12 @@ export function buildToolAttrs(
     "openclaw.skill.path": options?.skill?.path,
     "openclaw.skill.source.type": options?.skill?.sourceType,
     skill_result_status: options?.skillResultStatus,
-    "gen_ai.skill1.name": options?.skillName,
-    "gen_ai.skill1.description": options?.skill?.description,
-    "gen_ai.skill1.path": options?.skill?.path,
-    "gen_ai.skill1.source.type": options?.skill?.sourceType,
-    "gen_ai.skill1.result_status": options?.skillResultStatus,
-    "gen_ai.skill1.version": options?.skill?.version,
+    "gen_ai.skill.name": options?.skillName,
+    "gen_ai.skill.description": options?.skill?.description,
+    "gen_ai.skill.path": options?.skill?.path,
+    "gen_ai.skill.source.type": options?.skill?.sourceType,
+    "gen_ai.skill.result_status": options?.skillResultStatus,
+    "gen_ai.skill.version": options?.skill?.version,
     "openclaw.tool.phase": options?.phase,
     "openclaw.tool.result_status": options?.outcome,
     "openclaw.tool.arg_keys": summarizeToolArgKeys(options?.args),
@@ -1660,12 +1660,12 @@ export function buildSkillSpanAttrs(
     skill_result_status: options?.resultStatus,
     "openclaw.tool.call_id": options?.callId,
     "openclaw.tool.name": options?.toolName,
-    "gen_ai.skill1.name": skillName,
-    "gen_ai.skill1.path": options?.skill?.path,
-    "gen_ai.skill1.source.type": options?.skill?.sourceType,
-    "gen_ai.skill1.result_status": options?.resultStatus,
-    "gen_ai.skill1.description": options?.skill?.description,
-    "gen_ai.skill1.version": options?.skill?.version,
+    "gen_ai.skill.name": skillName,
+    "gen_ai.skill.path": options?.skill?.path,
+    "gen_ai.skill.source.type": options?.skill?.sourceType,
+    "gen_ai.skill.result_status": options?.resultStatus,
+    "gen_ai.skill.description": options?.skill?.description,
+    "gen_ai.skill.version": options?.skill?.version,
   };
 }
 

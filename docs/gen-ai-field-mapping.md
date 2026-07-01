@@ -6,7 +6,7 @@
 
 - trace / span / event / log 继续保留短字段，便于兼容既有查询
 - 同时新增官方点分字段，例如 `gen_ai.provider.name`
-- `skill` 当前没有稳定的官方 OTEL GenAI 一等字段；trace 侧统一使用 `skill.*`，并补充项目扩展字段 `gen_ai.skill1.*`
+- `skill` 当前没有稳定的官方 OTEL GenAI 一等字段；trace 侧统一使用 `skill.*`，并补充项目扩展字段 `gen_ai.skill.*`
 - 当前插件主动上报的指标收敛为 `gen_ai.workflow.duration`、`gen_ai.client.operation.duration`、`gen_ai.client.token.usage`
 - 指标 tag 优先使用官方 `gen_ai.*` 点分字段，duration 单位统一为 `s`
 - 敏感或体积较大的官方 opt-in 内容字段只使用当前已有 preview 构造，不输出原始全量内容
@@ -42,12 +42,12 @@
 | `skill_name` | `skill.name` | `skill:*`、`tool:*` | skill 名称；`skill_name` 继续保留为兼容短字段。 |
 | `skill_call_id` | - | `skill:*`、`tool:*` | skill 调用标识；当前与具体 `tool_call_id` 对齐，用于关联 `tool:Skill` 与 `skill:<name>`。 |
 | `skill_source` | - | `skill:*`、tool / skill duration metrics | 兼容短字段；保留运行期归因来源，当前主要为 `runtime` / `transcript`。 |
-| `skill_result_status` | `gen_ai.skill1.result_status`（项目扩展） | `skill:*`、`tool:*` | skill 结果状态；按关联 tool 是否报错映射为 `completed` / `error`。 |
-| `skill.description` | `gen_ai.skill1.description`（项目扩展） | `skill:*`、`tool:*` | skill 描述；优先来自 `SKILL.md` frontmatter。 |
-| `skill.path` | `gen_ai.skill1.path`（项目扩展） | `skill:*`、`tool:*` | skill 入口 `SKILL.md` 的绝对路径。 |
-| `skill.source.type` | `gen_ai.skill1.source.type`（项目扩展） | `skill:*`、`tool:*` | skill 来源类型；当前取值为 `system` / `user` / `workspace`。 |
-| - | `gen_ai.skill1.name`（项目扩展） | `skill:*`、`tool:*` | `skill.name` 的 `gen_ai.*` 扩展镜像。 |
-| - | `gen_ai.skill1.version`（项目扩展） | `skill:*`、`tool:*` | skill 版本；优先取 frontmatter `version`，其次取同目录 `package.json.version`。 |
+| `skill_result_status` | `gen_ai.skill.result_status`（项目扩展） | `skill:*`、`tool:*` | skill 结果状态；按关联 tool 是否报错映射为 `completed` / `error`。 |
+| `skill.description` | `gen_ai.skill.description`（项目扩展） | `skill:*`、`tool:*` | skill 描述；优先来自 `SKILL.md` frontmatter。 |
+| `skill.path` | `gen_ai.skill.path`（项目扩展） | `skill:*`、`tool:*` | skill 入口 `SKILL.md` 的绝对路径。 |
+| `skill.source.type` | `gen_ai.skill.source.type`（项目扩展） | `skill:*`、`tool:*` | skill 来源类型；当前取值为 `system` / `user` / `workspace`。 |
+| - | `gen_ai.skill.name`（项目扩展） | `skill:*`、`tool:*` | `skill.name` 的 `gen_ai.*` 扩展镜像。 |
+| - | `gen_ai.skill.version`（项目扩展） | `skill:*`、`tool:*` | skill 版本；优先取 frontmatter `version`，其次取同目录 `package.json.version`。 |
 | `token_type` | `gen_ai.token.type` | token 相关指标 | token 类型。当前指标只上报 `input` / `output`。 |
 | `output_kind=text` | `gen_ai.output.type=text` | 模型 / egress 相关 span | 仅当值符合官方枚举时输出，`tool_call` 仍保留在 `output_kind`。 |
 | `agent_version` | `gen_ai.agent.version` | 显式带 agent version 的 span / log attrs | 与 resource 级 `agent_version` 保持兼容。 |
@@ -78,6 +78,6 @@
 
 - `agent_runtime`、`agent_version` 继续作为 resource / 查询兼容字段。
 - `session_key`、`run_id`、`run_ids`、`channel`、`final_status`、`request_type`、`request_category` 等 OpenClaw 运行时字段没有官方一一对应字段，继续保留短字段。
-- `gen_ai.skill1.*` 是本插件为 skill 语义补齐的项目扩展字段，不代表官方 OTEL GenAI 已采纳同名属性。
+- `gen_ai.skill.*` 是本插件为 skill 语义补齐的项目扩展字段，不代表官方 OTEL GenAI 已采纳同名属性。
 - `gen_ai.system_instructions`、`gen_ai.tool.definitions`、`gen_ai.request.*` 采样参数、`server.address`、`server.port` 等字段当前没有稳定上游来源，因此不凭空生成。
 - 旧 `openclaw.*`、`gen_ai.agent.*`、`gen_ai.runtime.*` 指标双写不恢复；如果平台仍能查询到旧指标，通常来自历史数据。

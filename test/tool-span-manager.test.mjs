@@ -683,15 +683,15 @@ test("tool and skill spans backfill session attrs from the snapshot", () => {
   assert.equal(skillSpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
   assert.equal(skillSpan.attributes["skill.source.type"], "workspace");
   assert.equal(skillSpan.attributes.skill_result_status, "completed");
-  assert.equal(skillSpan.attributes["gen_ai.skill1.name"], "monitor");
-  assert.equal(skillSpan.attributes["gen_ai.skill1.version"], "1.2.3");
+  assert.equal(skillSpan.attributes["gen_ai.skill.name"], "monitor");
+  assert.equal(skillSpan.attributes["gen_ai.skill.version"], "1.2.3");
   assert.equal(skillToolSpan.attributes["skill.name"], "monitor");
   assert.equal(skillToolSpan.attributes["skill.description"], "生成监控器");
   assert.equal(skillToolSpan.attributes["skill.path"], "/home/liurui/.openclaw/workspace/skills/monitor/SKILL.md");
   assert.equal(skillToolSpan.attributes["skill.source.type"], "workspace");
   assert.equal(skillToolSpan.attributes.skill_result_status, "completed");
-  assert.equal(skillToolSpan.attributes["gen_ai.skill1.name"], "monitor");
-  assert.equal(skillToolSpan.attributes["gen_ai.skill1.version"], "1.2.3");
+  assert.equal(skillToolSpan.attributes["gen_ai.skill.name"], "monitor");
+  assert.equal(skillToolSpan.attributes["gen_ai.skill.version"], "1.2.3");
 });
 
 test("tool completion records tool and skill client operation durations", () => {

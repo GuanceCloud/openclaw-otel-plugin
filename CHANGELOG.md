@@ -19,6 +19,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 - Stopped emitting standalone `channel_ingress` and `channel_egress` spans; ingress and egress context now stays on request / agent summary fields, logs, and the remaining runtime lifecycle spans.
 - Updated trace documentation and tests to keep the retained span set focused on `openclaw_request`, `invoke_agent`, `dispatch_queue`, `session_processing`, `runtime_orchestration`, `llm`, skill, and tool spans.
 - Aligned skill trace shape with `claude-otel-plugin` by replacing the runtime `skill_call:*` wrapper with `tool:Skill -> skill:<name>`; the original OpenClaw low-level tool name is retained as `tool_original_name`.
+- Replaced the incorrect `gen_ai.skill1.*` trace tags with `gen_ai.skill.*`, matching `claude-otel-plugin` skill tag naming.
 
 ## 2026-06-26
 
@@ -32,7 +33,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 ### Skill Trace Tags
 
 - Unified skill trace attributes around `skill.*` on `skill:*` / `skill_call:*` / `tool:*`, including `skill.name`, `skill.description`, `skill.path`, `skill.source.type`, and `skill_result_status`.
-- Added project extension fields `gen_ai.skill1.name`, `gen_ai.skill1.description`, `gen_ai.skill1.path`, `gen_ai.skill1.source.type`, `gen_ai.skill1.result_status`, and `gen_ai.skill1.version` while keeping existing compatibility fields such as `skill_name`, `skill_call_id`, `skill_source`, and `skill_type`.
+- Added project extension fields `gen_ai.skill.name`, `gen_ai.skill.description`, `gen_ai.skill.path`, `gen_ai.skill.source.type`, `gen_ai.skill.result_status`, and `gen_ai.skill.version` while keeping existing compatibility fields such as `skill_name`, `skill_call_id`, `skill_source`, and `skill_type`.
 - Enriched session skill metadata loading so workspace and resolved skill snapshots can populate description, entry `SKILL.md` path, source type, and version on emitted spans.
 - Updated trace field documentation and field mapping notes to explain the current skill-to-GenAI compatibility strategy.
 
