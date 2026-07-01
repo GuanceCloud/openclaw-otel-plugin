@@ -3,7 +3,7 @@
 [English](./README.md)
 [变更记录](./CHANGELOG.md)
 
-`openclaw-otel-plugin` 用于把 OpenClaw 的运行时和诊断数据导出到 OTLP HTTP/protobuf 接收端。它会输出 traces、当前推荐的 `gen_ai.*` metrics，以及可选的 OTEL logs。
+`openclaw-otel-plugin` 用于把 OpenClaw 的运行时和诊断数据导出到 OTLP HTTP/protobuf 接收端。它会输出 traces、当前推荐的 `gen_ai.workflow.duration` / `gen_ai.client.*` metrics，以及可选的 OTEL logs。
 
 ## 环境要求
 

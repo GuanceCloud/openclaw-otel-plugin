@@ -428,84 +428,17 @@ export async function startOtelBootstrap(
   const tracer = trace.getTracer("openclaw-otel-plugin");
   const meter = metrics.getMeter("openclaw-otel-plugin");
   const instruments: MetricInstruments = {
-    genAiAgentRequestCount: meter.createCounter("gen_ai.agent.request.count", {
-      description: "Total GenAI agent requests observed by the plugin",
+    genAiWorkflowDuration: meter.createHistogram("gen_ai.workflow.duration", {
+      description: "GenAI workflow duration in seconds",
+      unit: "s",
     }),
-    genAiAgentRequestDuration: meter.createHistogram("gen_ai.agent.request.duration", {
-      description: "GenAI agent request duration in milliseconds",
-      unit: "ms",
+    genAiClientOperationDuration: meter.createHistogram("gen_ai.client.operation.duration", {
+      description: "GenAI client operation duration in seconds",
+      unit: "s",
     }),
-    genAiAgentSessionTokenInput: meter.createCounter("gen_ai.agent.session.token.input", {
-      description: "Session-scoped GenAI agent input token usage emitted by periodic session scans",
-    }),
-    genAiAgentSessionTokenOutput: meter.createCounter("gen_ai.agent.session.token.output", {
-      description: "Session-scoped GenAI agent output token usage emitted by periodic session scans",
-    }),
-    genAiAgentSessionTokenTotal: meter.createCounter("gen_ai.agent.session.token.total", {
-      description: "Session-scoped GenAI agent total token usage emitted by periodic session scans",
-    }),
-    genAiAgentSessionTokenUsage: meter.createCounter("gen_ai.agent.session.token.usage", {
-      description: "Session-scoped GenAI agent token usage emitted by periodic session scans",
-    }),
-    genAiAgentSessionTraceCount: meter.createCounter("gen_ai.agent.session.trace.count", {
-      description: "Session-scoped GenAI agent trace count emitted by periodic session scans",
-    }),
-    genAiAgentOperationCount: meter.createCounter("gen_ai.agent.operation.count", {
-      description: "GenAI agent operation count across model, tool, and skill execution",
-    }),
-    genAiAgentOperationDuration: meter.createHistogram("gen_ai.agent.operation.duration", {
-      description: "GenAI agent operation duration in milliseconds across model, tool, and skill execution",
-      unit: "ms",
-    }),
-    genAiAgentSkillActivationCount: meter.createCounter("gen_ai.agent.skill.activation.count", {
-      description: "Total GenAI agent skill activations observed by the plugin",
-    }),
-    genAiAgentTokenUsage: meter.createHistogram("gen_ai.agent.token.usage", {
-      description: "GenAI agent model token usage emitted by runtime and transcript replay",
+    genAiClientTokenUsage: meter.createHistogram("gen_ai.client.token.usage", {
+      description: "GenAI client input and output token usage",
       unit: "{token}",
-    }),
-    genAiRuntimeWebhookReceivedCount: meter.createCounter("gen_ai.runtime.webhook.received.count", {
-      description: "GenAI runtime webhook received events emitted from diagnostics",
-    }),
-    genAiRuntimeWebhookErrorCount: meter.createCounter("gen_ai.runtime.webhook.error.count", {
-      description: "GenAI runtime webhook error events emitted from diagnostics",
-    }),
-    genAiRuntimeWebhookDuration: meter.createHistogram("gen_ai.runtime.webhook.duration", {
-      description: "GenAI runtime webhook processing duration in milliseconds",
-      unit: "ms",
-    }),
-    genAiRuntimeMessageQueuedCount: meter.createCounter("gen_ai.runtime.message.queued.count", {
-      description: "GenAI runtime message queued events emitted from diagnostics",
-    }),
-    genAiRuntimeMessageProcessedCount: meter.createCounter("gen_ai.runtime.message.processed.count", {
-      description: "GenAI runtime message processed events emitted from diagnostics",
-    }),
-    genAiRuntimeMessageDuration: meter.createHistogram("gen_ai.runtime.message.duration", {
-      description: "GenAI runtime message processing duration in milliseconds",
-      unit: "ms",
-    }),
-    genAiRuntimeQueueEnqueueCount: meter.createCounter("gen_ai.runtime.queue.enqueue.count", {
-      description: "GenAI runtime queue enqueue events emitted from diagnostics",
-    }),
-    genAiRuntimeQueueDequeueCount: meter.createCounter("gen_ai.runtime.queue.dequeue.count", {
-      description: "GenAI runtime queue dequeue events emitted from diagnostics",
-    }),
-    genAiRuntimeQueueDepth: meter.createHistogram("gen_ai.runtime.queue.depth", {
-      description: "GenAI runtime queue depth emitted from diagnostics",
-    }),
-    genAiRuntimeQueueWait: meter.createHistogram("gen_ai.runtime.queue.wait", {
-      description: "GenAI runtime queue wait time in milliseconds",
-      unit: "ms",
-    }),
-    genAiRuntimeSessionStateCount: meter.createCounter("gen_ai.runtime.session.state.count", {
-      description: "GenAI runtime session state transitions emitted from diagnostics",
-    }),
-    genAiRuntimeSessionStuckCount: meter.createCounter("gen_ai.runtime.session.stuck.count", {
-      description: "GenAI runtime stuck session detections emitted from diagnostics",
-    }),
-    genAiRuntimeSessionStuckAge: meter.createHistogram("gen_ai.runtime.session.stuck.age", {
-      description: "GenAI runtime stuck session age in milliseconds",
-      unit: "ms",
     }),
   };
 

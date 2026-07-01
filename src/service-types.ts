@@ -156,30 +156,9 @@ export type RuntimeMetadata = {
 };
 
 export type MetricInstruments = {
-  genAiAgentRequestCount: any;
-  genAiAgentRequestDuration: any;
-  genAiAgentSessionTokenInput: any;
-  genAiAgentSessionTokenOutput: any;
-  genAiAgentSessionTokenTotal: any;
-  genAiAgentSessionTokenUsage: any;
-  genAiAgentSessionTraceCount: any;
-  genAiAgentOperationCount: any;
-  genAiAgentOperationDuration: any;
-  genAiAgentSkillActivationCount: any;
-  genAiAgentTokenUsage: any;
-  genAiRuntimeWebhookReceivedCount: any;
-  genAiRuntimeWebhookErrorCount: any;
-  genAiRuntimeWebhookDuration: any;
-  genAiRuntimeMessageQueuedCount: any;
-  genAiRuntimeMessageProcessedCount: any;
-  genAiRuntimeMessageDuration: any;
-  genAiRuntimeQueueEnqueueCount: any;
-  genAiRuntimeQueueDequeueCount: any;
-  genAiRuntimeQueueDepth: any;
-  genAiRuntimeQueueWait: any;
-  genAiRuntimeSessionStateCount: any;
-  genAiRuntimeSessionStuckCount: any;
-  genAiRuntimeSessionStuckAge: any;
+  genAiWorkflowDuration: any;
+  genAiClientOperationDuration: any;
+  genAiClientTokenUsage: any;
 };
 
 export type TranscriptToolCall = {

@@ -2,164 +2,59 @@
 
 ## 说明
 
-本文档只描述当前推荐使用的 **新指标**：
+本文档只描述当前插件会主动上报的推荐指标：
 
-- `gen_ai.client.*`
-- `gen_ai.agent.*`
-- `gen_ai.runtime.*`
+- `gen_ai.workflow.duration`
+- `gen_ai.client.operation.duration`
+- `gen_ai.client.token.usage`
 
-文档目标是提供可直接用于看板、监控器、DQL 的指标清单，因此仅保留：
+当前指标体系对齐 OpenTelemetry GenAI 原生命名，指标 tag 优先使用 `gen_ai.*` 点分字段。为方便和 trace / session 查询关联，指标仍保留少量非官方字段，例如 `session_id`、`skill_name`、`skill_source`、`tool_result_status`。
 
-- 指标名
-- 类型
-- 单位
-- tags
-- 描述
-
-当前单位策略：
-
-- 所有 duration / wait / age 相关直方图仍使用 `ms`
-- 当前指标 tags 采用双写过渡：保留短 tag，同时新增官方 OpenTelemetry GenAI 点分 tag
-- 字段变更关系见 [gen-ai-field-mapping.md](./gen-ai-field-mapping.md)
-- Resource 级属性也统一使用 canonical tag，例如 `agent_runtime`、`agent_version`
-- 平台里如果还能看到 `gen_ai_agent_*`，通常来自历史指标点，不代表当前实现仍会继续上报
-- 旧 `openclaw.*` 指标兼容双写已移除；如果平台里还能看到，通常来自历史指标点
-
-## GenAI Client 边界
-
-当前实现里，`GenAI Client` 命名空间只承载 OTEL 原生 client 语义，不再混入 OpenClaw 自定义的 agent operation 统计。
-
-- `gen_ai.client.*`
-  用于 OTEL 原生 client 指标；本插件不再向该命名空间写入自定义 token / operation 数据
-- `gen_ai.agent.operation.*`
-  用于 OpenClaw 自定义的 model / tool / skill operation 统计
-- `gen_ai.runtime.*`
-  用于消息、队列、session、webhook 等运行时过程指标
-
-如果平台里还能看到 `gen_ai.client.operation.duration`，应将其视为 OTEL 原生来源，而不是本插件当前的主查询口径。
-
-## Tag 设计
-
-### 通用 tag
-
-新指标继续保留短 tag 名，并同步输出对应官方 `gen_ai.*` tag：
-
-- `agent_runtime`
-- `operation_name`
-- `provider_name`
-- `request_model`
-- `response_model`
-- `model_name`
-- `token_type`
-- `channel`
-- `session_id`
-- `outcome`
-- `queue_name`
-- `webhook_name`
-- `skill_name`
-- `skill_source`
-- `tool_name`
-- `tool_result_status`
-- `source`
-
-### tag 说明
-
-| tag | 含义 |
-| --- | --- |
-| `agent_runtime` | Agent/runtime 来源标识，当前内置为 `openclaw`，后续可扩展为 `hermes` 等 |
-| `operation_name` | 操作类型，当前主要为 `model`、`tool`、`skill` |
-| `provider_name` | 模型提供方 |
-| `request_model` | 请求模型名 |
-| `response_model` | 响应模型名 |
-| `model_name` | 归因模型名，当前主要用于 `operation_name=tool` |
-| `token_type` | token 类型，当前主要为 `input` / `output` / `total` |
-| `channel` | 消息来源通道，例如 `feishu` |
-| `session_id` | OpenClaw session ID |
-| `outcome` | 结果状态或结束原因 |
-| `queue_name` | 队列 lane 名称 |
-| `webhook_name` | webhook / update 类型 |
-| `skill_name` | skill 名称 |
-| `skill_source` | skill 来源，当前主要为 `runtime` / `transcript` |
-| `tool_name` | tool 名称 |
-| `tool_result_status` | tool 返回状态 |
-| `source` | 消息事件来源 |
-
-### 官方 tag 对齐
-
-| 短 tag | 官方 tag | 说明 |
-| --- | --- | --- |
-| `operation_name` | `gen_ai.operation.name` | `model/tool/skill` 分别映射为 `chat/execute_tool/execute_tool` |
-| `provider_name` | `gen_ai.provider.name` | 模型或 Agent provider |
-| `request_model` | `gen_ai.request.model` | 请求模型 |
-| `response_model` | `gen_ai.response.model` | 响应模型 |
-| `session_id` | `gen_ai.conversation.id` | session / conversation 关联 |
-| `token_type` | `gen_ai.token.type` | token 类型；兼容 session 总量时可能出现 `total` |
-| `tool_name` | `gen_ai.tool.name` | tool operation 维度 |
+旧 `gen_ai.agent.*`、`gen_ai.runtime.*`、session token / trace、runtime queue / webhook / session health 指标已停止上报。如果平台里还能看到这些指标，通常来自历史数据点。
 
 ## 指标清单
 
-### GenAI Client
-
-说明：
-`gen_ai.client.*` 属于 OTEL 原生指标名。
-本插件不再向 `gen_ai.client.*` 写入自定义 token / operation 数据；本节仅保留 OTEL 原生语义说明。
-
-| 指标名 | 类型 | 单位 | tags | 描述                                                                                   |
-| --- | --- | --- | --- |--------------------------------------------------------------------------------------|
-| `gen_ai.client.token.usage` | Histogram | `{token}` | OTEL 原生 attrs，常见包括 `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.token.type`，以及可选的 `gen_ai.request.model`, `gen_ai.response.model`, `server.address`, `server.port` | Number of input and output tokens used. |
-| `gen_ai.client.operation.duration` | Histogram | `s` | OTEL 原生 attrs，常见包括 `gen_ai.operation.name`, `gen_ai.provider.name`，以及可选的 `gen_ai.request.model`, `gen_ai.response.model`, `server.address`, `server.port` | GenAI operation duration. |
-
-### GenAI Agent
-
 | 指标名 | 类型 | 单位 | tags | 描述 |
 | --- | --- | --- | --- | --- |
-| `gen_ai.agent.request.count` | Counter | - | `agent_runtime`, `channel`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `outcome` | Agent request 总数。 |
-| `gen_ai.agent.request.duration` | Histogram | `ms` | `agent_runtime`, `channel`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `outcome` | Agent request 总耗时。 |
-| `gen_ai.agent.token.usage` | Histogram | `{token}` | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `response_model`, `gen_ai.response.model`, `token_type`, `gen_ai.token.type` | Agent 侧模型 token 用量。来自 runtime `model.usage` 事件以及 transcript / synthetic fallback 回放。 |
-| `gen_ai.agent.operation.count` | Counter | - | 基础：`agent_runtime`, `operation_name`, `gen_ai.operation.name`, `outcome`<br>`operation_name=model`：`provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `response_model`, `gen_ai.response.model`<br>`operation_name=tool`：`tool_name`, `gen_ai.tool.name`, `skill_name`, `model_name`, `tool_result_status`<br>`operation_name=skill`：`skill_name`, `skill_source` | Agent 侧 operation 次数统计。当前覆盖 `model`、`tool`、`skill` 三类操作。 |
-| `gen_ai.agent.operation.duration` | Histogram | `ms` | 基础：`agent_runtime`, `operation_name`, `gen_ai.operation.name`, `outcome`<br>`operation_name=model`：`provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `response_model`, `gen_ai.response.model`<br>`operation_name=tool`：`tool_name`, `gen_ai.tool.name`, `skill_name`, `model_name`, `tool_result_status`<br>`operation_name=skill`：`skill_name`, `skill_source` | Agent 侧 operation 耗时统计。当前覆盖 `model`、`tool`、`skill` 三类操作。 |
-| `gen_ai.agent.session.token.input` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级输入 token 聚合值，由 active session 周期扫描产生。 |
-| `gen_ai.agent.session.token.output` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级输出 token 聚合值，由 active session 周期扫描产生。 |
-| `gen_ai.agent.session.token.total` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级总 token 聚合值，由 active session 周期扫描产生。 |
-| `gen_ai.agent.session.token.usage` | Counter | 保持当前 | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `token_type`, `gen_ai.token.type` | 兼容保留的 session 级 token 聚合指标，建议优先使用上面 3 个独立指标。 |
-| `gen_ai.agent.session.trace.count` | Counter | - | `agent_runtime`, `session_id`, `gen_ai.conversation.id`, `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model` | Session 级 trace 计数，由 active session 周期扫描产生。 |
-| `gen_ai.agent.skill.activation.count` | Counter | - | `agent_runtime`, `session_id`, `skill_name`, `skill_source` | Skill 激活次数。 |
+| `gen_ai.workflow.duration` | Histogram | `s` | `session_id`, `gen_ai.conversation.id`, `final_status` | 一次 OpenClaw 用户请求 / workflow 的端到端耗时。 |
+| `gen_ai.client.operation.duration` | Histogram | `s` | 模型调用：`gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `session_id`, `gen_ai.conversation.id`；tool 调用：`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `session_id`, `gen_ai.conversation.id`, `skill_name`, `tool_result_status`；skill 调用：`gen_ai.operation.name=skill`, `gen_ai.skill.name`, `session_id`, `gen_ai.conversation.id`, `skill_name`, `skill_source`, `tool_result_status` | GenAI client operation 耗时，覆盖模型调用、tool 执行以及作为特殊 tool 处理的 skill 执行窗口。 |
+| `gen_ai.client.token.usage` | Histogram | `{token}` | `gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.token.type`, `session_id`, `gen_ai.conversation.id` | 模型输入 / 输出 token 用量。当前只上报 `gen_ai.token.type=input` 和 `gen_ai.token.type=output`。 |
 
-### GenAI Runtime
+## Tag 说明
 
-| 指标名 | 类型 | 单位 | tags | 描述 |
-| --- | --- | --- | --- | --- |
-| `gen_ai.runtime.message.queued.count` | Counter | - | `agent_runtime`, `channel`, `session_id`, `source` | 消息进入处理链路的次数。 |
-| `gen_ai.runtime.message.processed.count` | Counter | - | `agent_runtime`, `channel`, `session_id`, `outcome` | 消息处理完成次数。 |
-| `gen_ai.runtime.message.duration` | Histogram | `ms` | `agent_runtime`, `channel`, `session_id`, `outcome` | 单条消息处理耗时。 |
-| `gen_ai.runtime.queue.enqueue.count` | Counter | - | `agent_runtime`, `queue_name`, `session_id`, `outcome` | 队列入队次数。 |
-| `gen_ai.runtime.queue.dequeue.count` | Counter | - | `agent_runtime`, `queue_name`, `session_id`, `outcome` | 队列出队次数。 |
-| `gen_ai.runtime.queue.depth` | Histogram | 保持当前 | `agent_runtime`, `queue_name`, `session_id`, `outcome` | 队列深度。 |
-| `gen_ai.runtime.queue.wait` | Histogram | `ms` | `agent_runtime`, `queue_name`, `session_id`, `outcome` | 队列等待时长。 |
-| `gen_ai.runtime.session.state.count` | Counter | - | `agent_runtime`, `session_id`, `outcome` | Session 状态迁移次数。 |
-| `gen_ai.runtime.session.stuck.count` | Counter | - | `agent_runtime`, `session_id`, `outcome` | Stuck session 检测次数。 |
-| `gen_ai.runtime.session.stuck.age` | Histogram | `ms` | `agent_runtime`, `session_id`, `outcome` | Stuck session 年龄。 |
-| `gen_ai.runtime.webhook.received.count` | Counter | - | `agent_runtime`, `channel`, `webhook_name` | Webhook 接收次数。 |
-| `gen_ai.runtime.webhook.error.count` | Counter | - | `agent_runtime`, `channel`, `webhook_name` | Webhook 错误次数。 |
-| `gen_ai.runtime.webhook.duration` | Histogram | `ms` | `agent_runtime`, `channel`, `webhook_name` | Webhook 处理耗时。 |
+| tag | 含义 |
+| --- | --- |
+| `gen_ai.operation.name` | operation 名。模型调用为 `chat`，tool 执行为 `execute_tool`，skill 执行为插件扩展值 `skill`。 |
+| `gen_ai.provider.name` | 模型提供方。 |
+| `gen_ai.request.model` | 请求模型名。 |
+| `gen_ai.response.model` | 响应模型名；当前没有独立响应模型时沿用请求模型。 |
+| `gen_ai.token.type` | token 类型。当前只上报 `input` / `output`。 |
+| `gen_ai.tool.name` | tool 名称，用于 `gen_ai.operation.name=execute_tool` 的 operation duration。 |
+| `gen_ai.skill.name` | skill 名称，用于 `gen_ai.operation.name=skill` 的 operation duration。 |
+| `gen_ai.conversation.id` | session / conversation 关联 ID，当前与 `session_id` 保持一致。 |
+| `session_id` | OpenClaw session ID，用于和 trace / logs 侧 canonical 字段关联。 |
+| `final_status` | workflow 最终状态，例如 `completed`、`error`、`timeout`、`cancelled`、`superseded`。 |
+| `skill_name` | skill 名称，当前用于 tool / skill operation duration。 |
+| `skill_source` | skill 来源，当前主要为 `runtime` / `transcript`。 |
+| `tool_result_status` | tool / skill 执行结果状态。 |
+
+## 迁移说明
+
+| 旧指标 | 当前替代方式 |
+| --- | --- |
+| `gen_ai.agent.request.duration` | 使用 `gen_ai.workflow.duration`。单位从 `ms` 改为 `s`。 |
+| `gen_ai.agent.operation.duration` | 使用 `gen_ai.client.operation.duration`。单位从 `ms` 改为 `s`，operation 类型通过 `gen_ai.operation.name` 区分。 |
+| `gen_ai.agent.token.usage` | 使用 `gen_ai.client.token.usage`，只查询 `gen_ai.token.type=input/output`。 |
+| `gen_ai.agent.request.count`、`gen_ai.agent.operation.count` | 当前不再上报 count 指标；需要次数时按 duration / token 指标点数或 trace 聚合。 |
+| `gen_ai.agent.session.*` | 当前不再上报 session 聚合指标；会话级分析优先使用 `session_id` 关联 trace / logs / 当前指标。 |
+| `gen_ai.runtime.*` | 当前不再上报 runtime 健康类 metrics；runtime 细节保留在 trace / logs 中。 |
 
 ## 使用建议
 
-1. 业务分析优先看：
-   - `gen_ai.agent.request.count`
-   - `gen_ai.agent.request.duration`
-2. 模型性能与 token 消耗优先看：
-   - `gen_ai.agent.token.usage`
-   - `gen_ai.agent.operation.duration`
-3. 会话级分析优先看：
-   - `gen_ai.agent.session.token.usage`
-   - `gen_ai.agent.session.trace.count`
-4. 运行时排队与健康优先看：
-   - `gen_ai.runtime.message.*`
-   - `gen_ai.runtime.queue.*`
-   - `gen_ai.runtime.session.*`
-   - `gen_ai.runtime.webhook.*`
-5. 需要按单会话排查时，优先使用带 `session_id` 的指标切分。
+1. 端到端耗时看 `gen_ai.workflow.duration`。
+2. 模型、tool、skill 执行耗时看 `gen_ai.client.operation.duration`，按 `gen_ai.operation.name`、`gen_ai.tool.name`、`gen_ai.skill.name`、`gen_ai.request.model` 切分。
+3. Token 消耗看 `gen_ai.client.token.usage`，按 `gen_ai.token.type=input/output` 切分。
+4. 单会话排查优先使用 `session_id` 或 `gen_ai.conversation.id` 关联 metrics、traces 和 logs。
 
 ## 代码入口
 

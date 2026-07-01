@@ -40,7 +40,7 @@
   - 兼容短字段：`skill_name`、`skill_call_id`、`skill_source`、`skill_type`
   - 推荐 trace 字段：`skill.name`、`skill.description`、`skill.path`、`skill.source.type`、`skill_result_status`
   - 项目扩展字段：`gen_ai.skill1.*`
-- skill / skill_call / tool 的 GenAI operation 仍统一映射到 `gen_ai.operation.name=execute_tool`
+- trace 侧 skill / skill_call / tool 的 GenAI operation 仍统一映射到 `gen_ai.operation.name=execute_tool`；metric 侧 skill duration 单独使用 `gen_ai.operation.name=skill`
 
 ## 最终 Span 规范
 
@@ -159,7 +159,7 @@
 
 - 当前 `skill_call:<name>` 和具体 `tool_call_id` 一一对应
 - 一次 skill 可能触发多个 tool call，因此同一个 `skill:<name>` 下可能出现多个 `skill_call:<name>`
-- skill call 完成后会单独计入 `gen_ai.agent.operation.*`，其 `operation_name=skill`
+- skill call 完成后会按 `gen_ai.client.operation.duration` 记录执行耗时，指标侧使用 `gen_ai.operation.name=skill` 和 `gen_ai.skill.name`
 
 ## 状态字段说明
 

@@ -3,7 +3,7 @@
 [中文说明](./README_ZH.md)
 [Changelog](./CHANGELOG.md)
 
-`openclaw-otel-plugin` exports OpenClaw runtime and diagnostics data to an OTLP HTTP/protobuf receiver. It emits traces, the current recommended `gen_ai.*` metrics, and optional OTEL logs.
+`openclaw-otel-plugin` exports OpenClaw runtime and diagnostics data to an OTLP HTTP/protobuf receiver. It emits traces, the current recommended `gen_ai.workflow.duration` / `gen_ai.client.*` metrics, and optional OTEL logs.
 
 ## Requirements
 

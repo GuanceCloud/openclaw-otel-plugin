@@ -10,8 +10,7 @@ import type {
 } from "./service-types.js";
 import {
   addEvent,
-  buildGenAiAgentSkillMetricAttrs,
-  buildGenAiAgentTokenMetricAttrs,
+  buildGenAiClientTokenMetricAttrs,
   buildRunScopeAttrs,
   buildGenAiClientModelMetricAttrs,
   buildGenAiClientSkillMetricAttrs,
@@ -21,6 +20,7 @@ import {
   clipPreview,
   clipValuePreview,
   collectToolSummaryValues,
+  durationMsToSeconds,
   endSpanSafely,
   inferSkillNameFromTool,
   inferSkillNameFromToolIdentity,
@@ -219,13 +219,12 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     const tokenMetrics = [
       ["input", usageTotals.inputTokens],
       ["output", usageTotals.outputTokens],
-      ["total", usageTotals.totalTokens],
     ] as const;
     for (const [tokenType, tokenValue] of tokenMetrics) {
       if (typeof tokenValue === "number" && tokenValue > 0) {
-        instruments.genAiAgentTokenUsage?.record(
+        instruments.genAiClientTokenUsage?.record(
           tokenValue,
-          buildGenAiAgentTokenMetricAttrs(provider, model, {
+          buildGenAiClientTokenMetricAttrs(provider, model, {
             session_id: sessionId,
             token_type: tokenType,
           }),
@@ -238,8 +237,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     durationMs: number,
     attrs: Record<string, string | number | boolean | undefined>,
   ) => {
-    instruments.genAiAgentOperationCount?.add(1, attrs);
-    instruments.genAiAgentOperationDuration?.record(durationMs, attrs);
+    instruments.genAiClientOperationDuration?.record(durationMsToSeconds(durationMs), attrs);
   };
 
   const syncToolSummaryAttrs = (evt: SessionEvent, run: ActiveRunSpan) => {
@@ -370,10 +368,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     };
     run.skillSpans.set(normalizedSkillName, skillState);
     run.activeSkillName = normalizedSkillName;
-    instruments.genAiAgentSkillActivationCount?.add(
-      1,
-      buildGenAiAgentSkillMetricAttrs(normalizedSkillName, source, evt.sessionId),
-    );
     const attrs = traceAttrs({
       "openclaw.skills": Array.from(run.usedSkillNames).join(", "),
       "openclaw.skill.count": run.usedSkillNames.size,

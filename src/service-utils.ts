@@ -656,6 +656,7 @@ const OFFICIAL_GEN_AI_ATTR_KEYS = new Set([
   "gen_ai.provider.name",
   "gen_ai.request.model",
   "gen_ai.response.model",
+  "gen_ai.skill.name",
   "gen_ai.token.type",
   "gen_ai.tool.call.arguments",
   "gen_ai.tool.call.id",
@@ -1754,16 +1755,19 @@ export function stripAgentSummaryModelUsageAttrs(
   return next;
 }
 
-export function buildGenAiAgentRequestMetricAttrs(
+export function durationMsToSeconds(durationMs: number): number {
+  return Math.max(0, durationMs) / 1000;
+}
+
+export function buildGenAiWorkflowMetricAttrs(
   snapshot: SessionSnapshot | undefined,
   summaryAttrs?: Record<string, string | number | boolean>,
 ) {
+  const sessionId = snapshot?.sessionId;
   return stringAttrs({
-    channel: snapshot?.lastChannel,
-    session_id: snapshot?.sessionId,
-    provider_name: snapshot?.lastProvider,
-    request_model: snapshot?.lastModel,
-    outcome:
+    session_id: sessionId,
+    "gen_ai.conversation.id": sessionId,
+    final_status:
       typeof summaryAttrs?.["openclaw.outcome"] === "string"
         ? summaryAttrs["openclaw.outcome"]
         : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
@@ -1793,19 +1797,18 @@ export function buildGenAiClientToolMetricAttrs(
   tool: Pick<ActiveToolSpan, "name" | "skillName" | "provider" | "namespace" | "mcpToolName" | "mcpHost">,
   resultStatus?: string,
   sessionId?: string,
-  modelName?: string,
+  _modelName?: string,
 ) {
   return stringAttrs({
-    operation_name: "tool",
     session_id: sessionId,
-    tool_name: tool.name,
+    "gen_ai.conversation.id": sessionId,
+    "gen_ai.operation.name": "execute_tool",
+    "gen_ai.tool.name": tool.name,
     skill_name: tool.skillName,
     tool_provider: tool.provider,
     tool_namespace: tool.namespace,
     tool_mcp_name: tool.mcpToolName,
     tool_mcp_host: tool.mcpHost,
-    model_name: modelName,
-    outcome: resultStatus,
     tool_result_status: resultStatus,
   });
 }
@@ -1817,11 +1820,13 @@ export function buildGenAiClientSkillMetricAttrs(
   source: "runtime" | "transcript" = "runtime",
 ) {
   return stringAttrs({
-    operation_name: "skill",
     session_id: sessionId,
+    "gen_ai.conversation.id": sessionId,
+    "gen_ai.operation.name": "skill",
+    "gen_ai.skill.name": skillName,
     skill_name: skillName,
     skill_source: source,
-    outcome,
+    tool_result_status: outcome,
   });
 }
 
@@ -1829,18 +1834,6 @@ export function buildSkillMetricAttrs(skillName: string, source: "runtime" | "tr
   return stringAttrs({
     "openclaw.skill_name": skillName,
     "openclaw.skill_source": source,
-  });
-}
-
-export function buildGenAiAgentSkillMetricAttrs(
-  skillName: string,
-  source: "runtime" | "transcript",
-  sessionId?: string,
-) {
-  return stringAttrs({
-    session_id: sessionId,
-    skill_name: skillName,
-    skill_source: source,
   });
 }
 
@@ -1856,25 +1849,33 @@ export function buildGenAiClientModelMetricAttrs(
   model?: string,
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
+  const sessionId = typeof extra?.session_id === "string" ? extra.session_id : undefined;
   return stringAttrs({
-    operation_name: "model",
-    provider_name: provider,
-    request_model: model,
-    response_model: model,
+    "gen_ai.operation.name": "chat",
+    "gen_ai.provider.name": provider,
+    "gen_ai.request.model": model,
+    "gen_ai.response.model": model,
+    "gen_ai.conversation.id": sessionId,
     ...(extra ?? {}),
   });
 }
 
-export function buildGenAiAgentTokenMetricAttrs(
+export function buildGenAiClientTokenMetricAttrs(
   provider?: string,
   model?: string,
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
+  const sessionId = typeof extra?.session_id === "string" ? extra.session_id : undefined;
+  const tokenType = typeof extra?.token_type === "string" ? extra.token_type : undefined;
+  const { token_type: _tokenType, ...rest } = extra ?? {};
   return stringAttrs({
-    provider_name: provider,
-    request_model: model,
-    response_model: model,
-    ...(extra ?? {}),
+    "gen_ai.operation.name": "chat",
+    "gen_ai.provider.name": provider,
+    "gen_ai.request.model": model,
+    "gen_ai.response.model": model,
+    "gen_ai.conversation.id": sessionId,
+    "gen_ai.token.type": tokenType,
+    ...rest,
   });
 }
 
@@ -1904,22 +1905,6 @@ export function buildSessionMetricAttrs(
     session_id: snapshot?.sessionId,
     model_provider: overrides?.modelProvider ?? snapshot?.lastProvider,
     model_name: overrides?.modelName ?? snapshot?.lastModel,
-  });
-}
-
-export function buildGenAiAgentSessionMetricAttrs(
-  snapshot: SessionSnapshot | undefined,
-  overrides?: {
-    modelProvider?: string;
-    modelName?: string;
-    tokenType?: string;
-  },
-) {
-  return stringAttrs({
-    session_id: snapshot?.sessionId,
-    provider_name: overrides?.modelProvider ?? snapshot?.lastProvider,
-    request_model: overrides?.modelName ?? snapshot?.lastModel,
-    token_type: overrides?.tokenType,
   });
 }
 
@@ -1986,31 +1971,12 @@ export function buildDiagnosticsWebhookMetricAttrs(channel?: string, webhook?: s
   });
 }
 
-export function buildGenAiRuntimeWebhookMetricAttrs(channel?: string, webhook?: string) {
-  return stringAttrs({
-    channel,
-    webhook_name: webhook,
-  });
-}
-
 export function buildDiagnosticsMessageMetricAttrs(
   channel?: string,
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
   return stringAttrs({
     "openclaw.channel": channel,
-    ...(extra ?? {}),
-  });
-}
-
-export function buildGenAiRuntimeMessageMetricAttrs(
-  channel?: string,
-  sessionId?: string,
-  extra?: Record<string, string | number | boolean | undefined>,
-) {
-  return stringAttrs({
-    channel,
-    session_id: sessionId,
     ...(extra ?? {}),
   });
 }
@@ -2025,18 +1991,6 @@ export function buildDiagnosticsQueueMetricAttrs(
   });
 }
 
-export function buildGenAiRuntimeQueueMetricAttrs(
-  lane?: string,
-  sessionId?: string,
-  extra?: Record<string, string | number | boolean | undefined>,
-) {
-  return stringAttrs({
-    queue_name: lane,
-    session_id: sessionId,
-    ...(extra ?? {}),
-  });
-}
-
 export function buildDiagnosticsSessionMetricAttrs(
   state?: string,
   reason?: string,
@@ -2045,19 +1999,6 @@ export function buildDiagnosticsSessionMetricAttrs(
   return stringAttrs({
     "openclaw.state": state,
     "openclaw.reason": reason,
-    ...(extra ?? {}),
-  });
-}
-
-export function buildGenAiRuntimeSessionMetricAttrs(
-  _state?: string,
-  reason?: string,
-  sessionId?: string,
-  extra?: Record<string, string | number | boolean | undefined>,
-) {
-  return stringAttrs({
-    session_id: sessionId,
-    outcome: reason,
     ...(extra ?? {}),
   });
 }

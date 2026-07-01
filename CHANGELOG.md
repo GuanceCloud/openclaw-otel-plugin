@@ -2,6 +2,18 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-07-01
+
+### Metric System Restructure
+
+- Replaced plugin-owned `gen_ai.agent.*` and `gen_ai.runtime.*` metric emission with the current `gen_ai.workflow.duration`, `gen_ai.client.operation.duration`, and `gen_ai.client.token.usage` metric set.
+- Changed workflow and operation duration metrics from milliseconds to seconds.
+- Moved model, tool, and skill duration reporting to `gen_ai.client.operation.duration`, using official tags such as `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.tool.name`, and `gen_ai.conversation.id`.
+- Moved model token reporting to `gen_ai.client.token.usage` and now emits only `gen_ai.token.type=input` / `output`; total and cache token values remain available on trace attributes but are no longer emitted as token metric series.
+- Stopped emitting custom session aggregate metrics, runtime queue/message/webhook/session metrics, skill activation counts, and operation/request count metrics.
+- Split skill duration metrics from generic tool duration metrics with `gen_ai.operation.name=skill` and `gen_ai.skill.name`, while regular tools continue to use `gen_ai.operation.name=execute_tool` and `gen_ai.tool.name`.
+- Updated metrics documentation, field mapping notes, trace tag notes, and GTrace protocol docs to reflect the new metric set.
+
 ## 2026-06-26
 
 ### Request And Agent Span Hygiene

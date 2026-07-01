@@ -19,15 +19,14 @@ import type {
 } from "./service-types.js";
 import {
   addEvent,
-  buildGenAiAgentTokenMetricAttrs,
+  buildGenAiClientTokenMetricAttrs,
   buildGenAiClientModelMetricAttrs,
-  buildGenAiAgentSessionMetricAttrs,
-  buildGenAiAgentRequestMetricAttrs,
+  buildGenAiWorkflowMetricAttrs,
   buildRunScopeAttrs,
   buildTranscriptReplayEvent,
   clipPreview,
-  computeSessionMetricDelta,
   createRunState,
+  durationMsToSeconds,
   endSpanSafely,
   eventTime,
   isHeartbeatSessionSnapshot,
@@ -1118,20 +1117,18 @@ export function createOtelPluginService(
             - (trajectoryRun.userTs ?? trajectoryRun.startedAt ?? Date.now()),
             1,
           );
-          instruments.genAiAgentOperationCount?.add(1, modelMetricAttrs);
-          instruments.genAiAgentOperationDuration?.record(durationMs, modelMetricAttrs);
+          instruments.genAiClientOperationDuration?.record(durationMsToSeconds(durationMs), modelMetricAttrs);
           const tokenMetrics = [
             ["input", usageTotals.inputTokens],
             ["output", usageTotals.outputTokens],
-            ["total", usageTotals.totalTokens],
           ] as const;
           for (const [tokenType, tokenValue] of tokenMetrics) {
             if (tokenValue <= 0) {
               continue;
             }
-            instruments.genAiAgentTokenUsage?.record(
+            instruments.genAiClientTokenUsage?.record(
               tokenValue,
-              buildGenAiAgentTokenMetricAttrs(trajectoryRun.provider, trajectoryRun.model, {
+              buildGenAiClientTokenMetricAttrs(trajectoryRun.provider, trajectoryRun.model, {
                 session_id: trajectoryRun.sessionId,
                 token_type: tokenType,
               }),
@@ -1363,13 +1360,12 @@ export function createOtelPluginService(
             "openclaw.state": "completed",
             "openclaw.outcome": finalStatus,
           };
-          const requestMetricAttrs = buildGenAiAgentRequestMetricAttrs(
+          const requestMetricAttrs = buildGenAiWorkflowMetricAttrs(
             requestMetricSnapshot as any,
             requestSummaryAttrs,
           );
-          instruments.genAiAgentRequestCount?.add(1, requestMetricAttrs);
-          instruments.genAiAgentRequestDuration?.record(
-            Math.max(egressEndTs - requestStartTs, 1),
+          instruments.genAiWorkflowDuration?.record(
+            durationMsToSeconds(Math.max(egressEndTs - requestStartTs, 1)),
             requestMetricAttrs,
           );
 
@@ -1430,63 +1426,6 @@ export function createOtelPluginService(
               currentTotals.totalTokens,
               tokenState?.totalTokens ?? 0,
             );
-            const previousTotals = reportedSessionMetrics.get(seriesKey);
-            const deltaTotals = computeSessionMetricDelta(currentTotals, previousTotals);
-            const genAiSessionMetricAttrs = buildGenAiAgentSessionMetricAttrs(snapshot, {
-              modelProvider: tokenState?.modelProvider,
-              modelName: tokenState?.modelName,
-            });
-            if (deltaTotals.inputTokens > 0) {
-              instruments.genAiAgentSessionTokenInput?.add(
-                deltaTotals.inputTokens,
-                genAiSessionMetricAttrs,
-              );
-              instruments.genAiAgentSessionTokenUsage?.add(
-                deltaTotals.inputTokens,
-                buildGenAiAgentSessionMetricAttrs(snapshot, {
-                  modelProvider: tokenState?.modelProvider,
-                  modelName: tokenState?.modelName,
-                  tokenType: "input",
-                }),
-              );
-            }
-            if (deltaTotals.outputTokens > 0) {
-              instruments.genAiAgentSessionTokenOutput?.add(
-                deltaTotals.outputTokens,
-                genAiSessionMetricAttrs,
-              );
-              instruments.genAiAgentSessionTokenUsage?.add(
-                deltaTotals.outputTokens,
-                buildGenAiAgentSessionMetricAttrs(snapshot, {
-                  modelProvider: tokenState?.modelProvider,
-                  modelName: tokenState?.modelName,
-                  tokenType: "output",
-                }),
-              );
-            }
-            if (deltaTotals.totalTokens > 0) {
-              instruments.genAiAgentSessionTokenTotal?.add(
-                deltaTotals.totalTokens,
-                genAiSessionMetricAttrs,
-              );
-              instruments.genAiAgentSessionTokenUsage?.add(
-                deltaTotals.totalTokens,
-                buildGenAiAgentSessionMetricAttrs(snapshot, {
-                  modelProvider: tokenState?.modelProvider,
-                  modelName: tokenState?.modelName,
-                  tokenType: "total",
-                }),
-              );
-            }
-            if (deltaTotals.traceCount > 0) {
-              instruments.genAiAgentSessionTraceCount?.add(
-                deltaTotals.traceCount,
-                buildGenAiAgentSessionMetricAttrs(snapshot, {
-                  modelProvider: tokenState?.modelProvider,
-                  modelName: tokenState?.modelName,
-                }),
-              );
-            }
             reportedSessionMetrics.set(seriesKey, currentTotals);
             if (tokenState) {
               tokenState.dirty = false;
@@ -1848,10 +1787,9 @@ export function createOtelPluginService(
         if (attrs) {
           current.span && addEvent(current.span, "run.finish");
         }
-        const genAiRequestMetricAttrs = buildGenAiAgentRequestMetricAttrs(snapshot, summaryAttrs);
-        instruments.genAiAgentRequestCount?.add(1, genAiRequestMetricAttrs);
-        instruments.genAiAgentRequestDuration?.record(
-          Math.max(0, eventTimestamp(evt).getTime() - current.startedAt),
+        const genAiRequestMetricAttrs = buildGenAiWorkflowMetricAttrs(snapshot, summaryAttrs);
+        instruments.genAiWorkflowDuration?.record(
+          durationMsToSeconds(Math.max(0, eventTimestamp(evt).getTime() - current.startedAt)),
           genAiRequestMetricAttrs,
         );
         finalizeRunSpans(current, eventTimestamp(evt));

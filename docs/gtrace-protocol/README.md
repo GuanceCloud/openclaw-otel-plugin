@@ -163,63 +163,39 @@ root_span（一次完整请求，例如一条消息的处理）
 
 ### 命名规范
 
-使用分层命名空间 `<domain>.<category>.<name>`：
+当前插件主动上报的指标收敛到 OTEL GenAI 原生命名：
 
-- `gen_ai.agent.*` — Agent 执行层指标
-- `gen_ai.runtime.*` — 运行时 / 基础设施指标
-- `gen_ai.client.*` — 客户端 / 模型调用指标（OTEL 原生）
+- `gen_ai.workflow.duration` — workflow 端到端耗时
+- `gen_ai.client.operation.duration` — 模型 / tool / skill operation 耗时
+- `gen_ai.client.token.usage` — 模型输入 / 输出 token 用量
 
 ### 指标清单
 
-**Agent 执行层：**
-
-| 指标名                                 | 类型      | 单位       | 说明                                   |
-| -------------------------------------- | --------- | ---------- | -------------------------------------- |
-| `gen_ai.agent.request.count`           | Counter   | —          | 请求总数                               |
-| `gen_ai.agent.request.duration`        | Histogram | `ms`       | 请求总耗时                             |
-| `gen_ai.agent.token.usage`             | Histogram | `{token}`  | 模型 token 用量分布                    |
-| `gen_ai.agent.operation.count`         | Counter   | —          | 操作计数（按 `operation_name` 区分 model/tool/skill） |
-| `gen_ai.agent.operation.duration`      | Histogram | `ms`       | 操作耗时                               |
-| `gen_ai.agent.session.token.input`     | Counter   | `{token}`  | Session 级输入 token 累计              |
-| `gen_ai.agent.session.token.output`    | Counter   | `{token}`  | Session 级输出 token 累计              |
-| `gen_ai.agent.session.token.total`     | Counter   | `{token}`  | Session 级总 token 累计                |
-| `gen_ai.agent.session.trace.count`     | Counter   | —          | Session 级 trace 计数                  |
-| `gen_ai.agent.skill.activation.count`  | Counter   | —          | Skill 激活次数                         |
-
-**运行时层：**
-
-| 指标名                                   | 类型      | 单位    | 说明                 |
-| ---------------------------------------- | --------- | ------- | -------------------- |
-| `gen_ai.runtime.message.queued.count`    | Counter   | —       | 消息入队次数         |
-| `gen_ai.runtime.message.processed.count` | Counter   | —       | 消息处理完成次数     |
-| `gen_ai.runtime.message.duration`        | Histogram | `ms`    | 消息处理耗时         |
-| `gen_ai.runtime.queue.enqueue.count`     | Counter   | —       | 入队次数             |
-| `gen_ai.runtime.queue.dequeue.count`     | Counter   | —       | 出队次数             |
-| `gen_ai.runtime.queue.depth`             | Histogram | —       | 队列深度             |
-| `gen_ai.runtime.queue.wait`              | Histogram | `ms`    | 队列等待时长         |
-| `gen_ai.runtime.session.state.count`     | Counter   | —       | Session 状态迁移次数 |
+| 指标名 | 类型 | 单位 | 说明 |
+| --- | --- | --- | --- |
+| `gen_ai.workflow.duration` | Histogram | `s` | 一次用户请求 / workflow 的端到端耗时 |
+| `gen_ai.client.operation.duration` | Histogram | `s` | 模型调用、tool 执行、skill 调用耗时 |
+| `gen_ai.client.token.usage` | Histogram | `{token}` | 模型输入 / 输出 token 用量 |
 
 ### 通用 Metric Tag
 
-推荐在指标上统一携带以下 tag，并与 span attribute 字段名保持一致：
+推荐在指标上优先使用官方 `gen_ai.*` tag，并保留必要关联字段：
 
 | tag                 | 说明                                          |
 | ------------------- | --------------------------------------------- |
-| `agent_runtime`     | Agent 运行时标识                               |
-| `operation_name`    | 操作类型：`model` / `tool` / `skill`          |
+| `gen_ai.operation.name` | 操作类型：`chat` / `execute_tool` / `skill` |
+| `gen_ai.provider.name` | 模型提供商 |
+| `gen_ai.request.model` | 请求模型名 |
+| `gen_ai.response.model` | 响应模型名 |
+| `gen_ai.token.type` | Token 类型：`input` / `output` |
+| `gen_ai.tool.name` | Tool 名称 |
+| `gen_ai.skill.name` | Skill 名称 |
+| `gen_ai.conversation.id` | 会话 / conversation ID |
 | `session_id`        | 会话 ID                                       |
-| `session_key`       | 会话 key                                       |
-| `provider_name`     | 模型提供商                                     |
-| `request_model`     | 请求模型名                                     |
-| `response_model`    | 响应模型名                                     |
-| `token_type`        | Token 类型：`input` / `output` / `total`      |
-| `channel`           | 消息通道                                       |
-| `outcome`           | 结果状态                                       |
-| `tool_name`         | Tool 名称                                      |
+| `final_status`      | workflow 最终状态                              |
 | `tool_result_status`| Tool 结果状态                                  |
 | `skill_name`        | Skill 名称                                     |
 | `skill_source`      | Skill 来源                                     |
-| `queue_name`        | 队列名称                                       |
 
 ## 接入步骤
 

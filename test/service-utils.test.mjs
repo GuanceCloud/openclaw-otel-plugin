@@ -5,22 +5,17 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  buildGenAiAgentTokenMetricAttrs,
-  buildGenAiAgentRequestMetricAttrs,
-  buildGenAiAgentSkillMetricAttrs,
-  buildGenAiAgentSessionMetricAttrs,
   buildRunScopeAttrs,
   buildTranscriptReplayEvent,
   buildGenAiClientModelMetricAttrs,
   buildGenAiClientSkillMetricAttrs,
+  buildGenAiClientTokenMetricAttrs,
   buildGenAiClientToolMetricAttrs,
+  buildGenAiWorkflowMetricAttrs,
   buildToolAttrs,
-  buildGenAiRuntimeMessageMetricAttrs,
-  buildGenAiRuntimeQueueMetricAttrs,
-  buildGenAiRuntimeSessionMetricAttrs,
-  buildGenAiRuntimeWebhookMetricAttrs,
   buildSessionMetricAttrs,
   computeSessionMetricDelta,
+  durationMsToSeconds,
   loadSnapshotForEvent,
   normalizeFinalStatus,
   readReplayFinalizationState,
@@ -976,39 +971,39 @@ test("buildSessionMetricAttrs prefers runtime model overrides for session metric
 
 test("buildGenAiClientModelMetricAttrs uses GenAI semantic-style keys", () => {
   const attrs = buildGenAiClientModelMetricAttrs("volcengine-plan", "ark-code-latest", {
-    token_type: "input",
+    session_id: "session-1",
   });
 
-  assert.equal(attrs.operation_name, "model");
+  assert.equal(attrs.operation_name, undefined);
   assert.equal(attrs["gen_ai.operation.name"], "chat");
-  assert.equal(attrs.provider_name, "volcengine-plan");
+  assert.equal(attrs.provider_name, undefined);
   assert.equal(attrs["gen_ai.provider.name"], "volcengine-plan");
-  assert.equal(attrs.request_model, "ark-code-latest");
+  assert.equal(attrs.request_model, undefined);
   assert.equal(attrs["gen_ai.request.model"], "ark-code-latest");
-  assert.equal(attrs.response_model, "ark-code-latest");
+  assert.equal(attrs.response_model, undefined);
   assert.equal(attrs["gen_ai.response.model"], "ark-code-latest");
-  assert.equal(attrs.token_type, "input");
-  assert.equal(attrs["gen_ai.token.type"], "input");
+  assert.equal(attrs.session_id, "session-1");
+  assert.equal(attrs["gen_ai.conversation.id"], "session-1");
 });
 
-test("buildGenAiAgentTokenMetricAttrs uses canonical agent token keys", () => {
-  const attrs = buildGenAiAgentTokenMetricAttrs("volcengine-plan", "ark-code-latest", {
+test("buildGenAiClientTokenMetricAttrs uses official token metric keys", () => {
+  const attrs = buildGenAiClientTokenMetricAttrs("volcengine-plan", "ark-code-latest", {
     session_id: "session-1",
     token_type: "input",
   });
 
-  assert.equal(attrs.provider_name, "volcengine-plan");
-  assert.equal(attrs.request_model, "ark-code-latest");
-  assert.equal(attrs.response_model, "ark-code-latest");
+  assert.equal(attrs.provider_name, undefined);
+  assert.equal(attrs.request_model, undefined);
+  assert.equal(attrs.response_model, undefined);
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs["gen_ai.provider.name"], "volcengine-plan");
   assert.equal(attrs["gen_ai.request.model"], "ark-code-latest");
   assert.equal(attrs["gen_ai.response.model"], "ark-code-latest");
   assert.equal(attrs["gen_ai.conversation.id"], "session-1");
-  assert.equal(attrs.token_type, "input");
+  assert.equal(attrs.token_type, undefined);
   assert.equal(attrs["gen_ai.token.type"], "input");
   assert.equal(attrs.operation_name, undefined);
-  assert.equal(attrs["gen_ai.operation.name"], undefined);
+  assert.equal(attrs["gen_ai.operation.name"], "chat");
 });
 
 test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
@@ -1019,12 +1014,12 @@ test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
     "gpt-5",
   );
 
-  assert.equal(attrs.operation_name, "tool");
+  assert.equal(attrs.operation_name, undefined);
   assert.equal(attrs["gen_ai.operation.name"], "execute_tool");
-  assert.equal(attrs.tool_name, "exec");
+  assert.equal(attrs.tool_name, undefined);
   assert.equal(attrs["gen_ai.tool.name"], "exec");
   assert.equal(attrs.skill_name, "dashboard");
-  assert.equal(attrs.model_name, "gpt-5");
+  assert.equal(attrs.model_name, undefined);
   assert.equal(attrs.tool_result_status, "completed");
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs["gen_ai.conversation.id"], "session-1");
@@ -1037,16 +1032,18 @@ test("buildGenAiClientSkillMetricAttrs uses skill operation naming", () => {
     "session-1",
   );
 
-  assert.equal(attrs.operation_name, "skill");
-  assert.equal(attrs["gen_ai.operation.name"], "execute_tool");
+  assert.equal(attrs.operation_name, undefined);
+  assert.equal(attrs["gen_ai.operation.name"], "skill");
+  assert.equal(attrs["gen_ai.tool.name"], undefined);
+  assert.equal(attrs["gen_ai.skill.name"], "dashboard");
   assert.equal(attrs.skill_name, "dashboard");
   assert.equal(attrs.skill_source, "runtime");
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs["gen_ai.conversation.id"], "session-1");
 });
 
-test("GenAI agent metric builders preserve session and request semantics", () => {
-  const requestAttrs = buildGenAiAgentRequestMetricAttrs(
+test("GenAI workflow metric builder keeps workflow tags model-free", () => {
+  const requestAttrs = buildGenAiWorkflowMetricAttrs(
     {
       sessionId: "session-1",
       lastChannel: "feishu",
@@ -1058,71 +1055,20 @@ test("GenAI agent metric builders preserve session and request semantics", () =>
       "openclaw.outcome": "completed",
     },
   );
-  const sessionAttrs = buildGenAiAgentSessionMetricAttrs(
-    {
-      sessionId: "session-1",
-      lastProvider: "snapshot-provider",
-      lastModel: "snapshot-model",
-    },
-    {
-      modelProvider: "runtime-provider",
-      modelName: "runtime-model",
-      tokenType: "total",
-    },
-  );
 
-  assert.equal(requestAttrs.channel, "feishu");
+  assert.equal(requestAttrs.channel, undefined);
   assert.equal(requestAttrs.session_id, "session-1");
-  assert.equal(requestAttrs.provider_name, "volcengine-plan");
-  assert.equal(requestAttrs.request_model, "ark-code-latest");
-  assert.equal(requestAttrs["gen_ai.provider.name"], "volcengine-plan");
-  assert.equal(requestAttrs["gen_ai.request.model"], "ark-code-latest");
+  assert.equal(requestAttrs.provider_name, undefined);
+  assert.equal(requestAttrs.request_model, undefined);
+  assert.equal(requestAttrs["gen_ai.provider.name"], undefined);
+  assert.equal(requestAttrs["gen_ai.request.model"], undefined);
   assert.equal(requestAttrs["gen_ai.conversation.id"], "session-1");
   assert.equal(requestAttrs.session_state, undefined);
-  assert.equal(requestAttrs.outcome, "completed");
-
-  assert.equal(sessionAttrs.session_id, "session-1");
-  assert.equal(sessionAttrs.session_key, undefined);
-  assert.equal(sessionAttrs.provider_name, "runtime-provider");
-  assert.equal(sessionAttrs.request_model, "runtime-model");
-  assert.equal(sessionAttrs["gen_ai.provider.name"], "runtime-provider");
-  assert.equal(sessionAttrs["gen_ai.request.model"], "runtime-model");
-  assert.equal(sessionAttrs["gen_ai.conversation.id"], "session-1");
-  assert.equal(sessionAttrs.token_type, "total");
-  assert.equal(sessionAttrs["gen_ai.token.type"], "total");
+  assert.equal(requestAttrs.outcome, undefined);
+  assert.equal(requestAttrs.final_status, "completed");
 });
 
-test("GenAI runtime and skill metric builders use the new namespaces", () => {
-  const skillAttrs = buildGenAiAgentSkillMetricAttrs("dashboard", "runtime", "session-1");
-  const messageAttrs = buildGenAiRuntimeMessageMetricAttrs("feishu", "session-1", {
-    outcome: "completed",
-  });
-  const queueAttrs = buildGenAiRuntimeQueueMetricAttrs("main", "session-1", {
-    outcome: "dequeue",
-  });
-  const sessionAttrs = buildGenAiRuntimeSessionMetricAttrs("processing", "waiting_for_tool", "session-1");
-
-  assert.equal(skillAttrs.session_id, "session-1");
-  assert.equal(skillAttrs["gen_ai.conversation.id"], "session-1");
-  assert.equal(skillAttrs.skill_name, "dashboard");
-  assert.equal(skillAttrs.skill_source, "runtime");
-  assert.equal(messageAttrs.channel, "feishu");
-  assert.equal(messageAttrs.session_id, "session-1");
-  assert.equal(messageAttrs["gen_ai.conversation.id"], "session-1");
-  assert.equal(messageAttrs.outcome, "completed");
-  assert.equal(queueAttrs.queue_name, "main");
-  assert.equal(queueAttrs.session_id, "session-1");
-  assert.equal(queueAttrs["gen_ai.conversation.id"], "session-1");
-  assert.equal(queueAttrs.outcome, "dequeue");
-  assert.equal(sessionAttrs.session_id, "session-1");
-  assert.equal(sessionAttrs["gen_ai.conversation.id"], "session-1");
-  assert.equal(sessionAttrs.session_state, undefined);
-  assert.equal(sessionAttrs.outcome, "waiting_for_tool");
-});
-
-test("GenAI runtime webhook metric builder uses the runtime webhook namespace", () => {
-  const attrs = buildGenAiRuntimeWebhookMetricAttrs("feishu", "message");
-
-  assert.equal(attrs.channel, "feishu");
-  assert.equal(attrs.webhook_name, "message");
+test("durationMsToSeconds converts metric durations to seconds", () => {
+  assert.equal(durationMsToSeconds(400), 0.4);
+  assert.equal(durationMsToSeconds(-1), 0);
 });
