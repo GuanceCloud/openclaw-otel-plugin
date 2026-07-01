@@ -22,6 +22,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 - Replaced the incorrect `gen_ai.skill1.*` trace tags with `gen_ai.skill.*`, matching `claude-otel-plugin` skill tag naming.
 - Backfilled `skill.description` / `gen_ai.skill.description` from the local `SKILL.md` when runtime skill inference happens before session skill metadata is available.
 - Backfilled `gen_ai.output.messages` on replayed final `llm` spans from the session assistant text when the transcript turn lacks an explicit output preview.
+- Skipped transcript summary `skill:*` spans when concrete `tool:Skill -> skill:<name>` spans already exist for the same skill, avoiding duplicate skill nesting.
 
 ## 2026-06-26
 

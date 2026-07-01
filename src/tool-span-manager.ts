@@ -387,7 +387,28 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
 
   const ensureTranscriptSkillSpans = (evt: SessionEvent) => {
     const snapshot = loadSessionSnapshot(evt.sessionKey);
+    const concreteSkillNames = new Set(
+      Object.values(snapshot?.toolCallSkillNamesById ?? {})
+        .map((skillName) => skillName.trim())
+        .filter(Boolean),
+    );
+    for (const toolCall of snapshot?.lastRunToolCalls ?? []) {
+      const summary = collectToolSummaryValues(toolCall.name, {
+        args: toolCall.args,
+        meta: toolCall.meta,
+        result: toolCall.result,
+      });
+      const skillName = inferSkillNameFromToolIdentity(toolCall.name, summary.target, summary.command);
+      if (skillName) {
+        concreteSkillNames.add(skillName);
+      }
+    }
     for (const skillName of snapshot?.invokedSkillNames ?? []) {
+      if (concreteSkillNames.has(skillName)) {
+        const run = getRun(evt, false);
+        run?.usedSkillNames.add(skillName);
+        continue;
+      }
       ensureSkillSpan(evt, skillName, "transcript");
     }
   };
