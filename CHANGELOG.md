@@ -23,6 +23,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 - Backfilled `skill.description` / `gen_ai.skill.description` from the local `SKILL.md` when runtime skill inference happens before session skill metadata is available.
 - Backfilled `gen_ai.output.messages` on replayed final `llm` spans from the session assistant text when the transcript turn lacks an explicit output preview.
 - Skipped transcript summary `skill:*` spans when concrete `tool:Skill -> skill:<name>` spans already exist for the same skill, avoiding duplicate skill nesting.
+- Routed final run skill backfill through the same transcript de-duplication logic so completed requests no longer create full-request-duration `skill:*` summary spans after real skill tool calls have already been emitted.
 
 ## 2026-06-26
 

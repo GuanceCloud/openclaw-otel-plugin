@@ -143,3 +143,62 @@ test("transcript skill summary is skipped when a concrete skill tool call exists
   assert.deepEqual(spans.map((span) => span.name), []);
   assert.deepEqual(Array.from(run.usedSkillNames), ["dashboard"]);
 });
+
+test("transcript skill summary is skipped when the run already used the skill", () => {
+  const spans = [];
+  const run = createRunState({ active: true }, 1000, 1000);
+  run.span = createFakeSpan("run");
+  run.ctx = { ctx: "run" };
+  run.usedSkillNames.add("dashboard");
+  const manager = createToolSpanManager({
+    tracer: {
+      startSpan(name) {
+        const span = createFakeSpan(name);
+        spans.push(span);
+        return span;
+      },
+    },
+    trace: {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    },
+    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    instruments: {},
+    getRun() {
+      return run;
+    },
+    getRoot() {
+      return { span: createFakeSpan("root"), ctx: { ctx: "root" } };
+    },
+    ensureUserSpan() {
+      return undefined;
+    },
+    loadSessionSnapshot() {
+      return {
+        sessionFile: "session.jsonl",
+        mtimeMs: 1,
+        invokedSkillNames: ["dashboard"],
+      };
+    },
+    enrichWithTranscript(_sessionKey, attrs) {
+      return attrs;
+    },
+    createChildSpan() {
+      throw new Error("not expected");
+    },
+    eventTimestamp(evt) {
+      return new Date(evt.ts ?? 1000);
+    },
+    setLatestAssistantText() {},
+    emitRuntimeOrchestrationSpan() {},
+    ensureRuntimeLifecycleSpans() {},
+    emitModelTurnDebugLog() {},
+  });
+
+  manager.ensureTranscriptSkillSpans({ sessionKey: "s1", ts: 2000 });
+
+  assert.deepEqual(spans.map((span) => span.name), []);
+  assert.deepEqual(Array.from(run.usedSkillNames), ["dashboard"]);
+});

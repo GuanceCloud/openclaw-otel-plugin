@@ -1659,19 +1659,12 @@ export function createOtelPluginService(
         }
         const snapshot = loadSessionSnapshot(sessionKey);
         const summaryAttrs = normalizeTerminalSpanAttrs(attrs ?? {});
-        for (const skillName of snapshot?.invokedSkillNames ?? []) {
-          if (!current.skillSpans.has(skillName)) {
-            ensureSkillSpan(
-              {
-                sessionKey: evt.sessionKey,
-                sessionId: evt.sessionId,
-                ts: current.mainStartTs,
-              },
-              skillName,
-              "transcript",
-            );
-          }
-        }
+        ensureTranscriptSkillSpans({
+          sessionKey,
+          sessionId: evt.sessionId,
+          runId: evt.runId,
+          ts: current.mainStartTs,
+        });
         const finalAttrs = buildAgentSummaryTraceAttrs(sessionKey, {
           ...enrichWithTranscript(sessionKey, summaryAttrs),
           ...buildRunScopeAttrs(resolveRunId(evt) ?? current.runId, current.runIds, resolveRunId(evt)),

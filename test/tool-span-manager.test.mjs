@@ -1284,7 +1284,7 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
 
   const modelSpan = spans.find((span) => span.name === "llm");
   assert.ok(modelSpan);
-  assert.deepEqual(getRunCalls, [true, false]);
+  assert.deepEqual(getRunCalls, [true, false, false]);
   assert.equal(modelSpan.options.kind, "client");
   assert.equal(modelSpan.options.attributes["span.kind"], "model");
   assert.equal(modelSpan.options.attributes.usage_input_tokens, 12);

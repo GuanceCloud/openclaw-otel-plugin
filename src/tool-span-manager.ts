@@ -387,8 +387,9 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
 
   const ensureTranscriptSkillSpans = (evt: SessionEvent) => {
     const snapshot = loadSessionSnapshot(evt.sessionKey);
+    const run = getRun(evt, false);
     const concreteSkillNames = new Set(
-      Object.values(snapshot?.toolCallSkillNamesById ?? {})
+      [...(run?.usedSkillNames ?? []), ...Object.values(snapshot?.toolCallSkillNamesById ?? {})]
         .map((skillName) => skillName.trim())
         .filter(Boolean),
     );
@@ -405,7 +406,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     }
     for (const skillName of snapshot?.invokedSkillNames ?? []) {
       if (concreteSkillNames.has(skillName)) {
-        const run = getRun(evt, false);
         run?.usedSkillNames.add(skillName);
         continue;
       }
