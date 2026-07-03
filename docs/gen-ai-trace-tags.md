@@ -22,6 +22,22 @@
   - `invoke_agent` 才是最接近 `AI Agent execution` 的 span
   - 多轮 `llm`、`tool:*`、`skill:*` 共同构成一次 agent 执行
 
+当前完整结构示意：
+
+```text
+openclaw_request
+├── session_processing
+├── runtime_orchestration
+└── invoke_agent
+    ├── llm
+    │   ├── tool:exec_command
+    │   └── tool:Skill
+    │       └── skill:plugin-creator
+    ├── llm
+    │   └── tool:read
+    └── llm
+```
+
 ## Skill 语义边界
 
 - 当前代码把 OpenClaw `skill` 定义为 **agent 执行中的能力层 / orchestration context**，不是一次独立的模型调用
