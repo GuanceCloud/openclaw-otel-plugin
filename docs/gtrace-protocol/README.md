@@ -168,6 +168,8 @@ root_span（一次完整请求，例如一条消息的处理）
 - `gen_ai.workflow.duration` — workflow 端到端耗时
 - `gen_ai.client.operation.duration` — 模型 / tool / skill operation 耗时
 - `gen_ai.client.token.usage` — 模型输入 / 输出 token 用量
+- `gen_ai.agent.operation.count` — 兼容保留的模型 / tool / skill operation 次数
+- `gen_ai.agent.operation.duration` — 兼容保留的模型 / tool / skill operation 耗时
 
 ### 指标清单
 
@@ -176,6 +178,8 @@ root_span（一次完整请求，例如一条消息的处理）
 | `gen_ai.workflow.duration` | Histogram | `s` | 一次用户请求 / workflow 的端到端耗时 |
 | `gen_ai.client.operation.duration` | Histogram | `s` | 模型调用、tool 执行、skill 调用耗时 |
 | `gen_ai.client.token.usage` | Histogram | `{token}` | 模型输入 / 输出 token 用量 |
+| `gen_ai.agent.operation.count` | Counter | `1` | 兼容保留的模型 / tool / skill operation 次数 |
+| `gen_ai.agent.operation.duration` | Histogram | `ms` | 兼容保留的模型 / tool / skill operation 耗时 |
 
 ### 通用 Metric Tag
 

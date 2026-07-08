@@ -113,6 +113,7 @@ test("skill file reads create a nested Skill tool span", () => {
 
   assert.ok(skillToolSpan);
   assert.ok(skillSpan);
+  assert.equal(skillToolSpan.parentCtx.ctx, "run");
   assert.equal(skillSpan.parentCtx.span.name, skillToolSpan.name);
   assert.equal(skillToolSpan.options.attributes.run_id, "run-1");
   assert.equal(skillSpan.options.attributes.run_id, "run-1");
@@ -790,6 +791,8 @@ test("tool and skill spans backfill session attrs from the snapshot", () => {
 test("tool completion records tool and skill client operation durations", () => {
   const spans = [];
   const durationRecords = [];
+  const agentDurationRecords = [];
+  const agentCountRecords = [];
   const tracer = createFakeTracer(spans);
   const trace = {
     setSpan(ctx, span) {
@@ -813,6 +816,16 @@ test("tool completion records tool and skill client operation durations", () => 
       genAiClientOperationDuration: {
         record(value, attrs) {
           durationRecords.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationDuration: {
+        record(value, attrs) {
+          agentDurationRecords.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationCount: {
+        add(value, attrs) {
+          agentCountRecords.push({ value, attrs });
         },
       },
     },
@@ -896,7 +909,7 @@ test("tool completion records tool and skill client operation durations", () => 
     gen_ai_skill_name: attrs["gen_ai.skill.name"],
     skill_name: attrs.skill_name,
     model_name: attrs.model_name,
-    outcome: attrs.tool_result_status,
+    outcome: attrs.outcome,
   }));
   assert.deepEqual(simplified, [
     {
@@ -904,7 +917,7 @@ test("tool completion records tool and skill client operation durations", () => 
       operation_name: "execute_tool",
       tool_name: "Skill",
       gen_ai_skill_name: undefined,
-      skill_name: "dashboard",
+      skill_name: undefined,
       model_name: undefined,
       outcome: "completed",
     },
@@ -913,8 +926,37 @@ test("tool completion records tool and skill client operation durations", () => 
       operation_name: "skill",
       tool_name: undefined,
       gen_ai_skill_name: "dashboard",
-      skill_name: "dashboard",
+      skill_name: undefined,
       model_name: undefined,
+      outcome: "completed",
+    },
+  ]);
+  assert.deepEqual(agentDurationRecords.map(({ value }) => value), [380, 380]);
+  assert.deepEqual(agentCountRecords.map(({ value, attrs }) => ({
+    value,
+    operation_name: attrs["gen_ai.operation.name"],
+    tool_name: attrs["gen_ai.tool.name"],
+    skill_name: attrs["gen_ai.skill.name"],
+    session_id: attrs.session_id,
+    compatibility_skill_name: attrs.skill_name,
+    outcome: attrs.outcome,
+  })), [
+    {
+      value: 1,
+      operation_name: "execute_tool",
+      tool_name: "Skill",
+      skill_name: undefined,
+      session_id: "sid-1",
+      compatibility_skill_name: undefined,
+      outcome: "completed",
+    },
+    {
+      value: 1,
+      operation_name: "skill",
+      tool_name: undefined,
+      skill_name: "dashboard",
+      session_id: "sid-1",
+      compatibility_skill_name: undefined,
       outcome: "completed",
     },
   ]);

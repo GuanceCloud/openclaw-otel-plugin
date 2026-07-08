@@ -27,6 +27,7 @@ import {
   MIN_VISIBLE_CHILD_MS,
   MIN_VISIBLE_MODEL_MS,
   redactSensitiveText,
+  recordGenAiAgentOperationMetrics,
   resolveSkillCatalogEntryFromToolIdentity,
   resolveUsageTokenTotals,
   setError,
@@ -245,7 +246,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     durationMs: number,
     attrs: Record<string, string | number | boolean | undefined>,
   ) => {
-    instruments.genAiClientOperationDuration?.record(durationMsToSeconds(durationMs), attrs);
+    recordGenAiAgentOperationMetrics(instruments, durationMs, attrs);
   };
 
   const syncToolSummaryAttrs = (evt: SessionEvent, run: ActiveRunSpan) => {
@@ -548,10 +549,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         ? attrs["openclaw.tool.mcp_host"]
         : undefined,
     };
-    const parentCtx = run.modelCtx ?? run.ctx;
     const startTs = typeof evt.ts === "number"
       ? Math.max(evt.ts, run.mainStartTs + MIN_VISIBLE_CHILD_MS)
       : Date.now();
+    const parentCtx = run.ctx;
     const span = tracer.startSpan(
       `tool:${spanToolName}`,
       {
@@ -859,6 +860,10 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       const isLastTurn = index === turns.length - 1;
       const outputPreview = turn.outputPreview ?? (isLastTurn ? clipPreview(snapshot?.lastAssistantText) : undefined);
       const outputKind = turn.outputKind ?? (outputPreview ? "text" : undefined);
+      const rawStartTs = typeof turn.startedAt === "number" ? turn.startedAt : replayStartTs;
+      const rawEndTs = typeof turn.endedAt === "number" ? turn.endedAt : rawStartTs + 1;
+      const startTs = Math.max(rawStartTs, run.mainStartTs);
+      const endTs = Math.max(rawEndTs, startTs + 1);
       if (offset === 0 && typeof run.orchestrationCursorTs === "number") {
         emitRuntimeOrchestrationSpan(
           evt,
@@ -872,10 +877,6 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
           run.ctx,
         );
       }
-      const rawStartTs = typeof turn.startedAt === "number" ? turn.startedAt : replayStartTs;
-      const rawEndTs = typeof turn.endedAt === "number" ? turn.endedAt : rawStartTs + 1;
-      const startTs = Math.max(rawStartTs, run.mainStartTs);
-      const endTs = Math.max(rawEndTs, startTs + 1);
       const usageTotals = resolveUsageTokenTotals(turn.usage);
       const span = tracer.startSpan(
         "llm",
@@ -937,6 +938,36 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       run.modelStartTs = startTs;
       run.modelEndTs = endTs;
       run.orchestrationCursorTs = endTs;
+      if ((run.transcriptAssistantTurnsEmitted ?? 0) <= index && outputPreview) {
+        const assistantStartTs = Math.max(endTs, startTs + 1);
+        const assistantEndTs = assistantStartTs + MIN_VISIBLE_CHILD_MS;
+        const assistantSpan = tracer.startSpan(
+          "assistant",
+          {
+            startTime: new Date(assistantStartTs),
+            kind: SpanKind.INTERNAL,
+            attributes: traceAttrs(enrichWithTranscript(evt.sessionKey, {
+              ...buildSessionSpanAttrs({
+                sessionKey: evt.sessionKey,
+                sessionId: evt.sessionId,
+                runId: evt.runId,
+                ts: assistantEndTs,
+              }),
+              session_update_time: assistantEndTs,
+              "span.kind": "output",
+              "openclaw.output.preview": outputPreview,
+              "openclaw.output.length": turn.text?.length ?? outputPreview?.length,
+              "openclaw.output.kind": outputKind,
+              "openclaw.provider": turn.provider ?? snapshot?.lastProvider,
+              "openclaw.model": turn.model ?? snapshot?.lastModel,
+            })),
+          },
+          run.ctx,
+        );
+        assistantSpan.setStatus({ code: SpanStatusCode.OK });
+        endSpanSafely(assistantSpan, new Date(assistantEndTs));
+        run.transcriptAssistantTurnsEmitted = index + 1;
+      }
       emitModelTurnDebugLog({
         source: "transcript",
         trace_id: typeof span.spanContext === "function" ? span.spanContext().traceId : undefined,
@@ -1211,7 +1242,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     if (!toolCallId) {
       return;
     }
-    const toolEvt = { sessionKey, sessionId, channel, ts: evt.ts ?? Date.now() };
+    const toolEvt = { sessionKey, sessionId, runId, channel, ts: evt.ts ?? Date.now() };
     if (evt.data.phase === "start") {
       ensureToolSpan(toolEvt, toolName, toolCallId, {
         ...buildToolAttrs(toolName, toolCallId, {

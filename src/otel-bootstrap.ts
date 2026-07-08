@@ -440,6 +440,14 @@ export async function startOtelBootstrap(
       description: "GenAI client input and output token usage",
       unit: "{token}",
     }),
+    genAiAgentOperationCount: meter.createCounter("gen_ai.agent.operation.count", {
+      description: "Agent-side operation count",
+      unit: "1",
+    }),
+    genAiAgentOperationDuration: meter.createHistogram("gen_ai.agent.operation.duration", {
+      description: "Agent-side operation duration in milliseconds",
+      unit: "ms",
+    }),
   };
 
   return {

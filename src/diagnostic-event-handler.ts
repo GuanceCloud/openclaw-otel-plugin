@@ -13,7 +13,9 @@ import {
   loadSnapshotForEvent,
   MIN_VISIBLE_CHILD_MS,
   normalizeFinalStatus,
+  normalizeOutcome,
   redactSensitiveText,
+  recordGenAiAgentOperationMetrics,
   resolveRequestClassification,
   resolveTranscriptReplayFreshness,
   resolveUsageTokenTotals,
@@ -33,6 +35,7 @@ type SessionEvent = {
   sessionKey?: string;
   sessionId?: string;
   ts?: number;
+  runId?: string;
 };
 
 type UserSpanEvent = SessionEvent & {
@@ -238,7 +241,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
   };
 
   const resolveSnapshotFinalOutcome = (snapshot: SessionSnapshot | undefined): string | undefined => {
-    const normalized = normalizeFinalStatus(snapshot?.runFinalStatus);
+    const normalized = normalizeOutcome(snapshot?.runFinalStatus);
     if (!normalized) {
       return snapshot?.runCompleted === true ? "completed" : undefined;
     }
@@ -256,6 +259,79 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       ?? resolveSessionKey?.(evt)
       ?? evt.sessionKey;
     return typeof resolved === "string" && resolved.trim() ? resolved.trim() : undefined;
+  };
+
+  const emitAssistantSpan = (
+    evt: SessionEvent,
+    run: ActiveRunSpan | undefined,
+    snapshot: SessionSnapshot | undefined,
+    options?: {
+      outputPreview?: string;
+      outputLength?: number;
+      provider?: string;
+      model?: string;
+      ts?: number;
+    },
+  ) => {
+    if (!run || run.assistantSpanEmitted) {
+      return;
+    }
+    const outputPreview = options?.outputPreview ?? clipPreview(snapshot?.lastAssistantText);
+    const outputLength = options?.outputLength ?? snapshot?.lastAssistantText?.length;
+    if (!outputPreview && !outputLength) {
+      return;
+    }
+    const endTs = typeof options?.ts === "number"
+      ? options.ts
+      : typeof evt.ts === "number"
+        ? evt.ts
+        : Date.now();
+    const startTs = Math.max(
+      typeof run.modelEndTs === "number" ? run.modelEndTs : run.mainStartTs,
+      run.mainStartTs + 1,
+    );
+    const durationMs = Math.max(endTs - startTs, 1);
+    const { span, endTime } = createChildSpan(
+      "assistant",
+      {
+        ...evt,
+        ts: endTs,
+      } as DiagnosticEventPayload,
+      {
+        session_id: evt.sessionId ?? snapshot?.sessionId,
+        channel: snapshot?.lastChannel,
+        "span.kind": "output",
+        "openclaw.output.preview": outputPreview,
+        "openclaw.output.length": outputLength,
+        "openclaw.output.kind": "text",
+        "openclaw.provider": options?.provider ?? snapshot?.lastProvider,
+        "openclaw.model": options?.model ?? snapshot?.lastModel,
+      },
+      durationMs,
+      run.ctx,
+    );
+    span.setStatus({ code: SpanStatusCode.OK });
+    span.end(endTime);
+    run.assistantSpanEmitted = true;
+  };
+
+  const withSnapshotRunId = <T extends SessionEvent>(
+    evt: T,
+    snapshot: SessionSnapshot | undefined,
+    snapshotFreshness?: boolean,
+  ): T => {
+    const existingRunId = typeof evt.runId === "string" ? evt.runId.trim() : "";
+    if (existingRunId || snapshotFreshness === false) {
+      return evt;
+    }
+    const snapshotRunId = typeof snapshot?.runId === "string" ? snapshot.runId.trim() : "";
+    if (!snapshotRunId) {
+      return evt;
+    }
+    return {
+      ...evt,
+      runId: snapshotRunId,
+    };
   };
 
   const hasRunProgressedPastQueue = (run: ActiveRunSpan | undefined): boolean => {
@@ -307,12 +383,24 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         if (isHeartbeatSessionSnapshot(processingSnapshot)) {
           break;
         }
+        const processingSnapshotFreshness = evt.state === "processing"
+          ? snapshotIsFreshForQueuedRequest(
+            processingSnapshot,
+            existingRun,
+            evt.ts,
+          )
+          : undefined;
         const processingTraceTs = evt.state === "processing"
           ? resolveTranscriptRequestStartTs(processingSnapshot, evt.ts, existingRun?.messageQueuedTs)
           : evt.ts;
-        const traceEvt = evt.state === "processing" && typeof processingTraceTs === "number"
+        const traceEvtBase = evt.state === "processing" && typeof processingTraceTs === "number"
           ? { ...evt, ts: processingTraceTs }
           : evt;
+        const traceEvt = withSnapshotRunId(
+          traceEvtBase,
+          processingSnapshot,
+          processingSnapshotFreshness,
+        );
         const sessionStateAttrs = {
           "openclaw.prevState": evt.prevState,
           "openclaw.state": evt.state,
@@ -332,11 +420,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           syncRootFromRun(evt);
         }
         if (evt.state === "processing") {
-          const processingSnapshotFreshness = snapshotIsFreshForQueuedRequest(
-            processingSnapshot,
-            existingRun,
-            evt.ts,
-          );
           const lifecycleStartTs = typeof processingTraceTs === "number" ? processingTraceTs : evt.ts;
           const snapshotBackfilledProcessingStart = Boolean(
             typeof processingTraceTs === "number"
@@ -349,13 +432,15 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               : undefined
             : processingSnapshot;
           ensureUserSpan({
-            sessionKey: evt.sessionKey,
-            sessionId: evt.sessionId,
+            sessionKey: traceEvt.sessionKey,
+            sessionId: traceEvt.sessionId,
+            runId: traceEvt.runId,
             ts: lifecycleStartTs ?? Date.now(),
           });
           const run = getRun({
-            sessionKey: evt.sessionKey,
-            sessionId: evt.sessionId,
+            sessionKey: traceEvt.sessionKey,
+            sessionId: traceEvt.sessionId,
+            runId: traceEvt.runId,
             ts: lifecycleStartTs,
           }, true);
           if (run) {
@@ -365,10 +450,11 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             if (typeof evt.ts === "number") {
               run.orchestrationCursorTs = evt.ts;
             }
-        ensureRuntimeLifecycleSpans(
-          {
-            sessionKey: evt.sessionKey,
-            sessionId: evt.sessionId,
+            ensureRuntimeLifecycleSpans(
+              {
+                sessionKey: traceEvt.sessionKey,
+                sessionId: traceEvt.sessionId,
+                runId: traceEvt.runId,
                 ts: lifecycleStartTs,
                 channel: snapshot?.lastChannel,
               },
@@ -396,14 +482,16 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           }
           const replaySnapshotFreshness = snapshotIsFreshForQueuedRequest(snapshot, activeRun, evt.ts);
           const replaySnapshotIsFresh = replaySnapshotFreshness === true;
+          const replayEvt = withSnapshotRunId(evt, snapshot, replaySnapshotFreshness);
           if (!hasActiveTrace && replaySnapshotFreshness !== true) {
             break;
           }
+          let emittedTranscriptModelSpans = false;
           if (replaySnapshotIsFresh) {
-            const emittedTranscriptModelSpans = emitTranscriptModelSpans(evt);
-            emitTranscriptToolSpans(evt);
+            emittedTranscriptModelSpans = emitTranscriptModelSpans(replayEvt);
+            emitTranscriptToolSpans(replayEvt);
             if (!emittedTranscriptModelSpans) {
-              emitSyntheticModelSpan(evt);
+              emitSyntheticModelSpan(replayEvt);
             }
           }
           const replayFinalAttrs = (!hasActiveTrace && replaySnapshotIsFresh)
@@ -414,9 +502,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             : undefined;
           ensureRuntimeLifecycleSpans(
             {
-              sessionKey: evt.sessionKey,
-              sessionId: evt.sessionId,
-              ts: evt.ts,
+              sessionKey: replayEvt.sessionKey,
+              sessionId: replayEvt.sessionId,
+              runId: replayEvt.runId,
+              ts: replayEvt.ts,
               channel: replaySnapshotIsFresh ? snapshot?.lastChannel : undefined,
               outcome: evt.state,
             },
@@ -428,24 +517,34 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               outcome: evt.state,
             },
           );
+          const shouldEmitAssistantSpan = replaySnapshotFreshness !== false
+            && (hasActiveTrace || snapshot?.runCompleted === true)
+            && !emittedTranscriptModelSpans;
+          if (shouldEmitAssistantSpan) {
+            emitAssistantSpan(replayEvt, getRun(replayEvt, false), snapshot, {
+              outputPreview: clipPreview(snapshot?.lastAssistantText),
+              outputLength: snapshot?.lastAssistantText?.length,
+              ts: evt.ts,
+            });
+          }
           if (replaySnapshotIsFresh && snapshot?.runCompleted === true) {
             markReplayWatermark(replaySessionKey, snapshot);
           }
-          const finalOutcome = getRun(evt, false)?.pendingFinalOutcome
+          const finalOutcome = getRun(replayEvt, false)?.pendingFinalOutcome
             ?? (replaySnapshotIsFresh ? resolveSnapshotFinalOutcome(snapshot) : undefined);
-          endRun(evt, stringAttrs({
+          endRun(replayEvt, stringAttrs({
             "openclaw.state": evt.state,
             "openclaw.outcome": finalOutcome,
             "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
             ...(replayFinalAttrs ?? {}),
           }));
-          endRoot(evt, stringAttrs({
+          endRoot(replayEvt, stringAttrs({
             "openclaw.state": evt.state,
             "openclaw.outcome": finalOutcome,
             "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
             ...(replayFinalAttrs ?? {}),
           }));
-          clearRun(evt);
+          clearRun(replayEvt);
         }
         break;
       }
@@ -598,8 +697,9 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           }
         }
         if (typeof evt.durationMs === "number") {
-          instruments.genAiClientOperationDuration?.record(
-            durationMsToSeconds(evt.durationMs),
+          recordGenAiAgentOperationMetrics(
+            instruments,
+            evt.durationMs,
             genAiModelMetricAttrs,
           );
         }
@@ -708,7 +808,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const replayAlreadyFinalized = hasReplayWatermark(replaySessionKey, snapshot);
         const replaySnapshotFreshness = snapshotIsFreshForQueuedRequest(snapshot, activeRun, evt.ts);
         const replaySnapshotIsFresh = replaySnapshotFreshness === true;
+        const replayEvt = withSnapshotRunId(evt, snapshot, replaySnapshotFreshness);
         const replaySnapshotCompleted = snapshot?.runCompleted === true;
+        const shouldEmitAssistantSpan = replaySnapshotFreshness !== false
+          && (hasActiveTrace || replaySnapshotCompleted);
         const replaySnapshotOutputPreview = replaySnapshotIsFresh
           ? clipPreview(snapshot?.lastAssistantText)
           : undefined;
@@ -730,14 +833,15 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           && (hasActiveTrace || replaySnapshotCompleted)
         );
         let emittedReplayPayload = false;
+        let emittedTranscriptModelSpans = false;
         if (shouldAttemptReplay) {
-          syncTranscriptSkillSummary(evt);
-          const emittedTranscriptModelSpans = emitTranscriptModelSpans(evt);
+          syncTranscriptSkillSummary(replayEvt);
+          emittedTranscriptModelSpans = emitTranscriptModelSpans(replayEvt);
           if (emittedTranscriptModelSpans) {
-            emitTranscriptToolSpans(evt);
+            emitTranscriptToolSpans(replayEvt);
             emittedReplayPayload = true;
           } else {
-            emitSyntheticModelSpan(evt);
+            emitSyntheticModelSpan(replayEvt);
             emittedReplayPayload = true;
           }
         }
@@ -747,13 +851,20 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         if (replaySnapshotFreshness === false && !hasActiveTrace) {
           break;
         }
-        const run = ensureRuntimeLifecycleSpans(evt, {
+        const run = ensureRuntimeLifecycleSpans(replayEvt, {
           createIfMissing: true,
           snapshot: replaySnapshotIsFresh ? snapshot : undefined,
           outputPreview: replaySnapshotOutputPreview,
           outputLength: replaySnapshotIsFresh ? snapshot?.lastAssistantText?.length : undefined,
           outcome: evt.outcome,
         });
+        if (shouldEmitAssistantSpan && !emittedTranscriptModelSpans) {
+          emitAssistantSpan(replayEvt, run, snapshot, {
+            outputPreview: replaySnapshotOutputPreview ?? clipPreview(snapshot?.lastAssistantText),
+            outputLength: snapshot?.lastAssistantText?.length,
+            ts: evt.ts,
+          });
+        }
         logDiagnosticEvent(evt, processedAttrs, {
           body: `message.processed ${evt.outcome}`,
           severityNumber: evt.outcome === "error" ? SeverityNumber.ERROR : SeverityNumber.INFO,
@@ -761,7 +872,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           context: run?.modelCtx ?? getActiveSkillCtx(run) ?? run?.ctx,
           exception: evt.outcome === "error" ? evt.error ?? evt.reason : undefined,
         });
-        syncRootFromRun(evt);
+        syncRootFromRun(replayEvt);
         if (run) {
           run.pendingFinalOutcome = evt.outcome;
           run.lastTouchedAt = Date.now();
@@ -771,7 +882,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           && !emittedReplayPayload
           && !hasRunTelemetryPayload(run)
         ) {
-          discardActiveRequest?.(evt);
+          discardActiveRequest?.(replayEvt);
           break;
         }
         if (replaySnapshotIsFresh && snapshot?.runCompleted === true) {

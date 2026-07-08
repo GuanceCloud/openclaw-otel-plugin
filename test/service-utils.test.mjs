@@ -18,6 +18,7 @@ import {
   durationMsToSeconds,
   loadSnapshotForEvent,
   normalizeFinalStatus,
+  normalizeOutcome,
   readReplayFinalizationState,
   resolveRequestClassification,
   resolveTranscriptReplayActivityTs,
@@ -40,12 +41,23 @@ import {
 test("normalizeFinalStatus maps upstream terminal aliases to canonical values", () => {
   assert.equal(normalizeFinalStatus("success"), "completed");
   assert.equal(normalizeFinalStatus("completed"), "completed");
-  assert.equal(normalizeFinalStatus("failure"), "error");
-  assert.equal(normalizeFinalStatus("failed"), "error");
+  assert.equal(normalizeFinalStatus("failure"), "cancelled");
+  assert.equal(normalizeFinalStatus("failed"), "cancelled");
   assert.equal(normalizeFinalStatus("canceled"), "cancelled");
-  assert.equal(normalizeFinalStatus("timed-out"), "timeout");
-  assert.equal(normalizeFinalStatus("superseded_by_next_message"), "superseded");
+  assert.equal(normalizeFinalStatus("timed-out"), "cancelled");
+  assert.equal(normalizeFinalStatus("superseded_by_next_message"), "cancelled");
   assert.equal(normalizeFinalStatus(undefined), undefined);
+});
+
+test("normalizeOutcome maps upstream terminal aliases to canonical values", () => {
+  assert.equal(normalizeOutcome("success"), "completed");
+  assert.equal(normalizeOutcome("completed"), "completed");
+  assert.equal(normalizeOutcome("failure"), "error");
+  assert.equal(normalizeOutcome("failed"), "error");
+  assert.equal(normalizeOutcome("canceled"), "cancelled");
+  assert.equal(normalizeOutcome("timed-out"), "cancelled");
+  assert.equal(normalizeOutcome("superseded_by_next_message"), "cancelled");
+  assert.equal(normalizeOutcome(undefined), undefined);
 });
 
 test("setError records low-cardinality error.type alongside span status", () => {
@@ -984,6 +996,7 @@ test("buildGenAiClientModelMetricAttrs uses GenAI semantic-style keys", () => {
   assert.equal(attrs["gen_ai.response.model"], "ark-code-latest");
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs["gen_ai.conversation.id"], "session-1");
+  assert.equal(attrs.outcome, "completed");
 });
 
 test("buildGenAiClientTokenMetricAttrs uses official token metric keys", () => {
@@ -1018,9 +1031,10 @@ test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
   assert.equal(attrs["gen_ai.operation.name"], "execute_tool");
   assert.equal(attrs.tool_name, undefined);
   assert.equal(attrs["gen_ai.tool.name"], "exec");
-  assert.equal(attrs.skill_name, "dashboard");
+  assert.equal(attrs.skill_name, undefined);
   assert.equal(attrs.model_name, undefined);
-  assert.equal(attrs.tool_result_status, "completed");
+  assert.equal(attrs.tool_result_status, undefined);
+  assert.equal(attrs.outcome, "completed");
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs["gen_ai.conversation.id"], "session-1");
 });
@@ -1036,8 +1050,9 @@ test("buildGenAiClientSkillMetricAttrs uses skill operation naming", () => {
   assert.equal(attrs["gen_ai.operation.name"], "skill");
   assert.equal(attrs["gen_ai.tool.name"], undefined);
   assert.equal(attrs["gen_ai.skill.name"], "dashboard");
-  assert.equal(attrs.skill_name, "dashboard");
-  assert.equal(attrs.skill_source, "runtime");
+  assert.equal(attrs.skill_name, undefined);
+  assert.equal(attrs.skill_source, undefined);
+  assert.equal(attrs.outcome, "completed");
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs["gen_ai.conversation.id"], "session-1");
 });
@@ -1064,7 +1079,7 @@ test("GenAI workflow metric builder keeps workflow tags model-free", () => {
   assert.equal(requestAttrs["gen_ai.request.model"], undefined);
   assert.equal(requestAttrs["gen_ai.conversation.id"], "session-1");
   assert.equal(requestAttrs.session_state, undefined);
-  assert.equal(requestAttrs.outcome, undefined);
+  assert.equal(requestAttrs.outcome, "completed");
   assert.equal(requestAttrs.final_status, "completed");
 });
 

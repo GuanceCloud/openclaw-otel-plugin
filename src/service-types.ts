@@ -79,6 +79,7 @@ export type ActiveRunSpan = {
   runIds?: Set<string>;
   span: any;
   ctx: any;
+  rootSharedSpan?: boolean;
   startedAt: number;
   lastTouchedAt: number;
   mainStartTs: number;
@@ -99,6 +100,7 @@ export type ActiveRunSpan = {
     endTs: number;
   };
   modelSpanEmitted: boolean;
+  assistantSpanEmitted?: boolean;
   thinkingSpanEmitted?: boolean;
   transcriptAssistantTurnsEmitted?: number;
   transcriptToolCallIds?: Set<string>;
@@ -143,6 +145,8 @@ export type MetricInstruments = {
   genAiWorkflowDuration: any;
   genAiClientOperationDuration: any;
   genAiClientTokenUsage: any;
+  genAiAgentOperationCount: any;
+  genAiAgentOperationDuration: any;
 };
 
 export type TranscriptToolCall = {

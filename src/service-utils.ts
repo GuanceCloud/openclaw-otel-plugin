@@ -5,6 +5,7 @@ import { stripAnsiEscapeCodes } from "./trace-runtime.js";
 import type {
   ActiveRunSpan,
   ActiveToolSpan,
+  MetricInstruments,
   RunAggregate,
   RuntimeMetadata,
   SessionSnapshot,
@@ -94,6 +95,7 @@ export function createRunState(ctx: any, mainStartTs: number, startedAt = Date.n
     sessionProcessingEmitted: false,
     runtimeLifecycleSpans: [],
     modelSpanEmitted: false,
+    assistantSpanEmitted: false,
     thinkingSpanEmitted: false,
     transcriptAssistantTurnsEmitted: 0,
     transcriptToolCallIds: new Set<string>(),
@@ -174,17 +176,46 @@ export function normalizeFinalStatus(rawStatus: string | undefined): string | un
   if (raw === "success" || raw === "completed") {
     return "completed";
   }
+  if (
+    raw === "cancelled"
+    || raw === "canceled"
+    || raw === "error"
+    || raw === "failed"
+    || raw === "failure"
+    || raw === "timeout"
+    || raw === "timed_out"
+    || raw === "timed-out"
+    || raw === "superseded"
+    || raw === "superseded_by_next_message"
+    || raw === "interrupted"
+  ) {
+    return "cancelled";
+  }
+  return raw;
+}
+
+export function normalizeOutcome(rawStatus: string | undefined): string | undefined {
+  const raw = typeof rawStatus === "string" ? rawStatus.trim().toLowerCase() : "";
+  if (!raw) {
+    return undefined;
+  }
+  if (raw === "success" || raw === "completed") {
+    return "completed";
+  }
   if (raw === "error" || raw === "failed" || raw === "failure") {
     return "error";
   }
-  if (raw === "cancelled" || raw === "canceled") {
+  if (
+    raw === "cancelled"
+    || raw === "canceled"
+    || raw === "timeout"
+    || raw === "timed_out"
+    || raw === "timed-out"
+    || raw === "superseded"
+    || raw === "superseded_by_next_message"
+    || raw === "interrupted"
+  ) {
     return "cancelled";
-  }
-  if (raw === "timeout" || raw === "timed_out" || raw === "timed-out") {
-    return "timeout";
-  }
-  if (raw === "superseded" || raw === "superseded_by_next_message") {
-    return "superseded";
   }
   return raw;
 }
@@ -760,8 +791,9 @@ function stringValue(value: string | number | boolean | undefined): string | und
 function inferGenAiFinishReason(
   attrs: Record<string, string | number | boolean | undefined>,
 ): string {
-  const status = stringValue(attrs.final_status ?? attrs.outcome ?? attrs.tool_result_status)?.toLowerCase();
-  if (status === "error" || status === "timeout" || status === "cancelled" || status === "canceled") {
+  const outcome = normalizeOutcome(stringValue(attrs.outcome ?? attrs.tool_result_status));
+  const finalStatus = normalizeFinalStatus(stringValue(attrs.final_status));
+  if (outcome === "error" || finalStatus === "cancelled" || outcome === "cancelled") {
     return "error";
   }
   if (attrs.output_kind === "tool_call" || attrs.tool_call_id || attrs.tool_name) {
@@ -995,7 +1027,17 @@ function withCanonicalAliases(
   mirrorAlias(next, "skill_name", "openclaw.skill.name");
   mirrorAlias(next, "skill_type", "openclaw.skill.kind");
   mirrorAlias(next, "skill_source", "openclaw.skill.source");
-  promoteAlias(next, "final_status", "openclaw.outcome");
+  promoteAlias(next, "outcome", "openclaw.outcome");
+  if (next.outcome !== undefined && next.outcome !== "") {
+    next.outcome = normalizeOutcome(stringValue(next.outcome));
+  }
+  promoteAlias(next, "final_status", "openclaw.final_status");
+  if ((next.final_status === undefined || next.final_status === "") && typeof next.outcome === "string") {
+    next.final_status = normalizeFinalStatus(next.outcome);
+  } else if (next.final_status !== undefined && next.final_status !== "") {
+    next.final_status = normalizeFinalStatus(stringValue(next.final_status));
+  }
+  delete next["openclaw.final_status"];
   delete next.__suppress_usage_cache_total_tokens;
   return next;
 }
@@ -1701,6 +1743,13 @@ export function buildRequestMetricAttrs(
   snapshot: SessionSnapshot | undefined,
   summaryAttrs?: Record<string, string | number | boolean>,
 ) {
+  const rawOutcome = typeof summaryAttrs?.["openclaw.outcome"] === "string"
+    ? summaryAttrs["openclaw.outcome"]
+    : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
+      ? summaryAttrs["openclaw.final_reason"]
+      : typeof summaryAttrs?.["openclaw.reason"] === "string"
+        ? summaryAttrs["openclaw.reason"]
+        : undefined;
   return stringAttrs({
     "openclaw.channel": snapshot?.lastChannel,
     "openclaw.chat_type": snapshot?.chatType,
@@ -1712,14 +1761,8 @@ export function buildRequestMetricAttrs(
         : typeof summaryAttrs?.["openclaw.state"] === "string"
           ? summaryAttrs["openclaw.state"]
           : undefined,
-    "openclaw.outcome":
-      typeof summaryAttrs?.["openclaw.outcome"] === "string"
-        ? summaryAttrs["openclaw.outcome"]
-        : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
-          ? summaryAttrs["openclaw.final_reason"]
-          : typeof summaryAttrs?.["openclaw.reason"] === "string"
-            ? summaryAttrs["openclaw.reason"]
-            : undefined,
+    "openclaw.outcome": normalizeOutcome(rawOutcome),
+    "openclaw.final_status": normalizeFinalStatus(rawOutcome),
   });
 }
 
@@ -1758,22 +1801,136 @@ export function durationMsToSeconds(durationMs: number): number {
   return Math.max(0, durationMs) / 1000;
 }
 
+export function buildGenAiAgentOperationCountMetricAttrs(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean> {
+  const operationName = typeof attrs["gen_ai.operation.name"] === "string"
+    ? attrs["gen_ai.operation.name"]
+    : undefined;
+  const outcome = normalizeOutcome(
+    stringValue(attrs.outcome ?? attrs.final_status ?? attrs.tool_result_status),
+  );
+  const baseAttrs: Record<string, string | number | boolean | undefined> = {
+    session_id: attrs.session_id,
+    "gen_ai.conversation.id": attrs["gen_ai.conversation.id"],
+    "gen_ai.operation.name": operationName,
+    outcome,
+  };
+
+  if (operationName === "chat") {
+    const normalized = stringAttrs({
+      ...baseAttrs,
+      "gen_ai.provider.name": attrs["gen_ai.provider.name"],
+      "gen_ai.request.model": attrs["gen_ai.request.model"],
+      "gen_ai.response.model": attrs["gen_ai.response.model"],
+    });
+    delete normalized.final_status;
+    return normalized;
+  }
+
+  if (operationName === "execute_tool") {
+    const normalized = stringAttrs({
+      ...baseAttrs,
+      "gen_ai.tool.name": attrs["gen_ai.tool.name"],
+    });
+    delete normalized.final_status;
+    return normalized;
+  }
+
+  if (operationName === "skill") {
+    const normalized = stringAttrs({
+      ...baseAttrs,
+      "gen_ai.skill.name": attrs["gen_ai.skill.name"],
+    });
+    delete normalized.final_status;
+    return normalized;
+  }
+
+  const normalized = stringAttrs(baseAttrs);
+  delete normalized.final_status;
+  return normalized;
+}
+
+export function buildGenAiAgentOperationDurationMetricAttrs(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean> {
+  const operationName = typeof attrs["gen_ai.operation.name"] === "string"
+    ? attrs["gen_ai.operation.name"]
+    : undefined;
+  const outcome = normalizeOutcome(
+    stringValue(attrs.outcome ?? attrs.final_status ?? attrs.tool_result_status),
+  );
+  const baseAttrs: Record<string, string | number | boolean | undefined> = {
+    session_id: attrs.session_id,
+    "gen_ai.conversation.id": attrs["gen_ai.conversation.id"],
+    "gen_ai.operation.name": operationName,
+    outcome,
+    "error.type": attrs["error.type"],
+  };
+
+  if (operationName === "chat") {
+    const normalized = stringAttrs({
+      ...baseAttrs,
+      "gen_ai.provider.name": attrs["gen_ai.provider.name"],
+      "gen_ai.request.model": attrs["gen_ai.request.model"],
+      "gen_ai.response.model": attrs["gen_ai.response.model"],
+    });
+    delete normalized.final_status;
+    return normalized;
+  }
+
+  if (operationName === "execute_tool") {
+    const normalized = stringAttrs({
+      ...baseAttrs,
+      "gen_ai.tool.name": attrs["gen_ai.tool.name"],
+    });
+    delete normalized.final_status;
+    return normalized;
+  }
+
+  if (operationName === "skill") {
+    const normalized = stringAttrs({
+      ...baseAttrs,
+      "gen_ai.skill.name": attrs["gen_ai.skill.name"],
+    });
+    delete normalized.final_status;
+    return normalized;
+  }
+
+  const normalized = stringAttrs(baseAttrs);
+  delete normalized.final_status;
+  return normalized;
+}
+
+export function recordGenAiAgentOperationMetrics(
+  instruments: Pick<MetricInstruments, "genAiClientOperationDuration" | "genAiAgentOperationCount" | "genAiAgentOperationDuration">,
+  durationMs: number,
+  attrs: Record<string, string | number | boolean | undefined>,
+) {
+  const safeDurationMs = Math.max(0, durationMs);
+  const metricDurationAttrs = buildGenAiAgentOperationDurationMetricAttrs(attrs);
+  instruments.genAiClientOperationDuration?.record(durationMsToSeconds(safeDurationMs), metricDurationAttrs);
+  instruments.genAiAgentOperationDuration?.record(safeDurationMs, metricDurationAttrs);
+  instruments.genAiAgentOperationCount?.add(1, buildGenAiAgentOperationCountMetricAttrs(attrs));
+}
+
 export function buildGenAiWorkflowMetricAttrs(
   snapshot: SessionSnapshot | undefined,
   summaryAttrs?: Record<string, string | number | boolean>,
 ) {
   const sessionId = snapshot?.sessionId;
+  const rawOutcome = typeof summaryAttrs?.["openclaw.outcome"] === "string"
+    ? summaryAttrs["openclaw.outcome"]
+    : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
+      ? summaryAttrs["openclaw.final_reason"]
+      : typeof summaryAttrs?.["openclaw.reason"] === "string"
+        ? summaryAttrs["openclaw.reason"]
+        : undefined;
   return stringAttrs({
     session_id: sessionId,
     "gen_ai.conversation.id": sessionId,
-    final_status:
-      typeof summaryAttrs?.["openclaw.outcome"] === "string"
-        ? summaryAttrs["openclaw.outcome"]
-        : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
-          ? summaryAttrs["openclaw.final_reason"]
-          : typeof summaryAttrs?.["openclaw.reason"] === "string"
-            ? summaryAttrs["openclaw.reason"]
-            : undefined,
+    final_status: normalizeFinalStatus(rawOutcome),
+    outcome: normalizeOutcome(rawOutcome),
   });
 }
 
@@ -1803,12 +1960,7 @@ export function buildGenAiClientToolMetricAttrs(
     "gen_ai.conversation.id": sessionId,
     "gen_ai.operation.name": "execute_tool",
     "gen_ai.tool.name": tool.name,
-    skill_name: tool.skillName,
-    tool_provider: tool.provider,
-    tool_namespace: tool.namespace,
-    tool_mcp_name: tool.mcpToolName,
-    tool_mcp_host: tool.mcpHost,
-    tool_result_status: resultStatus,
+    outcome: normalizeOutcome(resultStatus),
   });
 }
 
@@ -1823,9 +1975,7 @@ export function buildGenAiClientSkillMetricAttrs(
     "gen_ai.conversation.id": sessionId,
     "gen_ai.operation.name": "skill",
     "gen_ai.skill.name": skillName,
-    skill_name: skillName,
-    skill_source: source,
-    tool_result_status: outcome,
+    outcome: normalizeOutcome(outcome),
   });
 }
 
@@ -1849,12 +1999,16 @@ export function buildGenAiClientModelMetricAttrs(
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
   const sessionId = typeof extra?.session_id === "string" ? extra.session_id : undefined;
+  const outcome = normalizeOutcome(
+    stringValue(extra?.outcome ?? extra?.final_status ?? "completed"),
+  );
   return stringAttrs({
     "gen_ai.operation.name": "chat",
     "gen_ai.provider.name": provider,
     "gen_ai.request.model": model,
     "gen_ai.response.model": model,
     "gen_ai.conversation.id": sessionId,
+    outcome,
     ...(extra ?? {}),
   });
 }

@@ -2,22 +2,42 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-07-08
+
+### Trace Structure Rollback
+
+- Reverted the experimental `step:<index>` trace layer and stopped emitting step spans for live runtime, transcript replay, and trajectory replay.
+- Restored `invoke_agent` as the direct parent of `llm`, `tool:*`, `skill:*`, and `assistant` spans.
+- Removed `step_index` from emitted trace attributes and aligned the trace and metrics docs back to the flat `invoke_agent` structure.
+
+## 2026-07-07
+
+### Outcome Semantics Alignment
+
+- Split turn-level `final_status` from the cross-metric `outcome` dimension to match the current GTrace AI semantic conventions.
+- `final_status` now normalizes to `completed` / `cancelled` only, while `outcome` carries `completed` / `cancelled` / `error`.
+- Stopped exporting `tool_result_status` as a default operation metric tag; tool and skill metrics now fold results into the unified `outcome` tag.
+- Updated trajectory replay, session-idle closeout, and workflow metric derivation so failed upstream terminal values still preserve `outcome=error` while exposing canonical turn `final_status`.
+- Updated trace and metric docs to reflect the new `final_status` / `outcome` semantics.
+
 ## 2026-07-01
 
 ### Metric System Restructure
 
-- Replaced plugin-owned `gen_ai.agent.*` and `gen_ai.runtime.*` metric emission with the current `gen_ai.workflow.duration`, `gen_ai.client.operation.duration`, and `gen_ai.client.token.usage` metric set.
+- Replaced most plugin-owned `gen_ai.agent.*` and `gen_ai.runtime.*` metric emission with the current `gen_ai.workflow.duration`, `gen_ai.client.operation.duration`, and `gen_ai.client.token.usage` metric set; `gen_ai.agent.operation.count` / `gen_ai.agent.operation.duration` are retained for model/tool/skill operation compatibility.
 - Changed workflow and operation duration metrics from milliseconds to seconds.
-- Moved model, tool, and skill duration reporting to `gen_ai.client.operation.duration`, using official tags such as `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.tool.name`, and `gen_ai.conversation.id`.
+- Moved model, tool, and skill duration reporting to `gen_ai.client.operation.duration`, using official tags such as `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.tool.name`, and `gen_ai.conversation.id`. Also restored compatible `gen_ai.agent.operation.duration` in milliseconds.
 - Moved model token reporting to `gen_ai.client.token.usage` and now emits only `gen_ai.token.type=input` / `output`; total and cache token values remain available on trace attributes but are no longer emitted as token metric series.
-- Stopped emitting custom session aggregate metrics, runtime queue/message/webhook/session metrics, skill activation counts, and operation/request count metrics.
+- Stopped emitting custom session aggregate metrics, runtime queue/message/webhook/session metrics, skill activation counts, and request count metrics. Operation count is now restored through `gen_ai.agent.operation.count`.
 - Split skill duration metrics from generic tool duration metrics with `gen_ai.operation.name=skill` and `gen_ai.skill.name`, while regular tools continue to use `gen_ai.operation.name=execute_tool` and `gen_ai.tool.name`.
 - Updated metrics documentation, field mapping notes, trace tag notes, and GTrace protocol docs to reflect the new metric set.
 
 ### Trace Span Simplification
 
+- Removed the standalone `openclaw_request` root span and made `invoke_agent` the trace root.
+- Stopped emitting standalone `dispatch_queue`, `session_processing`, and `runtime_orchestration` shell spans so traces stay focused on `invoke_agent -> llm -> tool/skill`.
 - Stopped emitting standalone `channel_ingress` and `channel_egress` spans; ingress and egress context now stays on request / agent summary fields, logs, and the remaining runtime lifecycle spans.
-- Updated trace documentation and tests to keep the retained span set focused on `openclaw_request`, `invoke_agent`, `dispatch_queue`, `session_processing`, `runtime_orchestration`, `llm`, skill, and tool spans.
+- Updated trace documentation and tests to keep the retained span set focused on `invoke_agent`, `llm`, skill, and tool spans.
 - Aligned skill trace shape with `claude-otel-plugin` by replacing the runtime `skill_call:*` wrapper with `tool:Skill -> skill:<name>`; the original OpenClaw low-level tool name is retained as `tool_original_name`.
 - Replaced the incorrect `gen_ai.skill1.*` trace tags with `gen_ai.skill.*`, matching `claude-otel-plugin` skill tag naming.
 - Backfilled `skill.description` / `gen_ai.skill.description` from the local `SKILL.md` when runtime skill inference happens before session skill metadata is available.

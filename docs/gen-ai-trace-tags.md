@@ -13,9 +13,9 @@
 - 这里的 `AI Agent` 指能够基于上下文、模型、技能、工具和会话状态持续完成任务的执行主体
 - 在 OpenClaw 里，`agent` 不是单次模型调用，而是围绕一次用户消息组织上下文、决策、工具调用和结果返回的运行单元
 - 当前 trace 里，`AI Agent` 的主要观测边界是：
-  - `openclaw_request`：一条用户消息对应的一次完整请求
-  - `invoke_agent`：这次请求里的 agent 主执行窗口
+  - `invoke_agent`：一次用户请求对应的 agent 主执行窗口，也是整条 trace 的 root span
   - `llm`：agent 在执行过程中发起的一次模型调用
+  - `assistant`：agent 输出结果对应的一次助手输出
   - `tool:* / skill:*`：agent 在执行过程中使用的能力层与外部操作
 - 因此：
   - `llm` 不等于 `agent`
@@ -25,17 +25,12 @@
 当前完整结构示意：
 
 ```text
-openclaw_request
-├── session_processing
-├── runtime_orchestration
-└── invoke_agent
-    ├── llm
-    │   ├── tool:exec_command
-    │   └── tool:Skill
-    │       └── skill:plugin-creator
-    ├── llm
-    │   └── tool:read
-    └── llm
+invoke_agent
+├── llm
+├── tool:exec_command
+│   └── skill:plugin-creator
+├── llm
+└── assistant
 ```
 
 ## Skill 语义边界
@@ -45,8 +40,8 @@ openclaw_request
   - `skill:<name>`：skill operation span
   - `tool:Skill`：当一次 tool call 被识别为 skill 调用时，作为 `skill:<name>` 的父级 tool span
 - 当 tool 能归因到某个 skill 时，父子关系为：
-  - `invoke_agent -> llm -> tool:Skill -> skill:<name>`
-- `tool:Skill` 表示“模型触发了一次 Skill 特殊 tool 调用”
+  - `invoke_agent -> tool:Skill -> skill:<name>`
+- `tool:Skill` 表示“agent 触发了一次 Skill 特殊 tool 调用”
 - `skill:<name>` 表示“这次具体 skill 的执行窗口”
 - OpenClaw 底层触发 skill 的原始工具名保留在 `tool_original_name`，例如 `read` / `exec` / `edit`
 - transcript 回放时，如果只能确认“这个 skill 被使用过”，仍可能在 `invoke_agent` 下补 `skill:<name>` 汇总 span；能和具体 tool call 对上时，优先落 `tool:Skill -> skill:<name>`
@@ -62,12 +57,9 @@ openclaw_request
 
 ### 保留的 Span
 
-- `openclaw_request`
-- `dispatch_queue`
 - `invoke_agent`
-- `session_processing`
-- `runtime_orchestration`
 - `llm`
+- `assistant`
 - `skill:*`
 - `tool:*`
 
@@ -91,24 +83,9 @@ openclaw_request
 - 只保留对排障稳定且有价值的 span
 - 能用属性表达的，不单独拆 span
 - 能从前后关系推断的，不单独拆 span
-- 如需继续细分，优先在 `runtime_orchestration` 内增加 phase，而不是新增更多顶层 span
+- 当前不再输出独立的 runtime 壳 span，避免链路结构膨胀
 
 ## 核心 Span
-
-### `openclaw_request`
-
-表示“一条用户消息对应的一次完整请求”。
-
-用途：
-
-- 作为整条 trace 的 root span
-- 表示从消息进入 OpenClaw 到本轮处理完成的总窗口
-- 承载整轮请求级汇总信息，例如：
-  - session 关联
-  - 最终状态
-  - 汇总输出
-  - 会话创建/更新时间
-- 不汇总 `request_model` / `response_model` / `usage_*`；这些字段保留在 `llm` span
 
 ### `invoke_agent`
 
@@ -116,7 +93,7 @@ openclaw_request
 
 用途：
 
-- 作为 `openclaw_request` 下的主执行 span
+- 作为整条 trace 的 root span
 - 承载本轮模型调用、工具调用、skill 调用的父级上下文
 - 汇总本轮 run 维度的信息，例如：
   - 使用到的 tools / skills
@@ -136,6 +113,17 @@ openclaw_request
   - 输入预览
   - 输出预览
   - token 使用量
+- duration 只覆盖单次模型调用本身，不覆盖后续工具调用或助手输出
+
+### `assistant`
+
+表示“一次助手输出”。
+
+用途：
+
+- 表达本轮 agent 的输出事件
+- 记录输出预览、输出长度、provider、model
+- 不携带 token usage，避免和 `llm` 重复统计
 
 ### `skill:<name>`
 
@@ -152,7 +140,7 @@ openclaw_request
 
 补充说明：
 
-- runtime skill 调用完成后会按 `gen_ai.client.operation.duration` 记录执行耗时，指标侧使用 `gen_ai.operation.name=skill` 和 `gen_ai.skill.name`
+- runtime skill 调用完成后会按 `gen_ai.client.operation.duration` 和兼容指标 `gen_ai.agent.operation.duration` 记录执行耗时，并按 `gen_ai.agent.operation.count` 记录次数；指标侧使用 `gen_ai.operation.name=skill` 和 `gen_ai.skill.name`
 - `skill_call:*` span 已不再单独输出；调用关联继续通过 `skill_call_id` / `tool_call_id` 字段表达
 
 ## 状态字段说明
@@ -171,13 +159,18 @@ openclaw_request
   | `unset` / 空 | 当前 span 没有显式设置状态 |
 
 - `final_status`
-  - 表示一条 `openclaw_request` / `invoke_agent` 最终的业务结果
-  - 用于判断一次 agent 请求最终是成功完成、超时、取消还是被后续消息顶替
+  - 表示一条 `invoke_agent` 最终的业务结果
+  - 当前只保留 turn 终态语义，用于判断一次 agent 请求最终是正常完成还是被中断/取消
+
+- `outcome`
+  - 表示统一结果维度
+  - 用于和 metrics 侧对齐 `completed` / `cancelled` / `error`
 
 使用建议：
 
 - 看链路技术错误：优先看 `status`
 - 看一次 agent 请求最终结局：优先看 `final_status`
+- 需要和指标统一统计结果维度：看 `outcome`
 
 ### `final_status` 结果语义
 
@@ -186,16 +179,23 @@ openclaw_request
 | 值 | 含义 |
 | --- | --- |
 | `completed` | 本轮 agent 请求正常完成，并已形成最终结果 |
-| `error` | 本轮 agent 请求最终失败，未形成有效结果 |
-| `timeout` | 本轮 agent 请求因超时结束 |
-| `cancelled` | 本轮 agent 请求被主动取消 |
-| `superseded` | 本轮 agent 请求被后续新消息顶替，不再继续执行 |
+| `cancelled` | 本轮 agent 请求被中断、取消、报错收尾或被后续消息顶替 |
 
 补充说明：
 
 - `completed` 不要求所有子 span 都没有错误；只要 agent 最终成功产出结果即可
-- `error` 表示从业务结果看本轮失败，不等同于某个单独 `tool:*` 或 `llm` 的 `status = error`
-- `superseded` 常见于同一会话里新消息到来，旧请求被提前收尾
+- `final_status` 不再细分 `error` / `timeout` / `superseded`
+- 更细的失败语义通过 `outcome`、`status`、`reason` 表达
+
+### `outcome` 结果语义
+
+建议按以下语义使用：
+
+| 值 | 含义 |
+| --- | --- |
+| `completed` | 本轮 agent 请求正常完成 |
+| `cancelled` | 本轮 agent 请求被取消、中断、超时或被后续消息顶替 |
+| `error` | 本轮 agent 请求以失败结果结束 |
 
 ## Resource 级字段
 
@@ -260,9 +260,9 @@ openclaw_request
 
 | 字段 | 描述 |
 | --- | --- |
-| `gen_ai.operation.name` | 官方 GenAI operation 名，例如 `chat`、`invoke_agent`、`invoke_workflow`、`execute_tool`、`plan`；当前 `tool` 与 `skill` span 都映射为 `execute_tool` |
+| `gen_ai.operation.name` | 官方 GenAI operation 名，例如 `chat`、`invoke_agent`、`invoke_workflow`、`execute_tool`、`plan`；当前 root span 固定为 `invoke_agent`，`tool` 与 `skill` span 都映射为 `execute_tool` |
 | `error.type` | 错误 span 的低基数错误类型，当前统一为 `error` |
-| `gen_ai.provider.name` | 模型或 Agent 调用的 GenAI provider；当前 `openclaw_request` / `invoke_agent` 允许保留 provider 汇总 |
+| `gen_ai.provider.name` | 模型或 Agent 调用的 GenAI provider；当前 `invoke_agent` 允许保留 provider 汇总 |
 | `gen_ai.request.model` | 请求模型名；当前主要落在 `llm` |
 | `gen_ai.response.model` | 响应模型名；没有独立响应模型时沿用请求模型，当前主要落在 `llm` |
 | `gen_ai.conversation.id` | OpenClaw `session_id` 对应的 conversation id |
@@ -328,7 +328,7 @@ openclaw_request
 
 补充说明：
 
-- `request_model`、`response_model`、`usage_*` 当前不再写入 `openclaw_request` / `invoke_agent`
+- `request_model`、`response_model`、`usage_*` 当前不再写入 `invoke_agent`
 - 这些字段保留在 `llm` span；session / request 级聚合建议看 metrics
 
 ## Tool 相关字段
@@ -349,9 +349,7 @@ openclaw_request
 
 补充说明：
 
-- `runtime_orchestration` 当前允许携带 `output_summary`
-- `runtime` 生命周期 span 仍默认不携带 `input_preview` / `output_preview`
-- 与 Agent 计划最相关的 runtime 编排窗口当前统一落在 `runtime_orchestration`，并使用 `runtime_phase=agent_plan` 表达，而不是新增独立 `agent_plan` span
+- 当前不再输出 `runtime_orchestration` / `session_processing` / `dispatch_queue`
 - MCP 调用当前不新增独立 span 类型；仍落在 `tool:*`，通过 `tool_provider=mcp` 与 `tool_namespace=<server>` 区分
 
 ## Skill 相关字段

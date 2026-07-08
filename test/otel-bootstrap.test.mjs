@@ -56,15 +56,15 @@ test("RootBufferedTraceSpanProcessor waits for the root span before exporting a 
     traceId: "trace-1",
     spanId: "child-1",
     parentSpanId: "root-1",
-    name: "session_processing",
+    name: "llm",
     startTime: 2_000,
     endTime: 2_100,
   }));
   processor.onEnd(createSpan({
     traceId: "trace-1",
     spanId: "child-2",
-    parentSpanId: "root-1",
-    name: "llm",
+    parentSpanId: "child-1",
+    name: "tool:read",
     startTime: 2_100,
     endTime: 2_300,
   }));
@@ -74,7 +74,7 @@ test("RootBufferedTraceSpanProcessor waits for the root span before exporting a 
   processor.onEnd(createSpan({
     traceId: "trace-1",
     spanId: "root-1",
-    name: "openclaw_request",
+    name: "invoke_agent",
     startTime: 1_900,
     endTime: 2_400,
   }));
@@ -83,9 +83,9 @@ test("RootBufferedTraceSpanProcessor waits for the root span before exporting a 
 
   assert.equal(exports.length, 1);
   assert.deepEqual(exports[0], [
-    "openclaw_request",
-    "session_processing",
+    "invoke_agent",
     "llm",
+    "tool:read",
   ]);
 });
 
@@ -104,7 +104,7 @@ test("RootBufferedTraceSpanProcessor forceFlush exports incomplete traces once",
     traceId: "trace-2",
     spanId: "child-1",
     parentSpanId: "root-2",
-    name: "session_processing",
+    name: "llm",
     startTime: 2_000,
     endTime: 2_100,
   }));
@@ -112,7 +112,7 @@ test("RootBufferedTraceSpanProcessor forceFlush exports incomplete traces once",
   await processor.forceFlush();
   await processor.forceFlush();
 
-  assert.deepEqual(exports, [["session_processing"]]);
+  assert.deepEqual(exports, [["llm"]]);
 });
 
 test("RootBufferedTraceSpanProcessor exports buffered child attribute patches before root ends", async () => {
@@ -129,7 +129,7 @@ test("RootBufferedTraceSpanProcessor exports buffered child attribute patches be
     traceId: "trace-3",
     spanId: "child-1",
     parentSpanId: "root-3",
-    name: "session_processing",
+    name: "llm",
     startTime: 2_000,
     endTime: 2_050,
   });
@@ -140,7 +140,7 @@ test("RootBufferedTraceSpanProcessor exports buffered child attribute patches be
   processor.onEnd(createSpan({
     traceId: "trace-3",
     spanId: "root-3",
-    name: "openclaw_request",
+    name: "invoke_agent",
     startTime: 1_900,
     endTime: 2_400,
   }));
@@ -148,6 +148,6 @@ test("RootBufferedTraceSpanProcessor exports buffered child attribute patches be
   await processor.forceFlush();
 
   assert.equal(exports.length, 1);
-  const exportedChild = exports[0].find((span) => span.name === "session_processing");
+  const exportedChild = exports[0].find((span) => span.name === "llm");
   assert.equal(exportedChild.attributes.run_id, "run-3");
 });

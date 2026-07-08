@@ -21,7 +21,7 @@ function createFakeSpan(name) {
   };
 }
 
-test("message.processed does not emit standalone thinking span", () => {
+test("message.processed emits assistant span but not standalone thinking span", () => {
   const childCalls = [];
   const run = {
     ctx: { ctx: "run" },
@@ -116,11 +116,13 @@ test("message.processed does not emit standalone thinking span", () => {
 
   assert.deepEqual(
     childCalls.map((call) => call.name),
-    [],
+    ["assistant"],
   );
+  assert.equal(childCalls[0].parentCtx.ctx, "run");
 });
 
 test("message.processed syncs lifecycle without requesting an output lifecycle span", () => {
+  const childCalls = [];
   const lifecycleCalls = [];
   const run = {
     ctx: { ctx: "run" },
@@ -167,8 +169,16 @@ test("message.processed syncs lifecycle without requesting an output lifecycle s
     enrichWithTranscript(_sessionKey, attrs) {
       return attrs;
     },
-    createChildSpan() {
-      throw new Error("not expected");
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      childCalls.push({ name, evt, attrs, durationMs, parentCtx, span });
+      return {
+        span,
+        root: undefined,
+        effectiveDurationMs: durationMs ?? 0,
+        startTime: new Date((evt.ts ?? 0) - (durationMs ?? 0)),
+        endTime: new Date(evt.ts ?? 0),
+      };
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan(...args) {
@@ -205,6 +215,7 @@ test("message.processed syncs lifecycle without requesting an output lifecycle s
   assert.equal(lifecycleCalls.length, 1);
   assert.equal(lifecycleCalls[0].type, "lifecycle");
   assert.equal(lifecycleCalls[0].evt.ts, 1000);
+  assert.deepEqual(childCalls.map((call) => call.name), ["assistant"]);
   assert.deepEqual(Object.keys(lifecycleCalls[0].options).sort(), [
     "createIfMissing",
     "outcome",
@@ -216,6 +227,7 @@ test("message.processed syncs lifecycle without requesting an output lifecycle s
 });
 
 test("message.processed keeps the active trace open for later transcript growth", () => {
+  const childCalls = [];
   let endRunCalls = 0;
   let endRootCalls = 0;
   let clearRunCalls = 0;
@@ -270,8 +282,16 @@ test("message.processed keeps the active trace open for later transcript growth"
     enrichWithTranscript(_sessionKey, attrs) {
       return attrs;
     },
-    createChildSpan() {
-      throw new Error("not expected");
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      childCalls.push({ name, evt, attrs, durationMs, parentCtx, span });
+      return {
+        span,
+        root: undefined,
+        effectiveDurationMs: durationMs ?? 0,
+        startTime: new Date((evt.ts ?? 0) - (durationMs ?? 0)),
+        endTime: new Date(evt.ts ?? 0),
+      };
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
@@ -311,9 +331,11 @@ test("message.processed keeps the active trace open for later transcript growth"
   assert.equal(endRootCalls, 0);
   assert.equal(clearRunCalls, 0);
   assert.equal(run.pendingFinalOutcome, "completed");
+  assert.deepEqual(childCalls.map((call) => call.name), []);
 });
 
 test("message.processed prefers transcript replay and marks replay watermark for completed sessions", () => {
+  const childCalls = [];
   let transcriptCalls = 0;
   let toolReplayCalls = 0;
   let syntheticCalls = 0;
@@ -365,8 +387,16 @@ test("message.processed prefers transcript replay and marks replay watermark for
     enrichWithTranscript(_sessionKey, attrs) {
       return attrs;
     },
-    createChildSpan() {
-      throw new Error("not expected");
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      childCalls.push({ name, evt, attrs, durationMs, parentCtx, span });
+      return {
+        span,
+        root: undefined,
+        effectiveDurationMs: durationMs ?? 0,
+        startTime: new Date((evt.ts ?? 0) - (durationMs ?? 0)),
+        endTime: new Date(evt.ts ?? 0),
+      };
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
@@ -412,6 +442,7 @@ test("message.processed prefers transcript replay and marks replay watermark for
   assert.equal(toolReplayCalls, 1);
   assert.equal(syntheticCalls, 0);
   assert.equal(watermarkMarked, 1);
+  assert.deepEqual(childCalls.map((call) => call.name), []);
 });
 
 test("message.processed finalizes active trace without replaying stale transcript", () => {
@@ -647,6 +678,7 @@ test("message.processed discards completed shell traces without model or tool pa
 });
 
 test("message.processed does not synthesize replay traces for incomplete snapshots without an active trace", () => {
+  const childCalls = [];
   let transcriptCalls = 0;
   let toolReplayCalls = 0;
   let syntheticCalls = 0;
@@ -697,8 +729,16 @@ test("message.processed does not synthesize replay traces for incomplete snapsho
     enrichWithTranscript(_sessionKey, attrs) {
       return attrs;
     },
-    createChildSpan() {
-      throw new Error("not expected");
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      childCalls.push({ name, evt, attrs, durationMs, parentCtx, span });
+      return {
+        span,
+        root: undefined,
+        effectiveDurationMs: durationMs ?? 0,
+        startTime: new Date((evt.ts ?? 0) - (durationMs ?? 0)),
+        endTime: new Date(evt.ts ?? 0),
+      };
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
@@ -742,12 +782,15 @@ test("message.processed does not synthesize replay traces for incomplete snapsho
   assert.equal(toolReplayCalls, 0);
   assert.equal(syntheticCalls, 0);
   assert.equal(lifecycleCalls, 1);
+  assert.deepEqual(childCalls, []);
 });
 
 test("message.processed replays completed transcript snapshots even without an active trace", () => {
+  const childCalls = [];
   let transcriptCalls = 0;
   let toolReplayCalls = 0;
   let lifecycleCalls = 0;
+  const lifecycleEvts = [];
   const snapshot = {
     sessionFile: "session.jsonl",
     mtimeMs: 1,
@@ -791,13 +834,22 @@ test("message.processed replays completed transcript snapshots even without an a
     enrichWithTranscript(_sessionKey, attrs) {
       return attrs;
     },
-    createChildSpan() {
-      throw new Error("not expected");
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      childCalls.push({ name, evt, attrs, durationMs, parentCtx, span });
+      return {
+        span,
+        root: undefined,
+        effectiveDurationMs: durationMs ?? 0,
+        startTime: new Date((evt.ts ?? 0) - (durationMs ?? 0)),
+        endTime: new Date(evt.ts ?? 0),
+      };
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
-    ensureRuntimeLifecycleSpans() {
+    ensureRuntimeLifecycleSpans(evt) {
       lifecycleCalls += 1;
+      lifecycleEvts.push(evt);
       return { ctx: { ctx: "run" }, modelCtx: { ctx: "model" } };
     },
     emitModelTurnDebugLog() {},
@@ -834,6 +886,8 @@ test("message.processed replays completed transcript snapshots even without an a
   assert.equal(transcriptCalls, 1);
   assert.equal(toolReplayCalls, 1);
   assert.equal(lifecycleCalls, 1);
+  assert.equal(lifecycleEvts[0].runId, "run-123");
+  assert.deepEqual(childCalls.map((call) => call.name), []);
 });
 
 test("message.processed does not replay stale snapshots while a new trace is active", () => {
@@ -1140,6 +1194,7 @@ test("session.state processing backfills trace start from transcript snapshot", 
   assert.equal(runCalls.at(-1), 900);
   assert.equal(run.mainStartTs, 900);
   assert.equal(run.orchestrationCursorTs, 1000);
+  assert.equal(lifecycleCalls[0].evt.runId, "run-fresh");
   assert.equal(lifecycleCalls[0].evt.ts, 900);
   assert.equal(lifecycleCalls[0].options.startTsHint, 900);
   assert.equal(lifecycleCalls[0].options.processingStartTs, 1000);
@@ -1537,6 +1592,7 @@ test("session.state idle marks replay-only completed transcript traces", () => {
   let transcriptCalls = 0;
   let toolReplayCalls = 0;
   let lifecycleCalls = 0;
+  const lifecycleEvts = [];
 
   const handler = createDiagnosticEventHandler({
     trace: {
@@ -1592,8 +1648,9 @@ test("session.state idle marks replay-only completed transcript traces", () => {
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
-    ensureRuntimeLifecycleSpans() {
+    ensureRuntimeLifecycleSpans(evt) {
       lifecycleCalls += 1;
+      lifecycleEvts.push(evt);
       return undefined;
     },
     emitModelTurnDebugLog() {},
@@ -1630,6 +1687,7 @@ test("session.state idle marks replay-only completed transcript traces", () => {
   assert.equal(transcriptCalls, 1);
   assert.equal(toolReplayCalls, 1);
   assert.equal(lifecycleCalls, 1);
+  assert.equal(lifecycleEvts[0].runId, "run-123");
   assert.equal(endRunCalls.length, 1);
   assert.equal(endRootCalls.length, 1);
   assert.equal(endRunCalls[0].replay_source, "transcript");
@@ -1875,6 +1933,7 @@ test("session.state idle closes active trace without replaying stale transcript"
 });
 
 test("session.state idle falls back to completed final_status when message.processed never arrived", () => {
+  const childCalls = [];
   const endRunCalls = [];
   const endRootCalls = [];
   const run = {
@@ -1927,8 +1986,16 @@ test("session.state idle falls back to completed final_status when message.proce
     enrichWithTranscript(_sessionKey, attrs) {
       return attrs;
     },
-    createChildSpan() {
-      throw new Error("not expected");
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      childCalls.push({ name, evt, attrs, durationMs, parentCtx, span });
+      return {
+        span,
+        root: undefined,
+        effectiveDurationMs: durationMs ?? 0,
+        startTime: new Date((evt.ts ?? 0) - (durationMs ?? 0)),
+        endTime: new Date(evt.ts ?? 0),
+      };
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
@@ -1969,9 +2036,11 @@ test("session.state idle falls back to completed final_status when message.proce
   assert.equal(endRootCalls[0].final_status, "completed");
   assert.equal(endRunCalls[0].state, "idle");
   assert.equal(endRootCalls[0].state, "idle");
+  assert.deepEqual(childCalls.map((call) => call.name), []);
 });
 
 test("session.state idle prefers trajectory final status over idle", () => {
+  const childCalls = [];
   const endRunCalls = [];
   const endRootCalls = [];
   const run = {
@@ -2025,8 +2094,16 @@ test("session.state idle prefers trajectory final status over idle", () => {
     enrichWithTranscript(_sessionKey, attrs) {
       return attrs;
     },
-    createChildSpan() {
-      throw new Error("not expected");
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      childCalls.push({ name, evt, attrs, durationMs, parentCtx, span });
+      return {
+        span,
+        root: undefined,
+        effectiveDurationMs: durationMs ?? 0,
+        startTime: new Date((evt.ts ?? 0) - (durationMs ?? 0)),
+        endTime: new Date(evt.ts ?? 0),
+      };
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
@@ -2063,9 +2140,11 @@ test("session.state idle prefers trajectory final status over idle", () => {
 
   assert.equal(endRunCalls[0].final_status, "completed");
   assert.equal(endRootCalls[0].final_status, "completed");
+  assert.deepEqual(childCalls.map((call) => call.name), []);
 });
 
 test("session.state idle leaves final_status empty when no business outcome is available", () => {
+  const childCalls = [];
   const endRunCalls = [];
   const endRootCalls = [];
   const run = {
@@ -2118,8 +2197,16 @@ test("session.state idle leaves final_status empty when no business outcome is a
     enrichWithTranscript(_sessionKey, attrs) {
       return attrs;
     },
-    createChildSpan() {
-      throw new Error("not expected");
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      childCalls.push({ name, evt, attrs, durationMs, parentCtx, span });
+      return {
+        span,
+        root: undefined,
+        effectiveDurationMs: durationMs ?? 0,
+        startTime: new Date((evt.ts ?? 0) - (durationMs ?? 0)),
+        endTime: new Date(evt.ts ?? 0),
+      };
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
@@ -2158,6 +2245,7 @@ test("session.state idle leaves final_status empty when no business outcome is a
   assert.equal(endRootCalls[0].final_status, undefined);
   assert.equal(endRunCalls[0].state, "idle");
   assert.equal(endRootCalls[0].state, "idle");
+  assert.deepEqual(childCalls.map((call) => call.name), []);
 });
 
 test("model.usage emits llm span and preserves model context", () => {
@@ -2253,6 +2341,7 @@ test("model.usage emits llm span and preserves model context", () => {
   assert.equal(childCalls[0].attrs["openclaw.tokens.cache_read"], 6400);
   assert.equal(childCalls[0].attrs["openclaw.tokens.total"], 46);
   assert.equal(childCalls[0].attrs["llm.total_tokens"], undefined);
+  assert.equal(childCalls[0].parentCtx.ctx, "run");
   assert.equal(childCalls[0].span.status.code, "OK");
   assert.equal(childCalls[0].span.ended, true);
   assert.equal(run.modelStartTs, 600);
@@ -2262,6 +2351,8 @@ test("model.usage emits llm span and preserves model context", () => {
 test("model.usage uses snapshot sessionId for gen_ai client metrics when event sessionId is missing", () => {
   const tokenRecords = [];
   const operationDurations = [];
+  const agentOperationDurations = [];
+  const agentOperationCounts = [];
   const run = {
     ctx: { ctx: "run" },
   };
@@ -2285,6 +2376,16 @@ test("model.usage uses snapshot sessionId for gen_ai client metrics when event s
       genAiClientOperationDuration: {
         record(value, attrs) {
           operationDurations.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationDuration: {
+        record(value, attrs) {
+          agentOperationDurations.push({ value, attrs });
+        },
+      },
+      genAiAgentOperationCount: {
+        add(value, attrs) {
+          agentOperationCounts.push({ value, attrs });
         },
       },
     },
@@ -2366,6 +2467,23 @@ test("model.usage uses snapshot sessionId for gen_ai client metrics when event s
   assert.equal(operationDurations[0].attrs["gen_ai.operation.name"], "chat");
   assert.equal(operationDurations[0].attrs["gen_ai.request.model"], "gpt-5");
   assert.equal(operationDurations[0].attrs.session_id, "sid-from-snapshot");
+  assert.equal(operationDurations[0].attrs.outcome, "completed");
+  assert.equal(agentOperationDurations.length, 1);
+  assert.equal(agentOperationDurations[0].value, 400);
+  assert.equal(agentOperationDurations[0].attrs["gen_ai.operation.name"], "chat");
+  assert.equal(agentOperationDurations[0].attrs.outcome, "completed");
+  assert.equal(agentOperationCounts.length, 1);
+  assert.equal(agentOperationCounts[0].value, 1);
+  assert.deepEqual(agentOperationCounts[0].attrs, {
+    agent_runtime: "openclaw",
+    session_id: "sid-from-snapshot",
+    "gen_ai.conversation.id": "sid-from-snapshot",
+    "gen_ai.operation.name": "chat",
+    "gen_ai.provider.name": "openai",
+    "gen_ai.request.model": "gpt-5",
+    "gen_ai.response.model": "gpt-5",
+    outcome: "completed",
+  });
 });
 
 test("message.queued rotates a completed active run before starting the next request", () => {

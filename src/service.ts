@@ -35,9 +35,11 @@ import {
   MIN_VISIBLE_MODEL_MS,
   normalizeReasoningPreview,
   normalizeFinalStatus,
+  normalizeOutcome,
   normalizeUserInputPreview,
   parseSessionKey,
   redactSensitiveText,
+  recordGenAiAgentOperationMetrics,
   readReplayFinalizationState,
   rememberRunId,
   resolveReplayFinalizationStateFile,
@@ -388,10 +390,16 @@ export function createOtelPluginService(
       const buildAgentSummaryTraceAttrs = (
         sessionKey: string | undefined,
         attrs: Record<string, string | number | boolean | undefined>,
-      ) => traceAttrs(enrichWithTranscript(sessionKey, {
-        __suppress_session_model: true,
-        ...stripAgentSummaryModelUsageAttrs(attrs),
-      }));
+      ) => {
+        const stripped = stripAgentSummaryModelUsageAttrs(attrs);
+        const isTrajectoryReplay = stripped.replay_source === "trajectory";
+        return traceAttrs(enrichWithTranscript(sessionKey, {
+          __suppress_session_model: true,
+          __suppress_session_output_preview: isTrajectoryReplay,
+          __suppress_session_output_summary: isTrajectoryReplay,
+          ...stripped,
+        }));
+      };
 
       const eventTimestamp = (evt: { ts?: number }): Date =>
         typeof evt.ts === "number" ? eventTime(evt.ts) : new Date();
@@ -678,69 +686,7 @@ export function createOtelPluginService(
         attrs?: Record<string, string | number | boolean | undefined>,
         parentCtx?: any,
       ) => {
-        const sessionKey = resolveSessionKey(evt);
-        const requestKey = resolveRequestKey(evt, false);
-        if (!sessionKey || !requestKey || typeof startTs !== "number" || typeof endTs !== "number") {
-          return undefined;
-        }
-        const root = activeRoots.get(requestKey);
-        const run = activeRuns.get(requestKey);
-        const effectiveStartTs = Math.max(
-          startTs,
-          phase === "dispatch_queue"
-            ? root?.startedAt ?? startTs
-            : run?.mainStartTs ?? startTs,
-        );
-        const effectiveEndTs = Math.max(endTs, effectiveStartTs + 1);
-        if (effectiveEndTs <= effectiveStartTs) {
-          return undefined;
-        }
-        const span = tracer.startSpan(
-          phase === "dispatch_queue"
-              ? "dispatch_queue"
-            : phase === "session_processing"
-              ? "session_processing"
-              : "runtime_orchestration",
-          {
-            startTime: new Date(effectiveStartTs),
-            kind: SpanKind.INTERNAL,
-            attributes: traceAttrs(enrichWithTranscript(sessionKey, {
-              __suppress_session_input_preview: true,
-              __suppress_session_output_preview: true,
-              __suppress_session_output_summary:
-                phase === "dispatch_queue"
-                || phase === "session_processing",
-              ...buildRunScopeAttrs(
-                resolveRunId(evt) ?? run?.runId ?? root?.runId,
-                run?.runIds,
-                root?.runIds,
-                resolveRunId(evt),
-              ),
-              session_id: evt.sessionId,
-              "openclaw.sessionId": evt.sessionId,
-              session_update_time: endTs,
-              "span.kind": "runtime",
-              "openclaw.runtime.phase": phase,
-              __min_snapshot_user_ts:
-                phase === "dispatch_queue" || phase === "session_processing"
-                  ? effectiveStartTs
-                  : undefined,
-              ...attrs,
-            })),
-          },
-          parentCtx ?? run?.ctx ?? root?.ctx ?? context.active(),
-        );
-        span.setStatus({ code: SpanStatusCode.OK });
-        endSpanSafely(span, new Date(effectiveEndTs));
-        if (run) {
-          run.runtimeLifecycleSpans ??= [];
-          run.runtimeLifecycleSpans.push(span);
-          patchRuntimeLifecycleRunScopeAttrs(run, root, resolveRunId(evt));
-        }
-        if (run && phase !== "session_processing") {
-          run.orchestrationCursorTs = effectiveEndTs;
-        }
-        return span;
+        return undefined;
       };
 
       const ensureRuntimeLifecycleSpans = (
@@ -1055,7 +1001,7 @@ export function createOtelPluginService(
             - (trajectoryRun.userTs ?? trajectoryRun.startedAt ?? Date.now()),
             1,
           );
-          instruments.genAiClientOperationDuration?.record(durationMsToSeconds(durationMs), modelMetricAttrs);
+          recordGenAiAgentOperationMetrics(instruments, durationMs, modelMetricAttrs);
           const tokenMetrics = [
             ["input", usageTotals.inputTokens],
             ["output", usageTotals.outputTokens],
@@ -1099,6 +1045,7 @@ export function createOtelPluginService(
             inputPreview: userText,
             outputPreview,
           });
+          const finalOutcome = normalizeOutcome(trajectoryRun.finalStatus) ?? "completed";
           const finalStatus = normalizeFinalStatus(trajectoryRun.finalStatus) ?? "completed";
           const requestStartTs = trajectoryRun.startedAt
             ?? trajectoryRun.userTs
@@ -1111,11 +1058,6 @@ export function createOtelPluginService(
             ?? (modelStartTs + MIN_VISIBLE_MODEL_MS);
           const modelEndTs = Math.max(rawModelEndTs, modelStartTs + 1);
           const egressEndTs = Math.max(trajectoryRun.completedAt ?? modelEndTs, modelEndTs + MIN_VISIBLE_CHILD_MS);
-          const processingEndTs = Math.max(
-            Math.min(processingStartTs + MIN_VISIBLE_CHILD_MS, modelStartTs),
-            processingStartTs + 1,
-          );
-
           const baseAttrs = {
             ...stringAttrs({
               "openclaw.sessionKey": sessionKey,
@@ -1132,7 +1074,8 @@ export function createOtelPluginService(
               "openclaw.tokens.total": usageTotals.totalTokens,
               "openclaw.tokens.cache_read": usageTotals.cacheReadTokens,
               "openclaw.tokens.cache_write": usageTotals.cacheWriteTokens,
-              "openclaw.outcome": finalStatus,
+              "openclaw.outcome": finalOutcome,
+              "openclaw.final_status": finalStatus,
               "openclaw.output.kind": assistantText ? "text" : undefined,
               replay_source: "trajectory",
               trace_completeness: "partial",
@@ -1150,19 +1093,6 @@ export function createOtelPluginService(
             "openclaw.session.cwd": latestSnapshot?.sessionCwd,
           };
 
-          const rootSpan = tracer.startSpan(
-            "openclaw_request",
-            {
-              startTime: new Date(requestStartTs),
-              kind: SpanKind.SERVER,
-              attributes: buildAgentSummaryTraceAttrs(sessionKey, {
-                ...baseAttrs,
-                "span.kind": "request",
-              }),
-            },
-            context.active(),
-          );
-          const rootCtx = trace.setSpan(context.active(), rootSpan);
           const runSpan = tracer.startSpan(
             "invoke_agent",
             {
@@ -1173,37 +1103,9 @@ export function createOtelPluginService(
                 "span.kind": "agent",
               }),
             },
-            rootCtx,
+            context.active(),
           );
-          const runCtx = trace.setSpan(rootCtx, runSpan);
-
-          createImmediateSpan(
-            "session_processing",
-            processingStartTs,
-            processingEndTs,
-            SpanKind.INTERNAL,
-            {
-              ...baseAttrs,
-              "span.kind": "runtime",
-              "openclaw.runtime.phase": "session_processing",
-              "openclaw.state": "processing",
-            },
-            runCtx,
-          );
-          if (modelStartTs > processingEndTs) {
-            createImmediateSpan(
-              "runtime_orchestration",
-              processingEndTs,
-              modelStartTs,
-              SpanKind.INTERNAL,
-              {
-                ...baseAttrs,
-                "span.kind": "runtime",
-                "openclaw.runtime.phase": "agent_plan",
-              },
-              runCtx,
-            );
-          }
+          const runCtx = trace.setSpan(context.active(), runSpan);
           const modelSpan = createImmediateSpan(
             "llm",
             modelStartTs,
@@ -1224,13 +1126,25 @@ export function createOtelPluginService(
             },
             runCtx,
           );
+          if (assistantText) {
+            createImmediateSpan(
+              "assistant",
+              modelEndTs,
+              egressEndTs,
+              SpanKind.INTERNAL,
+              {
+                ...baseAttrs,
+                "span.kind": "output",
+                "openclaw.output.preview": outputPreview,
+                "openclaw.output.length": assistantText.length,
+                "openclaw.output.kind": "text",
+              },
+              runCtx,
+            );
+          }
           runSpan.setAttributes(buildAgentSummaryTraceAttrs(sessionKey, {
             ...baseAttrs,
             "span.kind": "agent",
-          }));
-          rootSpan.setAttributes(buildAgentSummaryTraceAttrs(sessionKey, {
-            ...baseAttrs,
-            "span.kind": "request",
           }));
 
           emitModelTurnDebugLog({
@@ -1264,7 +1178,8 @@ export function createOtelPluginService(
           };
           const requestSummaryAttrs = {
             "openclaw.state": "completed",
-            "openclaw.outcome": finalStatus,
+            "openclaw.outcome": finalOutcome,
+            "openclaw.final_status": finalStatus,
           };
           const requestMetricAttrs = buildGenAiWorkflowMetricAttrs(
             requestMetricSnapshot as any,
@@ -1276,9 +1191,7 @@ export function createOtelPluginService(
           );
 
           runSpan.setStatus({ code: SpanStatusCode.OK });
-          rootSpan.setStatus({ code: SpanStatusCode.OK });
           endSpanSafely(runSpan, new Date(egressEndTs));
-          endSpanSafely(rootSpan, new Date(egressEndTs));
 
           const latestCompletedSnapshot = loadSessionSnapshot(sessionKey);
           if (
@@ -1356,11 +1269,11 @@ export function createOtelPluginService(
           current.modelStartTs = undefined;
         }
         toolSpanManager.finalizeToolAndSkillSpans(current, endTime);
-        if (current.span) {
+        if (current.span && !current.rootSharedSpan) {
           current.span.setStatus({ code: SpanStatusCode.OK });
           endSpanSafely(current.span, endTime);
-          current.span = undefined;
         }
+        current.span = undefined;
         current.ctx = current.userCtx ?? current.ctx;
         if (current.userSpan) {
           current.userSpan.setStatus({ code: SpanStatusCode.OK });
@@ -1406,10 +1319,10 @@ export function createOtelPluginService(
           : eventTimestamp(evt).getTime();
         const snapshot = loadSessionSnapshot(sessionKey);
         const span = tracer.startSpan(
-          "openclaw_request",
+          "invoke_agent",
           {
             startTime: new Date(rootStartTs),
-            kind: SpanKind.SERVER,
+            kind: SpanKind.INTERNAL,
             attributes: traceAttrs(enrichWithTranscript(sessionKey, {
               __suppress_session_model: true,
               "openclaw.sessionKey": evt.sessionKey,
@@ -1420,7 +1333,7 @@ export function createOtelPluginService(
               "openclaw.queueDepth": evt.queueDepth,
               session_create_at: snapshot?.createdAt,
               session_update_time: rootStartTs,
-              "span.kind": "request",
+              "span.kind": "agent",
             })),
           },
         );
@@ -1475,32 +1388,14 @@ export function createOtelPluginService(
         if (rememberRunId(root, resolvedRunId)) {
           root.span.setAttributes(traceRunScopeAttrs(resolvedRunId ?? root.runId, root.runIds));
         }
-        const userCtx = current?.userCtx;
-        const snapshot = loadSessionSnapshot(sessionKey);
-        const span = tracer.startSpan(
-          "invoke_agent",
-          {
-            startTime: eventTimestamp(evt),
-            kind: SpanKind.INTERNAL,
-            attributes: traceAttrs(enrichWithTranscript(sessionKey, {
-              __suppress_session_model: true,
-              "openclaw.sessionKey": evt.sessionKey,
-              "openclaw.sessionId": evt.sessionId,
-              ...buildRunScopeAttrs(resolvedRunId ?? root.runId, root.runIds, resolvedRunId),
-              session_create_at: snapshot?.createdAt,
-              session_update_time: eventTimestamp(evt).getTime(),
-              "span.kind": "agent",
-            })),
-          },
-          userCtx ?? root.ctx,
-        );
         const runStartTs = eventTimestamp(evt).getTime();
-        const run = current ?? createRunState(userCtx ?? root.ctx, runStartTs, runStartTs);
+        const run = current ?? createRunState(root.ctx, runStartTs, runStartTs);
         run.requestKey = requestKey;
         run.sessionIdentity = sessionKey;
         rememberRunId(run, resolvedRunId ?? root.runId);
-        run.span = span;
-        run.ctx = trace.setSpan(userCtx ?? root.ctx, span);
+        run.span = root.span;
+        run.ctx = root.ctx;
+        run.rootSharedSpan = true;
         activeRuns.set(requestKey, run);
         patchRuntimeLifecycleRunScopeAttrs(run, root, resolvedRunId);
         return run;

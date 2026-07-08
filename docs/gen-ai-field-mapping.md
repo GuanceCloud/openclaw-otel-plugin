@@ -7,7 +7,7 @@
 - trace / span / event / log 继续保留短字段，便于兼容既有查询
 - 同时新增官方点分字段，例如 `gen_ai.provider.name`
 - `skill` 当前没有稳定的官方 OTEL GenAI 一等字段；trace 侧统一使用 `skill.*`，并补充项目扩展字段 `gen_ai.skill.*`
-- 当前插件主动上报的指标收敛为 `gen_ai.workflow.duration`、`gen_ai.client.operation.duration`、`gen_ai.client.token.usage`
+- 当前插件主动上报的推荐指标包括 `gen_ai.workflow.duration`、`gen_ai.client.operation.duration`、`gen_ai.client.token.usage`，并兼容保留 `gen_ai.agent.operation.count` / `gen_ai.agent.operation.duration`
 - 指标 tag 优先使用官方 `gen_ai.*` 点分字段，duration 单位统一为 `s`
 - 敏感或体积较大的官方 opt-in 内容字段只使用当前已有 preview 构造，不输出原始全量内容
 
@@ -24,14 +24,14 @@
 | --- | --- | --- | --- |
 | `operation_name` / `span.kind` / `runtime_phase` | `gen_ai.operation.name` | model / agent / tool / skill / planning span，相关指标 tag | 官方 operation 名。当前映射见下方 operation 表。 |
 | span error status | `error.type` | 错误 span | 当前输出低基数 `error`，错误详情仍放在 OTEL span status message。 |
-| `provider_name` | `gen_ai.provider.name` | `llm`、`invoke_agent`、request 汇总、model token/operation 指标 | 模型或 Agent 调用的 GenAI provider。 |
-| `request_model` | `gen_ai.request.model` | `llm`、model token/operation 指标 | 请求模型名。`openclaw_request` / `invoke_agent` 不再汇总该字段。 |
+| `provider_name` | `gen_ai.provider.name` | `llm`、`invoke_agent`、model token/operation 指标 | 模型或 Agent 调用的 GenAI provider。 |
+| `request_model` | `gen_ai.request.model` | `llm`、model token/operation 指标 | 请求模型名。`invoke_agent` 不再汇总该字段。 |
 | `response_model` | `gen_ai.response.model` | `llm`、model token/operation 指标 | 响应模型名；没有独立响应模型时沿用请求模型。 |
 | `session_id` | `gen_ai.conversation.id` | 带 session 关联的 span / metric | OpenClaw session id 对应官方 conversation id。 |
-| `usage_input_tokens` | `gen_ai.usage.input_tokens` | `llm` | 输入 token 数。`openclaw_request` / `invoke_agent` 不再汇总该字段。 |
-| `usage_output_tokens` | `gen_ai.usage.output_tokens` | `llm` | 输出 token 数。`openclaw_request` / `invoke_agent` 不再汇总该字段。 |
-| `usage_cache_read_input_tokens` | `gen_ai.usage.cache_read.input_tokens` | `llm` | provider cache read input token 数。`openclaw_request` / `invoke_agent` 不再汇总该字段。 |
-| `usage_cache_write_input_tokens` | `gen_ai.usage.cache_creation.input_tokens` | `llm` | provider cache creation / write input token 数。`openclaw_request` / `invoke_agent` 不再汇总该字段。 |
+| `usage_input_tokens` | `gen_ai.usage.input_tokens` | `llm` | 输入 token 数。`invoke_agent` 不再汇总该字段。 |
+| `usage_output_tokens` | `gen_ai.usage.output_tokens` | `llm` | 输出 token 数。`invoke_agent` 不再汇总该字段。 |
+| `usage_cache_read_input_tokens` | `gen_ai.usage.cache_read.input_tokens` | `llm` | provider cache read input token 数。`invoke_agent` 不再汇总该字段。 |
+| `usage_cache_write_input_tokens` | `gen_ai.usage.cache_creation.input_tokens` | `llm` | provider cache creation / write input token 数。`invoke_agent` 不再汇总该字段。 |
 | `input_preview` | `gen_ai.input.messages` | 模型 / Agent 相关 span | 使用已脱敏、截断后的 preview 构造 JSON 字符串，形如 `[{role:"user",parts:[{type:"text",content:"..."}]}]`。 |
 | `output_preview`、`output_summary`、`output_kind` | `gen_ai.output.messages` | 模型 / Agent 相关 span | 使用已脱敏、截断后的 preview / summary 构造 JSON 字符串；`output_kind=tool_call` 且有 tool 身份时输出 `tool_call` part。 |
 | `tool_name` | `gen_ai.tool.name` | `tool:*` span、tool operation 指标 | tool 名称。 |
@@ -60,14 +60,14 @@
 | `operation_name=tool` 或 `span.kind=tool` | `execute_tool` | tool 执行。 |
 | skill operation metric | `skill` | 插件扩展 operation 类型；skill 是一类特殊 tool，但在指标里单独切分。 |
 | `span.kind=agent` | `invoke_agent` | `invoke_agent` span 表示一次 agent 主执行窗口。 |
-| `span.kind=request` | `invoke_workflow` | `openclaw_request` 表示一次用户消息触发的完整工作流。 |
-| `runtime_phase=agent_plan` | `plan` | `runtime_orchestration` 中的规划阶段。 |
+| `span.kind=request` | `invoke_workflow` | 历史 request 汇总语义，当前 trace 不再单独输出 request root span。 |
+| `runtime_phase=agent_plan` | `plan` | 历史 runtime 编排语义，当前 trace 不再单独输出 runtime 壳 span。 |
 
 ## Metric Tag 关系
 
 | 指标范围 | 保留短 tag | 新增官方 tag | 说明 |
 | --- | --- | --- | --- |
-| model operation / token metrics | - | `gen_ai.provider.name`、`gen_ai.request.model`、`gen_ai.response.model` | 适用于 `gen_ai.client.operation.duration`、`gen_ai.client.token.usage`。 |
+| model operation / token metrics | - | `gen_ai.provider.name`、`gen_ai.request.model`、`gen_ai.response.model` | 适用于 `gen_ai.client.operation.duration`、`gen_ai.agent.operation.*`、`gen_ai.client.token.usage`。 |
 | token metrics | - | `gen_ai.token.type` | 当前只上报 `input` / `output`。 |
 | operation metrics | - | `gen_ai.operation.name` | 模型为 `chat`，tool 为 `execute_tool`，skill 为插件扩展值 `skill`。 |
 | session correlation | `session_id` | `gen_ai.conversation.id` | 指标保留 `session_id` 作为查询便利字段，并与官方 conversation id 对齐。 |
@@ -80,4 +80,4 @@
 - `session_key`、`run_id`、`run_ids`、`channel`、`final_status`、`request_type`、`request_category` 等 OpenClaw 运行时字段没有官方一一对应字段，继续保留短字段。
 - `gen_ai.skill.*` 是本插件为 skill 语义补齐的项目扩展字段，不代表官方 OTEL GenAI 已采纳同名属性。
 - `gen_ai.system_instructions`、`gen_ai.tool.definitions`、`gen_ai.request.*` 采样参数、`server.address`、`server.port` 等字段当前没有稳定上游来源，因此不凭空生成。
-- 旧 `openclaw.*`、`gen_ai.agent.*`、`gen_ai.runtime.*` 指标双写不恢复；如果平台仍能查询到旧指标，通常来自历史数据。
+- 旧 `openclaw.*`、除 `gen_ai.agent.operation.*` 外的 `gen_ai.agent.*`、以及 `gen_ai.runtime.*` 指标双写不恢复；如果平台仍能查询到旧指标，通常来自历史数据。
