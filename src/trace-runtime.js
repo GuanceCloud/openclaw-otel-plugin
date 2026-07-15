@@ -22,6 +22,10 @@ export function stripAnsiEscapeCodes(text) {
 export function normalizeTerminalSpanAttrs(attrs) {
   const next = { ...attrs };
   delete next.trace_id;
+  if ("openclaw.outcome" in next && !("openclaw.status" in next)) {
+    next["openclaw.status"] = next["openclaw.outcome"];
+  }
+  delete next["openclaw.outcome"];
   if ("openclaw.state" in next) {
     next["openclaw.final_state"] = next["openclaw.state"];
     delete next["openclaw.state"];

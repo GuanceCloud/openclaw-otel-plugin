@@ -145,7 +145,7 @@ invoke_agent
 
 ## 状态字段说明
 
-- `status`
+- `span status`
   - 表示当前 span 自身的执行状态
   - 用于判断某个具体 span 是否报错
   - 例如 `tool:*`、`llm` 是否执行失败
@@ -162,15 +162,15 @@ invoke_agent
   - 表示一条 `invoke_agent` 最终的业务结果
   - 当前只保留 turn 终态语义，用于判断一次 agent 请求最终是正常完成还是被中断/取消
 
-- `outcome`
+- `status`
   - 表示统一结果维度
   - 用于和 metrics 侧对齐 `completed` / `cancelled` / `error`
 
 使用建议：
 
-- 看链路技术错误：优先看 `status`
+- 看链路技术错误：优先看 span status / `error.type`
 - 看一次 agent 请求最终结局：优先看 `final_status`
-- 需要和指标统一统计结果维度：看 `outcome`
+- 需要和指标统一统计结果维度：看 `status`
 
 ### `final_status` 结果语义
 
@@ -185,9 +185,9 @@ invoke_agent
 
 - `completed` 不要求所有子 span 都没有错误；只要 agent 最终成功产出结果即可
 - `final_status` 不再细分 `error` / `timeout` / `superseded`
-- 更细的失败语义通过 `outcome`、`status`、`reason` 表达
+- 更细的失败语义通过 `status`、span status、`reason` 表达
 
-### `outcome` 结果语义
+### `status` 结果语义
 
 建议按以下语义使用：
 

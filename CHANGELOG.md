@@ -2,6 +2,18 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-07-15
+
+### Result Status Rename
+
+- Replaced the exported canonical result field/tag with `status` across trace attributes and GenAI metric tags.
+- Kept backward-compatible reads for the legacy result alias so replayed or stale upstream events still normalize into canonical `status`.
+- Updated trace, metric, and protocol docs to reflect the `final_status` plus `status` split.
+
+### Documentation Cleanup
+
+- Removed remaining `outcome` wording from the published docs so the user-facing field/tag guidance now consistently refers to `status`.
+
 ## 2026-07-08
 
 ### Trace Structure Rollback
@@ -14,11 +26,11 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 ### Outcome Semantics Alignment
 
-- Split turn-level `final_status` from the cross-metric `outcome` dimension to match the current GTrace AI semantic conventions.
-- `final_status` now normalizes to `completed` / `cancelled` only, while `outcome` carries `completed` / `cancelled` / `error`.
-- Stopped exporting `tool_result_status` as a default operation metric tag; tool and skill metrics now fold results into the unified `outcome` tag.
-- Updated trajectory replay, session-idle closeout, and workflow metric derivation so failed upstream terminal values still preserve `outcome=error` while exposing canonical turn `final_status`.
-- Updated trace and metric docs to reflect the new `final_status` / `outcome` semantics.
+- Split turn-level `final_status` from the cross-metric result dimension to match the current GTrace AI semantic conventions.
+- `final_status` now normalizes to `completed` / `cancelled` only, while the result dimension carries `completed` / `cancelled` / `error`.
+- Stopped exporting `tool_result_status` as a default operation metric tag; tool and skill metrics now fold results into the unified result tag.
+- Updated trajectory replay, session-idle closeout, and workflow metric derivation so failed upstream terminal values still preserve `status=error` while exposing canonical turn `final_status`.
+- Updated trace and metric docs to reflect the new `final_status` / `status` semantics.
 
 ## 2026-07-01
 

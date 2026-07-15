@@ -99,7 +99,7 @@ root_span（一次完整请求，例如一条消息的处理）
 | ----------------- | ------ | ------------------------------------------------------------ |
 | `final_status`    | string | 最终业务结果：`completed` / `error` / `timeout` / `cancelled` / `superseded` |
 | `state`           | string | 当前状态                                                     |
-| `outcome`         | string | 结果状态                                                     |
+| `status`          | string | 结果状态                                                     |
 
 **请求分类：**
 

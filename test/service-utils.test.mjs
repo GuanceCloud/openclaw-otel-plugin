@@ -561,7 +561,9 @@ test("stringAttrs maps openclaw fields to canonical aliases", () => {
   assert.equal(attrs["gen_ai.skill.source.type"], "workspace");
   assert.equal(attrs["gen_ai.skill.result_status"], "completed");
   assert.equal(attrs["gen_ai.skill.version"], "1.2.3");
+  assert.equal(attrs.status, "completed");
   assert.equal(attrs.final_status, "completed");
+  assert.equal(attrs.outcome, undefined);
   assert.equal(attrs.sessionId, undefined);
   assert.equal(attrs.sessionKey, undefined);
   assert.equal(attrs["gen_ai.agent_runtime"], undefined);
@@ -996,7 +998,8 @@ test("buildGenAiClientModelMetricAttrs uses GenAI semantic-style keys", () => {
   assert.equal(attrs["gen_ai.response.model"], "ark-code-latest");
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs["gen_ai.conversation.id"], "session-1");
-  assert.equal(attrs.outcome, "completed");
+  assert.equal(attrs.status, "completed");
+  assert.equal(attrs.outcome, undefined);
 });
 
 test("buildGenAiClientTokenMetricAttrs uses official token metric keys", () => {
@@ -1034,7 +1037,8 @@ test("buildGenAiClientToolMetricAttrs uses tool operation naming", () => {
   assert.equal(attrs.skill_name, undefined);
   assert.equal(attrs.model_name, undefined);
   assert.equal(attrs.tool_result_status, undefined);
-  assert.equal(attrs.outcome, "completed");
+  assert.equal(attrs.status, "completed");
+  assert.equal(attrs.outcome, undefined);
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs["gen_ai.conversation.id"], "session-1");
 });
@@ -1052,7 +1056,8 @@ test("buildGenAiClientSkillMetricAttrs uses skill operation naming", () => {
   assert.equal(attrs["gen_ai.skill.name"], "dashboard");
   assert.equal(attrs.skill_name, undefined);
   assert.equal(attrs.skill_source, undefined);
-  assert.equal(attrs.outcome, "completed");
+  assert.equal(attrs.status, "completed");
+  assert.equal(attrs.outcome, undefined);
   assert.equal(attrs.session_id, "session-1");
   assert.equal(attrs["gen_ai.conversation.id"], "session-1");
 });
@@ -1079,7 +1084,8 @@ test("GenAI workflow metric builder keeps workflow tags model-free", () => {
   assert.equal(requestAttrs["gen_ai.request.model"], undefined);
   assert.equal(requestAttrs["gen_ai.conversation.id"], "session-1");
   assert.equal(requestAttrs.session_state, undefined);
-  assert.equal(requestAttrs.outcome, "completed");
+  assert.equal(requestAttrs.status, "completed");
+  assert.equal(requestAttrs.outcome, undefined);
   assert.equal(requestAttrs.final_status, "completed");
 });
 

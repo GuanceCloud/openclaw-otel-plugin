@@ -18,10 +18,10 @@
 
 | 指标名 | 类型 | 单位 | tags | 描述 |
 | --- | --- | --- | --- | --- |
-| `gen_ai.workflow.duration` | Histogram | `s` | `session_id`, `gen_ai.conversation.id`, `final_status`, `outcome` | 一次 OpenClaw 用户请求 / workflow 的端到端耗时。 |
-| `gen_ai.client.operation.duration` | Histogram | `s` | 模型调用：`gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `session_id`, `gen_ai.conversation.id`, `outcome`；tool 调用：`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `session_id`, `gen_ai.conversation.id`, `outcome`；skill 调用：`gen_ai.operation.name=skill`, `gen_ai.skill.name`, `session_id`, `gen_ai.conversation.id`, `outcome` | GenAI client operation 耗时，覆盖模型调用、tool 执行以及作为特殊 tool 处理的 skill 执行窗口。 |
+| `gen_ai.workflow.duration` | Histogram | `s` | `session_id`, `gen_ai.conversation.id`, `final_status`, `status` | 一次 OpenClaw 用户请求 / workflow 的端到端耗时。 |
+| `gen_ai.client.operation.duration` | Histogram | `s` | 模型调用：`gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `session_id`, `gen_ai.conversation.id`, `status`；tool 调用：`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `session_id`, `gen_ai.conversation.id`, `status`；skill 调用：`gen_ai.operation.name=skill`, `gen_ai.skill.name`, `session_id`, `gen_ai.conversation.id`, `status` | GenAI client operation 耗时，覆盖模型调用、tool 执行以及作为特殊 tool 处理的 skill 执行窗口。 |
 | `gen_ai.client.token.usage` | Histogram | `{token}` | `gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.token.type`, `session_id`, `gen_ai.conversation.id` | 模型输入 / 输出 token 用量。当前只上报 `gen_ai.token.type=input` 和 `gen_ai.token.type=output`。 |
-| `gen_ai.agent.operation.count` | Counter | `1` | 基础：`session_id`, `gen_ai.conversation.id`, `gen_ai.operation.name`, `outcome`；模型调用：`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`；tool 调用：`gen_ai.tool.name`；skill 调用：`gen_ai.skill.name` | Agent 侧 operation 次数。每个 `llm`、`tool:*`、`skill:*` span 记录 1 个点。 |
+| `gen_ai.agent.operation.count` | Counter | `1` | 基础：`session_id`, `gen_ai.conversation.id`, `gen_ai.operation.name`, `status`；模型调用：`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`；tool 调用：`gen_ai.tool.name`；skill 调用：`gen_ai.skill.name` | Agent 侧 operation 次数。每个 `llm`、`tool:*`、`skill:*` span 记录 1 个点。 |
 | `gen_ai.agent.operation.duration` | Histogram | `ms` | 与 `gen_ai.client.operation.duration` 使用同一组 operation attrs | Agent 侧 operation 耗时兼容指标，覆盖模型调用、tool 执行和 skill 执行窗口。 |
 
 ## Tag 说明
@@ -38,7 +38,7 @@
 | `gen_ai.conversation.id` | session / conversation 关联 ID，当前与 `session_id` 保持一致。 |
 | `session_id` | OpenClaw session ID，用于和 trace / logs 侧 canonical 字段关联。 |
 | `final_status` | workflow 最终状态。当前只使用 `completed` / `cancelled`。 |
-| `outcome` | 统一结果维度。当前使用 `completed` / `cancelled` / `error`。 |
+| `status` | 统一结果维度。当前使用 `completed` / `cancelled` / `error`。 |
 
 ## 迁移说明
 

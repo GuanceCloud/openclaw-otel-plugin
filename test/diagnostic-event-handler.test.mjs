@@ -2467,11 +2467,11 @@ test("model.usage uses snapshot sessionId for gen_ai client metrics when event s
   assert.equal(operationDurations[0].attrs["gen_ai.operation.name"], "chat");
   assert.equal(operationDurations[0].attrs["gen_ai.request.model"], "gpt-5");
   assert.equal(operationDurations[0].attrs.session_id, "sid-from-snapshot");
-  assert.equal(operationDurations[0].attrs.outcome, "completed");
+  assert.equal(operationDurations[0].attrs.status, "completed");
   assert.equal(agentOperationDurations.length, 1);
   assert.equal(agentOperationDurations[0].value, 400);
   assert.equal(agentOperationDurations[0].attrs["gen_ai.operation.name"], "chat");
-  assert.equal(agentOperationDurations[0].attrs.outcome, "completed");
+  assert.equal(agentOperationDurations[0].attrs.status, "completed");
   assert.equal(agentOperationCounts.length, 1);
   assert.equal(agentOperationCounts[0].value, 1);
   assert.deepEqual(agentOperationCounts[0].attrs, {
@@ -2482,7 +2482,7 @@ test("model.usage uses snapshot sessionId for gen_ai client metrics when event s
     "gen_ai.provider.name": "openai",
     "gen_ai.request.model": "gpt-5",
     "gen_ai.response.model": "gpt-5",
-    outcome: "completed",
+    status: "completed",
   });
 });
 

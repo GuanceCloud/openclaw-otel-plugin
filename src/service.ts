@@ -945,12 +945,12 @@ export function createOtelPluginService(
         }
         endRun(transcriptEvt, stringAttrs({
           "openclaw.state": "completed",
-          "openclaw.outcome": "completed",
+          "openclaw.status": "completed",
           ...(replaySummaryAttrs ?? {}),
         }));
         endRoot(transcriptEvt, stringAttrs({
           "openclaw.state": "completed",
-          "openclaw.outcome": "completed",
+          "openclaw.status": "completed",
           ...(replaySummaryAttrs ?? {}),
         }));
         clearRun(transcriptEvt);
@@ -1074,7 +1074,7 @@ export function createOtelPluginService(
               "openclaw.tokens.total": usageTotals.totalTokens,
               "openclaw.tokens.cache_read": usageTotals.cacheReadTokens,
               "openclaw.tokens.cache_write": usageTotals.cacheWriteTokens,
-              "openclaw.outcome": finalOutcome,
+              "openclaw.status": finalOutcome,
               "openclaw.final_status": finalStatus,
               "openclaw.output.kind": assistantText ? "text" : undefined,
               replay_source: "trajectory",
@@ -1178,7 +1178,7 @@ export function createOtelPluginService(
           };
           const requestSummaryAttrs = {
             "openclaw.state": "completed",
-            "openclaw.outcome": finalOutcome,
+            "openclaw.status": finalOutcome,
             "openclaw.final_status": finalStatus,
           };
           const requestMetricAttrs = buildGenAiWorkflowMetricAttrs(
@@ -1479,8 +1479,10 @@ export function createOtelPluginService(
         }
         current.span.setStatus({ code: SpanStatusCode.OK });
         endSpanSafely(current.span, eventTimestamp(evt));
-        const finalOutcome = typeof summaryAttrs["openclaw.outcome"] === "string"
-          ? summaryAttrs["openclaw.outcome"]
+        const finalOutcome = typeof summaryAttrs["openclaw.status"] === "string"
+          ? summaryAttrs["openclaw.status"]
+          : typeof summaryAttrs["openclaw.outcome"] === "string"
+            ? summaryAttrs["openclaw.outcome"]
           : undefined;
         if (finalOutcome && finalOutcome !== "interrupted") {
           const finalizedRunIds = new Set<string>([
@@ -1634,7 +1636,7 @@ export function createOtelPluginService(
           }
           addEvent(current.span, "session.timeout", { "openclaw.root.ttl_ms": config.rootSpanTtlMs });
           current.span.setAttributes(traceAttrs(normalizeTerminalSpanAttrs(stringAttrs({
-            "openclaw.outcome": "interrupted",
+            "openclaw.status": "interrupted",
             "openclaw.reason": "session.timeout",
           }))));
           endSpanSafely(current.span);
@@ -1653,7 +1655,7 @@ export function createOtelPluginService(
             continue;
           }
           const terminalAttrs = stringAttrs({
-            "openclaw.outcome": "interrupted",
+            "openclaw.status": "interrupted",
             "openclaw.reason": "session.timeout",
           });
           const concludeEvt = {
@@ -1899,7 +1901,7 @@ export function createOtelPluginService(
               ts: Date.now(),
             },
             stringAttrs({
-              "openclaw.outcome": "interrupted",
+              "openclaw.status": "interrupted",
               "openclaw.reason": "runtime.stop",
             }),
           );
@@ -1913,7 +1915,7 @@ export function createOtelPluginService(
       activeRuns.clear();
       for (const { span } of Array.from(activeRoots.values())) {
         span.setAttributes(traceAttrs(normalizeTerminalSpanAttrs(stringAttrs({
-          "openclaw.outcome": "interrupted",
+          "openclaw.status": "interrupted",
           "openclaw.reason": "runtime.stop",
         }))));
         endSpanSafely(span);

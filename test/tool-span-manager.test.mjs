@@ -909,7 +909,7 @@ test("tool completion records tool and skill client operation durations", () => 
     gen_ai_skill_name: attrs["gen_ai.skill.name"],
     skill_name: attrs.skill_name,
     model_name: attrs.model_name,
-    outcome: attrs.outcome,
+    status: attrs.status,
   }));
   assert.deepEqual(simplified, [
     {
@@ -919,7 +919,7 @@ test("tool completion records tool and skill client operation durations", () => 
       gen_ai_skill_name: undefined,
       skill_name: undefined,
       model_name: undefined,
-      outcome: "completed",
+      status: "completed",
     },
     {
       value: 0.38,
@@ -928,7 +928,7 @@ test("tool completion records tool and skill client operation durations", () => 
       gen_ai_skill_name: "dashboard",
       skill_name: undefined,
       model_name: undefined,
-      outcome: "completed",
+      status: "completed",
     },
   ]);
   assert.deepEqual(agentDurationRecords.map(({ value }) => value), [380, 380]);
@@ -939,7 +939,7 @@ test("tool completion records tool and skill client operation durations", () => 
     skill_name: attrs["gen_ai.skill.name"],
     session_id: attrs.session_id,
     compatibility_skill_name: attrs.skill_name,
-    outcome: attrs.outcome,
+    status: attrs.status,
   })), [
     {
       value: 1,
@@ -948,7 +948,7 @@ test("tool completion records tool and skill client operation durations", () => 
       skill_name: undefined,
       session_id: "sid-1",
       compatibility_skill_name: undefined,
-      outcome: "completed",
+      status: "completed",
     },
     {
       value: 1,
@@ -957,7 +957,7 @@ test("tool completion records tool and skill client operation durations", () => 
       skill_name: "dashboard",
       session_id: "sid-1",
       compatibility_skill_name: undefined,
-      outcome: "completed",
+      status: "completed",
     },
   ]);
 });

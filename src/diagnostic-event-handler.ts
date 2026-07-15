@@ -534,13 +534,13 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             ?? (replaySnapshotIsFresh ? resolveSnapshotFinalOutcome(snapshot) : undefined);
           endRun(replayEvt, stringAttrs({
             "openclaw.state": evt.state,
-            "openclaw.outcome": finalOutcome,
+            "openclaw.status": finalOutcome,
             "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
             ...(replayFinalAttrs ?? {}),
           }));
           endRoot(replayEvt, stringAttrs({
             "openclaw.state": evt.state,
-            "openclaw.outcome": finalOutcome,
+            "openclaw.status": finalOutcome,
             "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
             ...(replayFinalAttrs ?? {}),
           }));
@@ -594,7 +594,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               sessionId: evt.sessionId,
               ts: evt.ts - 1,
             },
-            stringAttrs({ "openclaw.outcome": finalOutcome ?? "superseded_by_next_message" }),
+            stringAttrs({ "openclaw.status": finalOutcome ?? "superseded_by_next_message" }),
           );
           endRoot(
             {
@@ -602,7 +602,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               sessionId: evt.sessionId,
               ts: evt.ts - 1,
             },
-            stringAttrs({ "openclaw.outcome": finalOutcome ?? "superseded_by_next_message" }),
+            stringAttrs({ "openclaw.status": finalOutcome ?? "superseded_by_next_message" }),
           );
           clearRun(evt);
         }
@@ -819,7 +819,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.channel": evt.channel,
           "openclaw.messageId": evt.messageId ? String(evt.messageId) : undefined,
           "openclaw.chatId": evt.chatId ? String(evt.chatId) : undefined,
-          "openclaw.outcome": evt.outcome,
+          "openclaw.status": evt.outcome,
           "openclaw.reason": evt.reason ? redactSensitiveText(evt.reason) : undefined,
           "span.kind": "output",
           "openclaw.output.preview": replaySnapshotOutputPreview,

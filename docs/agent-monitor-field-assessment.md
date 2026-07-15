@@ -38,7 +38,7 @@
 | `openclaw.tokens.input` | `input_tokens` |
 | `openclaw.tokens.output` | `output_tokens` |
 | `openclaw.tokens.total` | `total_tokens` |
-| `openclaw.outcome` / `openclaw.final_state` | `final_status` |
+| `openclaw.status` / `openclaw.final_state` | `final_status` |
 
 ### Tool 映射
 
@@ -51,7 +51,6 @@
 | `openclaw.tool.target` | `tool_target` |
 | `openclaw.tool.command` | `tool_command` |
 | `openclaw.tool.phase` | `tool_phase` |
-| `openclaw.tool.outcome` | `tool_outcome` |
 | `openclaw.tool.result_status` | `tool_result_status` |
 | `openclaw.tool.arg_keys` | `tool_arg_keys` |
 | `openclaw.tool.args.preview` | `tool_args_preview` |
@@ -67,8 +66,7 @@
 
 说明：
 
-- `tool_outcome` 表示插件对本次工具调用的统一结果判定，当前仅区分 `completed` / `error`
-- `tool_result_status` 仅提取工具返回体中的显式状态字段，如 `result.details.status` 或 `result.status`，不再回退 `result.outcome`
+- `tool_result_status` 仅提取工具返回体中的显式状态字段，如 `result.details.status` 或 `result.status`，不再回退其他历史结果字段
 
 ### Skill 映射
 
@@ -103,7 +101,7 @@
 | `output_tokens` | model/request attrs | `output_tokens` | 直接可取 |
 | `total_tokens` | model/request attrs | `total_tokens` | 直接可取 |
 | `latency_ms` | span duration | model span duration | 不必重复存字段 |
-| `status` | span status + attrs | span status / `openclaw.outcome` | 直接可取 |
+| `status` | span status + attrs | span status / `openclaw.status` | 直接可取 |
 | `tool_call_id` | tool span attr | `tool_call_id` | 直接可取 |
 | `tool_name` | tool span attr | `tool_name` | 直接可取 |
 | `call_latency_ms` | tool span duration | tool span duration | 不必重复存字段 |

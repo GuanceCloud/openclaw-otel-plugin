@@ -60,7 +60,7 @@ test("normalizeTerminalSpanAttrs stores terminal session state under final_* key
     {
       "openclaw.final_state": "idle",
       "openclaw.final_reason": "run_completed",
-      "openclaw.outcome": "completed",
+      "openclaw.status": "completed",
     },
   );
 });

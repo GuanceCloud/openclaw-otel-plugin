@@ -791,9 +791,9 @@ function stringValue(value: string | number | boolean | undefined): string | und
 function inferGenAiFinishReason(
   attrs: Record<string, string | number | boolean | undefined>,
 ): string {
-  const outcome = normalizeOutcome(stringValue(attrs.outcome ?? attrs.tool_result_status));
+  const status = normalizeOutcome(stringValue(attrs.status ?? attrs.outcome ?? attrs.tool_result_status));
   const finalStatus = normalizeFinalStatus(stringValue(attrs.final_status));
-  if (outcome === "error" || finalStatus === "cancelled" || outcome === "cancelled") {
+  if (status === "error" || finalStatus === "cancelled" || status === "cancelled") {
     return "error";
   }
   if (attrs.output_kind === "tool_call" || attrs.tool_call_id || attrs.tool_name) {
@@ -1027,16 +1027,19 @@ function withCanonicalAliases(
   mirrorAlias(next, "skill_name", "openclaw.skill.name");
   mirrorAlias(next, "skill_type", "openclaw.skill.kind");
   mirrorAlias(next, "skill_source", "openclaw.skill.source");
-  promoteAlias(next, "outcome", "openclaw.outcome");
-  if (next.outcome !== undefined && next.outcome !== "") {
-    next.outcome = normalizeOutcome(stringValue(next.outcome));
+  promoteAlias(next, "status", "openclaw.status", "openclaw.outcome", "outcome");
+  if (next.status !== undefined && next.status !== "") {
+    next.status = normalizeOutcome(stringValue(next.status));
   }
   promoteAlias(next, "final_status", "openclaw.final_status");
-  if ((next.final_status === undefined || next.final_status === "") && typeof next.outcome === "string") {
-    next.final_status = normalizeFinalStatus(next.outcome);
+  if ((next.final_status === undefined || next.final_status === "") && typeof next.status === "string") {
+    next.final_status = normalizeFinalStatus(next.status);
   } else if (next.final_status !== undefined && next.final_status !== "") {
     next.final_status = normalizeFinalStatus(stringValue(next.final_status));
   }
+  delete next.outcome;
+  delete next["openclaw.status"];
+  delete next["openclaw.outcome"];
   delete next["openclaw.final_status"];
   delete next.__suppress_usage_cache_total_tokens;
   return next;
@@ -1743,8 +1746,10 @@ export function buildRequestMetricAttrs(
   snapshot: SessionSnapshot | undefined,
   summaryAttrs?: Record<string, string | number | boolean>,
 ) {
-  const rawOutcome = typeof summaryAttrs?.["openclaw.outcome"] === "string"
-    ? summaryAttrs["openclaw.outcome"]
+  const rawStatus = typeof summaryAttrs?.["openclaw.status"] === "string"
+    ? summaryAttrs["openclaw.status"]
+    : typeof summaryAttrs?.["openclaw.outcome"] === "string"
+      ? summaryAttrs["openclaw.outcome"]
     : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
       ? summaryAttrs["openclaw.final_reason"]
       : typeof summaryAttrs?.["openclaw.reason"] === "string"
@@ -1761,8 +1766,8 @@ export function buildRequestMetricAttrs(
         : typeof summaryAttrs?.["openclaw.state"] === "string"
           ? summaryAttrs["openclaw.state"]
           : undefined,
-    "openclaw.outcome": normalizeOutcome(rawOutcome),
-    "openclaw.final_status": normalizeFinalStatus(rawOutcome),
+    "openclaw.status": normalizeOutcome(rawStatus),
+    "openclaw.final_status": normalizeFinalStatus(rawStatus),
   });
 }
 
@@ -1807,14 +1812,14 @@ export function buildGenAiAgentOperationCountMetricAttrs(
   const operationName = typeof attrs["gen_ai.operation.name"] === "string"
     ? attrs["gen_ai.operation.name"]
     : undefined;
-  const outcome = normalizeOutcome(
-    stringValue(attrs.outcome ?? attrs.final_status ?? attrs.tool_result_status),
+  const status = normalizeOutcome(
+    stringValue(attrs.status ?? attrs.outcome ?? attrs.final_status ?? attrs.tool_result_status),
   );
   const baseAttrs: Record<string, string | number | boolean | undefined> = {
     session_id: attrs.session_id,
     "gen_ai.conversation.id": attrs["gen_ai.conversation.id"],
     "gen_ai.operation.name": operationName,
-    outcome,
+    status,
   };
 
   if (operationName === "chat") {
@@ -1857,14 +1862,14 @@ export function buildGenAiAgentOperationDurationMetricAttrs(
   const operationName = typeof attrs["gen_ai.operation.name"] === "string"
     ? attrs["gen_ai.operation.name"]
     : undefined;
-  const outcome = normalizeOutcome(
-    stringValue(attrs.outcome ?? attrs.final_status ?? attrs.tool_result_status),
+  const status = normalizeOutcome(
+    stringValue(attrs.status ?? attrs.outcome ?? attrs.final_status ?? attrs.tool_result_status),
   );
   const baseAttrs: Record<string, string | number | boolean | undefined> = {
     session_id: attrs.session_id,
     "gen_ai.conversation.id": attrs["gen_ai.conversation.id"],
     "gen_ai.operation.name": operationName,
-    outcome,
+    status,
     "error.type": attrs["error.type"],
   };
 
@@ -1919,8 +1924,10 @@ export function buildGenAiWorkflowMetricAttrs(
   summaryAttrs?: Record<string, string | number | boolean>,
 ) {
   const sessionId = snapshot?.sessionId;
-  const rawOutcome = typeof summaryAttrs?.["openclaw.outcome"] === "string"
-    ? summaryAttrs["openclaw.outcome"]
+  const rawStatus = typeof summaryAttrs?.["openclaw.status"] === "string"
+    ? summaryAttrs["openclaw.status"]
+    : typeof summaryAttrs?.["openclaw.outcome"] === "string"
+      ? summaryAttrs["openclaw.outcome"]
     : typeof summaryAttrs?.["openclaw.final_reason"] === "string"
       ? summaryAttrs["openclaw.final_reason"]
       : typeof summaryAttrs?.["openclaw.reason"] === "string"
@@ -1929,8 +1936,8 @@ export function buildGenAiWorkflowMetricAttrs(
   return stringAttrs({
     session_id: sessionId,
     "gen_ai.conversation.id": sessionId,
-    final_status: normalizeFinalStatus(rawOutcome),
-    outcome: normalizeOutcome(rawOutcome),
+    final_status: normalizeFinalStatus(rawStatus),
+    status: normalizeOutcome(rawStatus),
   });
 }
 
@@ -1960,7 +1967,7 @@ export function buildGenAiClientToolMetricAttrs(
     "gen_ai.conversation.id": sessionId,
     "gen_ai.operation.name": "execute_tool",
     "gen_ai.tool.name": tool.name,
-    outcome: normalizeOutcome(resultStatus),
+    status: normalizeOutcome(resultStatus),
   });
 }
 
@@ -1975,7 +1982,7 @@ export function buildGenAiClientSkillMetricAttrs(
     "gen_ai.conversation.id": sessionId,
     "gen_ai.operation.name": "skill",
     "gen_ai.skill.name": skillName,
-    outcome: normalizeOutcome(outcome),
+    status: normalizeOutcome(outcome),
   });
 }
 
@@ -1999,17 +2006,18 @@ export function buildGenAiClientModelMetricAttrs(
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
   const sessionId = typeof extra?.session_id === "string" ? extra.session_id : undefined;
-  const outcome = normalizeOutcome(
-    stringValue(extra?.outcome ?? extra?.final_status ?? "completed"),
+  const status = normalizeOutcome(
+    stringValue(extra?.status ?? extra?.outcome ?? extra?.final_status ?? "completed"),
   );
+  const { status: _status, outcome: _outcome, ...rest } = extra ?? {};
   return stringAttrs({
     "gen_ai.operation.name": "chat",
     "gen_ai.provider.name": provider,
     "gen_ai.request.model": model,
     "gen_ai.response.model": model,
     "gen_ai.conversation.id": sessionId,
-    outcome,
-    ...(extra ?? {}),
+    status,
+    ...rest,
   });
 }
 
