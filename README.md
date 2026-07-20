@@ -46,11 +46,19 @@ OSS_ENDPOINT=https://<your-oss-root> \
 
 ### Windows PowerShell
 
-```powershell
-Invoke-WebRequest "https://<your-oss-root>/openclaw-otel-plugin/install.ps1" -OutFile "$env:TEMP\openclaw-otel-plugin-install.ps1"
+GitHub prereleases require an exact version because `releases/latest` does not resolve to a prerelease. The execution-policy change below applies only to the current PowerShell process and is discarded when the window closes:
 
-& "$env:TEMP\openclaw-otel-plugin-install.ps1" latest `
-  -OssEndpoint "https://<your-oss-root>" `
+```powershell
+$version = "v0.7.1-rc"
+$releaseBase = "https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/$version"
+$installer = "$env:TEMP\openclaw-otel-plugin-install.ps1"
+
+Invoke-WebRequest "$releaseBase/install.ps1" -OutFile $installer
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+Unblock-File $installer
+
+& $installer `
+  "$releaseBase/openclaw-otel-plugin-$version.tar.gz" `
   -Type gtrace `
   -Endpoint "http://<dataway-host>" `
   -XToken "<client_token>" `
@@ -59,6 +67,8 @@ Invoke-WebRequest "https://<your-oss-root>/openclaw-otel-plugin/install.ps1" -Ou
     "agent_name=<your_agent_name>"
   )
 ```
+
+For OSS delivery, download the installer from `https://<your-oss-root>/openclaw-otel-plugin/install.ps1` and pass `latest -OssEndpoint "https://<your-oss-root>"` as its first arguments. Never place real tokens, `agent_id`, or `agent_name` values in documentation, source-controlled scripts, or issue reports.
 
 ### Source Install
 

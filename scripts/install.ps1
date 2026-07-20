@@ -162,11 +162,17 @@ try {
     $config = $existingConfig
     if ($null -eq $config) { $config = [pscustomobject]@{} }
     $plugins = Ensure-ObjectProperty $config "plugins"
-    $allow = @(Get-PropertyValue $plugins "allow")
+    $allow = @(
+      @(Get-PropertyValue $plugins "allow") |
+        Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) }
+    )
     if ($allow -notcontains $PluginName) { $allow += $PluginName }
     Set-ObjectProperty $plugins "allow" $allow
     $load = Ensure-ObjectProperty $plugins "load"
-    $paths = @(Get-PropertyValue $load "paths")
+    $paths = @(
+      @(Get-PropertyValue $load "paths") |
+        Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) }
+    )
     if ($paths -notcontains $PluginDir) { $paths += $PluginDir }
     Set-ObjectProperty $load "paths" $paths
     $entries = Ensure-ObjectProperty $plugins "entries"
@@ -193,7 +199,12 @@ try {
       if ($XToken) { Set-ObjectProperty $headers "X-Token" $XToken }
     }
     New-Item -ItemType Directory -Path (Split-Path -Parent $ConfigFile) -Force | Out-Null
-    $config | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $ConfigFile -Encoding UTF8
+    $configJson = $config | ConvertTo-Json -Depth 30
+    [System.IO.File]::WriteAllText(
+      $ConfigFile,
+      "$configJson$([Environment]::NewLine)",
+      [System.Text.UTF8Encoding]::new($false)
+    )
     Write-InstallLog "updated $ConfigFile"
   }
 
