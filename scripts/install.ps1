@@ -224,9 +224,14 @@ try {
 
   Write-InstallLog "install type: $Type"
   if (-not $NoRestart) {
-    if (Get-Command openclaw -ErrorAction SilentlyContinue) {
+    $openclawCommand = "openclaw"
+    if ($env:OS -eq "Windows_NT") { $openclawCommand = "openclaw.cmd" }
+    if (Get-Command $openclawCommand -ErrorAction SilentlyContinue) {
       Write-InstallLog "restarting openclaw gateway"
-      & openclaw gateway restart
+      & $openclawCommand gateway restart
+      if ($LASTEXITCODE -ne 0) {
+        throw "[install] openclaw gateway restart failed with exit code $LASTEXITCODE"
+      }
     } else {
       Write-InstallLog "openclaw command was not found, skipping gateway restart"
     }
