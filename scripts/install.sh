@@ -431,6 +431,9 @@ config.plugins.entries ??= {};
 config.plugins.entries[pluginId] ??= {};
 config.plugins.entries[pluginId].enabled = true;
 config.plugins.entries[pluginId].config ??= {};
+if (typeof config.plugins.entries[pluginId].config.enabled !== "boolean") {
+  config.plugins.entries[pluginId].config.enabled = true;
+}
 config.plugins.entries[pluginId].config.resourceAttributes ??= {};
 if (!config.plugins.entries[pluginId].config.resourceAttributes.agent_runtime) {
   config.plugins.entries[pluginId].config.resourceAttributes.agent_runtime = "openclaw";

@@ -893,7 +893,19 @@ test("buildToolAttrs infers mcp provider and namespace from explicit metadata", 
   assert.equal(attrs["openclaw.tool.namespace"], "owl");
 });
 
-test("buildToolAttrs infers bundle mcp identity and underlying mcp tool name", () => {
+test("buildToolAttrs infers bundle mcp identity and underlying mcp tool name", (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-mcp-host-"));
+  const configPath = path.join(stateDir, "openclaw.json");
+  fs.writeFileSync(configPath, JSON.stringify({
+    mcp: { servers: { owl: { url: "https://owl-mcp.guance.com/mcp" } } },
+  }));
+  const previousConfigPath = process.env.OPENCLAW_CONFIG_PATH;
+  process.env.OPENCLAW_CONFIG_PATH = configPath;
+  t.after(() => {
+    if (previousConfigPath === undefined) delete process.env.OPENCLAW_CONFIG_PATH;
+    else process.env.OPENCLAW_CONFIG_PATH = previousConfigPath;
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  });
   const attrs = buildToolAttrs("owl__exec_tool", "call-1", {
     args: {
       tool_name: "owl.data.simple_query",

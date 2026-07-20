@@ -107,7 +107,7 @@ export function createOtelPluginService(
     id: "openclaw-otel-plugin",
     async start(ctx) {
       if (!config.enabled) {
-        ctx.logger.info("[otel-plugin] disabled");
+        ctx.logger.info("[otel-plugin] disabled by config; hooks and telemetry exporters were not started");
         return;
       }
 

@@ -1117,11 +1117,17 @@ function detectOpenClawVersion(): string | undefined {
     return envVersion;
   }
   const candidates = [
+    process.env.APPDATA
+      ? path.join(process.env.APPDATA, "npm", "node_modules", "openclaw", "package.json")
+      : undefined,
     path.join(path.dirname(path.dirname(process.execPath)), "lib", "node_modules", "openclaw", "package.json"),
     "/usr/local/lib/node_modules/openclaw/package.json",
     "/usr/lib/node_modules/openclaw/package.json",
   ];
   for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
     try {
       const raw = fs.readFileSync(candidate, "utf8");
       const parsed = JSON.parse(raw) as { version?: unknown };

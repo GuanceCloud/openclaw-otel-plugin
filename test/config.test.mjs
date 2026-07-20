@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { resolveOtelPluginConfig } from "../dist/src/config.js";
+
+test("resolveOtelPluginConfig supports the telemetry master switch", () => {
+  assert.equal(resolveOtelPluginConfig({}).enabled, true);
+  assert.equal(resolveOtelPluginConfig({ enabled: false }).enabled, false);
+});
 import { buildOtelResourceAttrs } from "../dist/src/otel-bootstrap.js";
 
 test("resolveOtelPluginConfig keeps openclaw as the default agent runtime resource attribute", () => {

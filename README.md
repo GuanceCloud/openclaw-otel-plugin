@@ -13,7 +13,7 @@
 
 ## Install
 
-`install.sh` is the only OSS install/upgrade entrypoint. It works for both first-time installs and upgrades.
+Use `install.sh` on Linux/macOS and `install.ps1` on Windows. Both support first-time installs and upgrades.
 
 ### GTrace
 
@@ -26,7 +26,8 @@ OSS_ENDPOINT=https://<your-oss-root> \
   --type gtrace \
   --endpoint http://<dataway-host> \
   --x-token <client_token> \
-  --tag env=prod
+  --tag 'agent_id=<your_agent_id>' \
+  --tag 'agent_name=<your_agent_name>'
 ```
 
 ### Standard OTLP
@@ -39,7 +40,24 @@ OSS_ENDPOINT=https://<your-oss-root> \
 /tmp/openclaw-otel-plugin-install.sh latest \
   --type otlp \
   --endpoint http://127.0.0.1:4318/otel \
-  --tag env=prod
+  --tag 'agent_id=<your_agent_id>' \
+  --tag 'agent_name=<your_agent_name>'
+```
+
+### Windows PowerShell
+
+```powershell
+Invoke-WebRequest "https://<your-oss-root>/openclaw-otel-plugin/install.ps1" -OutFile "$env:TEMP\openclaw-otel-plugin-install.ps1"
+
+& "$env:TEMP\openclaw-otel-plugin-install.ps1" latest `
+  -OssEndpoint "https://<your-oss-root>" `
+  -Type gtrace `
+  -Endpoint "http://<dataway-host>" `
+  -XToken "<client_token>" `
+  -Tag @(
+    "agent_id=<your_agent_id>",
+    "agent_name=<your_agent_name>"
+  )
 ```
 
 ### Source Install
@@ -48,7 +66,7 @@ Source install, build, packaging, and release steps are in [BUILDING.md](./BUILD
 
 ## Upgrade
 
-If the plugin is already installed, `install.sh` reuses the existing `~/.openclaw/openclaw.json` values for:
+For upgrades, the installer reuses the existing settings below and preserves the existing `config.enabled` value:
 
 - `endpoint`
 - `headers.X-Token`
@@ -84,6 +102,7 @@ Minimal example in `~/.openclaw/openclaw.json`:
       "openclaw-otel-plugin": {
         "enabled": true,
         "config": {
+          "enabled": true,
           "endpoint": "http://127.0.0.1:4318/otel",
           "tracePath": "v1/traces",
           "metricsPath": "v1/metrics",
@@ -105,6 +124,7 @@ Minimal example in `~/.openclaw/openclaw.json`:
 
 Key fields:
 
+- `enabled` (inside `config`): telemetry master switch; `true` registers hooks and exports traces/metrics, while `false` starts no hooks or exporters and sends no telemetry
 - `endpoint`: receiver base URL
 - `tracePath`: trace route
 - `metricsPath`: metrics route
@@ -123,6 +143,18 @@ Check gateway logs:
 
 ```bash
 tail -n 50 ~/.openclaw/logs/gateway.log
+```
+
+On Windows PowerShell:
+
+```powershell
+Get-Content "$HOME\.openclaw\logs\gateway.log" -Tail 50
+```
+
+When `config.enabled` is `false`, expect:
+
+```text
+[otel-plugin] disabled by config; hooks and telemetry exporters were not started
 ```
 
 Expected startup lines:

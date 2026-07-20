@@ -1354,6 +1354,7 @@ function readNestedRecord(
 }
 
 let cachedMcpServerHosts: Map<string, string> | undefined;
+let cachedMcpServerHostsConfigPath: string | undefined;
 
 function resolveOpenClawConfigPath(): string {
   const explicit = process.env.OPENCLAW_CONFIG_PATH?.trim();
@@ -1368,12 +1369,12 @@ function resolveOpenClawConfigPath(): string {
 }
 
 function loadConfiguredMcpServerHosts(): Map<string, string> {
-  if (cachedMcpServerHosts) {
+  const configPath = resolveOpenClawConfigPath();
+  if (cachedMcpServerHosts && cachedMcpServerHostsConfigPath === configPath) {
     return cachedMcpServerHosts;
   }
   const hosts = new Map<string, string>();
   try {
-    const configPath = resolveOpenClawConfigPath();
     const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<string, unknown>;
     const mcp = isRecord(parsed.mcp) ? parsed.mcp : undefined;
     const servers = isRecord(mcp?.servers) ? mcp?.servers : undefined;
@@ -1393,6 +1394,7 @@ function loadConfiguredMcpServerHosts(): Map<string, string> {
   } catch {
     // Ignore missing or unreadable config; MCP host is optional enrichment.
   }
+  cachedMcpServerHostsConfigPath = configPath;
   cachedMcpServerHosts = hosts;
   return hosts;
 }

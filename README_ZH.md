@@ -13,7 +13,7 @@
 
 ## 安装
 
-`install.sh` 是唯一的 OSS 安装/升级入口，首次安装和升级都使用它。
+Linux/macOS 使用 `install.sh`，Windows 使用 `install.ps1`；二者都支持首次安装和升级。
 
 ### GTrace
 
@@ -26,7 +26,8 @@ OSS_ENDPOINT=https://<你的-oss-root> \
   --type gtrace \
   --endpoint http://<dataway-host> \
   --x-token <client_token> \
-  --tag env=prod
+  --tag 'agent_id=<你的_agent_id>' \
+  --tag 'agent_name=<你的_agent_name>'
 ```
 
 ### 标准 OTLP
@@ -39,7 +40,24 @@ OSS_ENDPOINT=https://<你的-oss-root> \
 /tmp/openclaw-otel-plugin-install.sh latest \
   --type otlp \
   --endpoint http://127.0.0.1:4318/otel \
-  --tag env=prod
+  --tag 'agent_id=<你的_agent_id>' \
+  --tag 'agent_name=<你的_agent_name>'
+```
+
+### Windows PowerShell
+
+```powershell
+Invoke-WebRequest "https://<你的-oss-root>/openclaw-otel-plugin/install.ps1" -OutFile "$env:TEMP\openclaw-otel-plugin-install.ps1"
+
+& "$env:TEMP\openclaw-otel-plugin-install.ps1" latest `
+  -OssEndpoint "https://<你的-oss-root>" `
+  -Type gtrace `
+  -Endpoint "http://<dataway-host>" `
+  -XToken "<client_token>" `
+  -Tag @(
+    "agent_id=<你的_agent_id>",
+    "agent_name=<你的_agent_name>"
+  )
 ```
 
 ### 源码安装
@@ -48,7 +66,7 @@ OSS_ENDPOINT=https://<你的-oss-root> \
 
 ## 升级
 
-如果插件已经安装，`install.sh` 会自动复用现有 `~/.openclaw/openclaw.json` 里的：
+如果插件已经安装，安装器会自动复用现有配置，并保留已有的 `config.enabled` 开关值：
 
 - `endpoint`
 - `headers.X-Token`
@@ -84,6 +102,7 @@ OSS_ENDPOINT=https://<你的-oss-root> \
       "openclaw-otel-plugin": {
         "enabled": true,
         "config": {
+          "enabled": true,
           "endpoint": "http://127.0.0.1:4318/otel",
           "tracePath": "v1/traces",
           "metricsPath": "v1/metrics",
@@ -105,6 +124,7 @@ OSS_ENDPOINT=https://<你的-oss-root> \
 
 关键字段：
 
+- `enabled`（`config` 内）：插件 telemetry 总开关；`true` 时注册 hook 并上报 traces/metrics，`false` 时不注册 hook、不启动 exporter，也不上报数据
 - `endpoint`：接收端基础地址
 - `tracePath`：trace 写入路径
 - `metricsPath`：metrics 写入路径
@@ -125,11 +145,23 @@ OSS_ENDPOINT=https://<你的-oss-root> \
 tail -n 50 ~/.openclaw/logs/gateway.log
 ```
 
+Windows PowerShell 可使用：
+
+```powershell
+Get-Content "$HOME\.openclaw\logs\gateway.log" -Tail 50
+```
+
 正常启动时应看到：
 
 ```text
 [otel-plugin] trace exporter enabled (http/protobuf) -> ...
 [otel-plugin] metric exporter enabled (http/protobuf) -> ...
+```
+
+当 `config.enabled` 为 `false` 时应看到：
+
+```text
+[otel-plugin] disabled by config; hooks and telemetry exporters were not started
 ```
 
 如果开启了日志导出，还应看到：
