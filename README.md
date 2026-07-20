@@ -46,11 +46,11 @@ OSS_ENDPOINT=https://<your-oss-root> \
 
 ### Windows PowerShell
 
-The command now matches the Qoder plugin flow and executes the GitHub Release installer in memory, avoiding local `.ps1` execution-policy restrictions. GitHub `releases/latest` does not resolve to a prerelease, so the RC requires an exact version:
+The command matches the Qoder plugin flow and executes the GitHub Release installer in memory, avoiding local `.ps1` execution-policy restrictions:
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.7.1-rc/install-release.ps1))) `
-  -Version v0.7.1-rc `
+& ([scriptblock]::Create((irm https://github.com/GuanceCloud/openclaw-otel-plugin/releases/latest/download/install-release.ps1))) `
+  -Version latest `
   -Type gtrace `
   -Endpoint "http://<dataway-host>" `
   -XToken "<client_token>" `
@@ -60,7 +60,7 @@ The command now matches the Qoder plugin flow and executes the GitHub Release in
   )
 ```
 
-After a stable release is published, use `releases/latest/download/install-release.ps1` with `-Version latest`. For OSS delivery, additionally pass `-OssEndpoint "https://<your-oss-root>"`. Never place real tokens, `agent_id`, or `agent_name` values in documentation, source-controlled scripts, or issue reports.
+For a pinned version, use `releases/download/vX.Y.Z/install-release.ps1` with `-Version vX.Y.Z`. For OSS delivery, additionally pass `-OssEndpoint "https://<your-oss-root>"`. Never place real tokens, `agent_id`, or `agent_name` values in documentation, source-controlled scripts, or issue reports.
 
 ### Source Install
 
