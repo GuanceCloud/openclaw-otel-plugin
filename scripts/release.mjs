@@ -91,6 +91,7 @@ async function main() {
   await fs.rm(`${latestArchivePath}.sha256`, { force: true });
   await fs.rm(path.join(outputDir, "install.sh"), { force: true });
   await fs.rm(path.join(outputDir, "install.ps1"), { force: true });
+  await fs.rm(path.join(outputDir, "install-release.ps1"), { force: true });
   await fs.rm(path.join(outputDir, "update.sh"), { force: true });
   await fs.mkdir(stagingDir, { recursive: true });
 
@@ -123,6 +124,7 @@ async function main() {
   const latestChecksumPath = await writeSha256(latestArchivePath);
   const installScriptPath = await copyReleaseSidecar("scripts/install.sh", "install.sh", 0o755);
   const windowsInstallScriptPath = await copyReleaseSidecar("scripts/install.ps1", "install.ps1");
+  const windowsReleaseInstallScriptPath = await copyReleaseSidecar("scripts/install.ps1", "install-release.ps1");
 
   log(`artifact: ${path.relative(repoRoot, archivePath)}`);
   log(`checksum: ${path.relative(repoRoot, checksumPath)}`);
@@ -130,6 +132,7 @@ async function main() {
   log(`latest checksum: ${path.relative(repoRoot, latestChecksumPath)}`);
   log(`installer: ${path.relative(repoRoot, installScriptPath)}`);
   log(`windows installer: ${path.relative(repoRoot, windowsInstallScriptPath)}`);
+  log(`windows release installer: ${path.relative(repoRoot, windowsReleaseInstallScriptPath)}`);
 }
 
 main().catch((error) => {

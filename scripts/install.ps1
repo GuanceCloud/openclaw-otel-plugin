@@ -8,6 +8,7 @@ param(
   [string]$XToken,
   [string[]]$Tag = @(),
   [string]$OssEndpoint = $env:OSS_ENDPOINT,
+  [string]$GitHubRepository = "GuanceCloud/openclaw-otel-plugin",
   [string]$PluginDir = $env:OPENCLAW_PLUGIN_DIR,
   [string]$ConfigFile = $env:OPENCLAW_CONFIG_FILE,
   [string]$PluginName = "openclaw-otel-plugin",
@@ -54,6 +55,15 @@ function Resolve-DownloadBaseUrl {
   $root = $OssEndpoint.TrimEnd("/")
   if ($root.EndsWith("/$PluginName")) { return $root }
   return "$root/$PluginName"
+}
+
+function Resolve-GitHubArchiveUrl([string]$RequestedVersion) {
+  $releaseRoot = "https://github.com/$GitHubRepository/releases"
+  if ([string]::IsNullOrWhiteSpace($RequestedVersion) -or $RequestedVersion -eq "latest") {
+    return "$releaseRoot/latest/download/$PluginName.tar.gz"
+  }
+  $normalizedVersion = $RequestedVersion.TrimStart("v")
+  return "$releaseRoot/download/v$normalizedVersion/$PluginName-v$normalizedVersion.tar.gz"
 }
 
 function Download-Archive([string]$Url, [string]$Target) {
@@ -122,12 +132,16 @@ try {
     Write-InstallLog "using local archive $Version"
     Copy-Item -LiteralPath $Version -Destination $archivePath
   } else {
-    $downloadBase = Resolve-DownloadBaseUrl
-    if ([string]::IsNullOrWhiteSpace($Version) -or $Version -eq "latest") {
-      Download-Archive "$downloadBase/$PluginName.tar.gz" $archivePath
+    if ([string]::IsNullOrWhiteSpace($OssEndpoint)) {
+      Download-Archive (Resolve-GitHubArchiveUrl $Version) $archivePath
     } else {
-      $normalizedVersion = $Version.TrimStart("v")
-      Download-Archive "$downloadBase/$PluginName-v$normalizedVersion.tar.gz" $archivePath
+      $downloadBase = Resolve-DownloadBaseUrl
+      if ([string]::IsNullOrWhiteSpace($Version) -or $Version -eq "latest") {
+        Download-Archive "$downloadBase/$PluginName.tar.gz" $archivePath
+      } else {
+        $normalizedVersion = $Version.TrimStart("v")
+        Download-Archive "$downloadBase/$PluginName-v$normalizedVersion.tar.gz" $archivePath
+      }
     }
   }
 

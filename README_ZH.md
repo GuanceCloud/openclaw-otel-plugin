@@ -46,19 +46,11 @@ OSS_ENDPOINT=https://<你的-oss-root> \
 
 ### Windows PowerShell
 
-从 GitHub Release 安装 prerelease 时必须指定准确版本；GitHub 的 `releases/latest` 不会指向 prerelease。下面的执行策略调整仅对当前 PowerShell 窗口生效，关闭窗口后自动恢复：
+安装命令与 Qoder 插件保持一致，直接在内存中执行 GitHub Release 的安装器，因此不受本机 `.ps1` 执行策略限制。GitHub 的 `releases/latest` 不会指向 prerelease，所以 RC 阶段必须指定准确版本：
 
 ```powershell
-$version = "v0.7.1-rc"
-$releaseBase = "https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/$version"
-$installer = "$env:TEMP\openclaw-otel-plugin-install.ps1"
-
-Invoke-WebRequest "$releaseBase/install.ps1" -OutFile $installer
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-Unblock-File $installer
-
-& $installer `
-  "$releaseBase/openclaw-otel-plugin-$version.tar.gz" `
+& ([scriptblock]::Create((irm https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.7.1-rc/install-release.ps1))) `
+  -Version v0.7.1-rc `
   -Type gtrace `
   -Endpoint "http://<dataway-host>" `
   -XToken "<client_token>" `
@@ -68,7 +60,7 @@ Unblock-File $installer
   )
 ```
 
-使用 OSS 时，将安装器下载地址改为 `https://<你的-oss-root>/openclaw-otel-plugin/install.ps1`，并以 `latest -OssEndpoint "https://<你的-oss-root>"` 作为安装器的前两个参数。不要把真实 token、`agent_id` 或 `agent_name` 写入文档、脚本仓库或问题记录。
+正式版发布后，可将安装器 URL 改为 `releases/latest/download/install-release.ps1`，同时使用 `-Version latest`。使用 OSS 时额外传入 `-OssEndpoint "https://<你的-oss-root>"`。不要把真实 token、`agent_id` 或 `agent_name` 写入文档、脚本仓库或问题记录。
 
 ### 源码安装
 
