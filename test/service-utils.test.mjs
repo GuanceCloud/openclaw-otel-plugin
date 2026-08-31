@@ -17,6 +17,7 @@ import {
   computeSessionMetricDelta,
   durationMsToSeconds,
   loadSnapshotForEvent,
+  normalizeUserInputPreview,
   normalizeFinalStatus,
   normalizeOutcome,
   readReplayFinalizationState,
@@ -53,6 +54,37 @@ test("first-chunk span attributes require a unique contained model call and are 
   assert.deepEqual(takeModelFirstChunkAttrs(retry, "openai", "m", 1000, 2000), {});
   assert.deepEqual(takeModelFirstChunkAttrs(undefined, "openai", "m", 1000, 2000), {});
   assert.deepEqual(takeModelFirstChunkAttrs({ ...run, modelCallTimingsOverflow: true }, "openai", "m", 1000, 2000), {});
+});
+
+test("normalizeUserInputPreview removes untrusted conversation metadata", () => {
+  assert.equal(
+    normalizeUserInputPreview(
+      "Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"oc_123\"}\n```\n帮我查看今天的待办",
+    ),
+    "帮我查看今天的待办",
+  );
+});
+
+test("normalizeUserInputPreview retains sender metadata compatibility", () => {
+  assert.equal(
+    normalizeUserInputPreview(
+      "Sender (untrusted metadata):\n```json\n{\"id\":\"ou_123\"}\n```\n你好",
+    ),
+    "你好",
+  );
+});
+
+test("normalizeUserInputPreview leaves ordinary user input unchanged", () => {
+  assert.equal(normalizeUserInputPreview("  普通消息  "), "普通消息");
+});
+
+test("normalizeUserInputPreview omits metadata-only input instead of restoring it", () => {
+  assert.equal(
+    normalizeUserInputPreview(
+      "Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"oc_123\"}\n```",
+    ),
+    undefined,
+  );
 });
 
 test("normalizeFinalStatus maps upstream terminal aliases to canonical values", () => {

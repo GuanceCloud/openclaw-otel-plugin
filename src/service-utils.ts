@@ -1289,11 +1289,11 @@ export function normalizeUserInputPreview(text: string | undefined): string | un
   }
 
   normalized = normalized
-    .replace(/^Sender \(untrusted metadata\):\s*```json[\s\S]*?```\s*/i, "")
+    .replace(/^(?:Sender|Conversation info) \(untrusted metadata\):\s*```json[\s\S]*?```\s*/i, "")
     .replace(/^\[[^\]]+\]\s*/, "")
     .trim();
 
-  return clipPreview(normalized) ?? clipPreview(text);
+  return clipPreview(normalized);
 }
 
 export function normalizeReasoningPreview(text: string | undefined): string | undefined {
