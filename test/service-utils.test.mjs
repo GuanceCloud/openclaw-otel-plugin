@@ -56,10 +56,10 @@ test("first-chunk span attributes require a unique contained model call and are 
   assert.deepEqual(takeModelFirstChunkAttrs({ ...run, modelCallTimingsOverflow: true }, "openai", "m", 1000, 2000), {});
 });
 
-test("normalizeUserInputPreview removes untrusted conversation metadata", () => {
+test("normalizeUserInputPreview removes consecutive untrusted metadata blocks", () => {
   assert.equal(
     normalizeUserInputPreview(
-      "Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"oc_123\"}\n```\n帮我查看今天的待办",
+      "Conversation info (untrusted metadata):\n```json\n{\"chat_id\":\"oc_123\"}\n```\n\nSender (untrusted metadata):\n```json\n{\"id\":\"ou_123\"}\n```\n\n帮我查看今天的待办",
     ),
     "帮我查看今天的待办",
   );

@@ -1289,7 +1289,7 @@ export function normalizeUserInputPreview(text: string | undefined): string | un
   }
 
   normalized = normalized
-    .replace(/^(?:Sender|Conversation info) \(untrusted metadata\):\s*```json[\s\S]*?```\s*/i, "")
+    .replace(/^(?:(?:Sender|Conversation info) \(untrusted metadata\):\s*```json[\s\S]*?```\s*)+/i, "")
     .replace(/^\[[^\]]+\]\s*/, "")
     .trim();
 
