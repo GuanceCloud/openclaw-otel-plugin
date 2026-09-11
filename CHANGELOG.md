@@ -3,7 +3,7 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-11
 
-Release: `v0.7.3-rc.3` (pre-release; stable latest remains `v0.7.2`).
+Release: `v0.7.3-rc.4` (pre-release; stable latest remains `v0.7.2`).
 
 ### Input Preview Privacy
 
@@ -15,6 +15,8 @@ Release: `v0.7.3-rc.3` (pre-release; stable latest remains `v0.7.2`).
 - Added `gen_ai.client.operation.time_to_first_chunk` (seconds) from native model-call terminal diagnostics, with canonical low-cardinality tags and bounded per-call deduplication.
 - Added standard `gen_ai.response.time_to_first_chunk` attributes (seconds) to uniquely matched runtime/transcript LLM spans, replacing the unpublished custom first-chunk event without changing span structure or duration.
 - Match native model-call timing against every run ID associated with an active trace, including runtime-generated secondary IDs.
+- Subscribe to OpenClaw's trusted diagnostic metadata stream, because its public plugin event stream intentionally excludes native `model.call.*` timing events.
+- Encode the standard span attribute for the current trace backend as `gen_ai_response_time_to_first_chunk`; its source semantic-convention name remains `gen_ai.response.time_to_first_chunk`.
 - Documented first-response observation semantics (not strict effective-token TTFT), failure samples, and omission of missing/invalid/replayed timing data.
 
 ## 2026-07-15

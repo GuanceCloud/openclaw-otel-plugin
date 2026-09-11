@@ -56,6 +56,13 @@ test("first-chunk span attributes require a unique contained model call and are 
   assert.deepEqual(takeModelFirstChunkAttrs({ ...run, modelCallTimingsOverflow: true }, "openai", "m", 1000, 2000), {});
 });
 
+test("traceAttrs encodes the standard first-chunk attribute for the trace backend", () => {
+  assert.equal(
+    traceAttrs({ "gen_ai.response.time_to_first_chunk": 1.796 })["gen_ai.response_time_to_first_chunk"],
+    1.796,
+  );
+});
+
 test("normalizeUserInputPreview removes consecutive untrusted metadata blocks", () => {
   assert.equal(
     normalizeUserInputPreview(

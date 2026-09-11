@@ -163,6 +163,10 @@ function collectTracePayloadSummary(
           : typeof resourceAttrs.agent_version === "string"
             ? String(resourceAttrs.agent_version)
             : undefined,
+        gen_ai_response_time_to_first_chunk:
+          typeof attrs["gen_ai.response_time_to_first_chunk"] === "number"
+            ? attrs["gen_ai.response_time_to_first_chunk"]
+            : undefined,
       };
       return summary;
     })

@@ -865,6 +865,13 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       const rawEndTs = typeof turn.endedAt === "number" ? turn.endedAt : rawStartTs + 1;
       const startTs = Math.max(rawStartTs, run.mainStartTs);
       const endTs = Math.max(rawEndTs, startTs + 1);
+      const firstChunkAttrs = takeModelFirstChunkAttrs(
+        run,
+        turn.provider ?? snapshot?.lastProvider,
+        turn.model ?? snapshot?.lastModel,
+        startTs,
+        endTs,
+      );
       if (offset === 0 && typeof run.orchestrationCursorTs === "number") {
         emitRuntimeOrchestrationSpan(
           evt,
@@ -890,8 +897,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
             __suppress_session_output_summary: true,
             session_update_time: endTs,
             turn_index: index + 1,
-            ...takeModelFirstChunkAttrs(run, turn.provider ?? snapshot?.lastProvider,
-              turn.model ?? snapshot?.lastModel, startTs, endTs),
+            ...firstChunkAttrs,
             "span.kind": "model",
             "openclaw.input.preview": turn.inputPreview,
             "openclaw.output.preview": outputPreview,

@@ -2,7 +2,7 @@ import type {
   DiagnosticEventPayload,
   OpenClawPluginService,
 } from "openclaw/plugin-sdk";
-import { onDiagnosticEvent } from "openclaw/plugin-sdk";
+import { onInternalDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { OtelPluginConfig } from "./config.js";
 import { createDiagnosticEventHandler } from "./diagnostic-event-handler.js";
 import { startOtelBootstrap } from "./otel-bootstrap.js";
@@ -1861,7 +1861,9 @@ export function createOtelPluginService(
         markReplayWatermark,
       });
 
-      unsubscribeDiagnostic = onDiagnosticEvent(handleDiagnosticEvent);
+      // Model-call timing is emitted by OpenClaw as a trusted diagnostic event.
+      // This subscription exposes event metadata only, never the private model-content payload.
+      unsubscribeDiagnostic = onInternalDiagnosticEvent((evt) => handleDiagnosticEvent(evt));
 
       reportSessionMetrics();
       sessionMetricsInterval = setInterval(reportSessionMetrics, config.flushIntervalMs);
