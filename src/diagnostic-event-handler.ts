@@ -161,7 +161,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     emitDiagnosticLog,
     emitRuntimeOrchestrationSpan,
     ensureRuntimeLifecycleSpans,
-    emitModelTurnDebugLog,
+    emitModelTurnDebugLog = () => {},
     getActiveSkillCtx,
     syncTranscriptSkillSummary,
     emitTranscriptModelSpans,
@@ -372,6 +372,9 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     );
   };
 
+  const runHasId = (run: ActiveRunSpan | undefined, runId: string | undefined): boolean =>
+    Boolean(run && runId && (run.runId === runId || run.runIds?.has(runId)));
+
   return (evt: DiagnosticEventPayload) => {
     cleanupExpiredRoots();
 
@@ -382,7 +385,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const validLatency = typeof latencyMs === "number" && Number.isFinite(latencyMs)
           && latencyMs >= 0 && Number.isFinite(evt.durationMs) && evt.durationMs >= latencyMs;
         const run = getRun(evt, false);
-        if (run?.runId === evt.runId && evt.callId && Number.isFinite(evt.ts)
+        if (runHasId(run, evt.runId) && evt.callId && Number.isFinite(evt.ts)
           && Number.isFinite(evt.durationMs) && evt.durationMs >= 0) {
           const timings = run.modelCallTimings ??= new Map();
           if (!timings.has(evt.callId)) {
@@ -391,6 +394,17 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               provider: evt.provider, model: evt.model,
               startTs: evt.ts - evt.durationMs, endTs: evt.ts,
               firstChunkSeconds: validLatency ? latencyMs! / 1000 : undefined,
+            });
+            emitModelTurnDebugLog({
+              source: "native_model_call",
+              session_key: evt.sessionKey,
+              session_id: evt.sessionId,
+              run_id: evt.runId,
+              model_call_id: evt.callId,
+              provider: evt.provider,
+              model: evt.model,
+              duration_ms: evt.durationMs,
+              time_to_first_chunk_seconds: validLatency ? latencyMs! / 1000 : undefined,
             });
           }
         }

@@ -58,6 +58,19 @@ test("first-chunk timing ignores absent or invalid observations and start events
   assert.equal(records[0][0], 0.1);
 });
 
+test("first-chunk timing accepts a secondary run ID owned by the active trace", () => {
+  const records = [];
+  const run = { runId: "primary", runIds: new Set(["primary", "native"]), span: { addEvent() {} } };
+  const handler = createDiagnosticEventHandler({
+    instruments: { genAiClientTimeToFirstChunk: { record: (...args) => records.push(args) } },
+    cleanupExpiredRoots() {}, getRun: () => run, emitModelTurnDebugLog() {},
+  });
+  handler({ type: "model.call.completed", runId: "native", callId: "call", provider: "openai", model: "m",
+    ts: 2000, durationMs: 1000, timeToFirstByteMs: 200 });
+  assert.equal(records.length, 1);
+  assert.equal(run.modelCallTimings.get("call").firstChunkSeconds, 0.2);
+});
+
 function createFakeSpan(name) {
   return {
     name,
