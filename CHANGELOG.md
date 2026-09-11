@@ -1,13 +1,14 @@
 # Changelog
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
-## Unreleased
-
-- Fixed input previews leaking `Conversation info (untrusted metadata)` session context.
-
 ## 2026-09-11
 
-Release: `v0.7.3-rc.1` (pre-release; stable latest remains `v0.7.2`).
+Release: `v0.7.3-rc.2` (pre-release; stable latest remains `v0.7.2`).
+
+### Input Preview Privacy
+
+- Removed consecutive `Conversation info (untrusted metadata)` and `Sender (untrusted metadata)` blocks before capturing the input preview.
+- Metadata-only input now yields no preview instead of restoring the original metadata through a fallback.
 
 ### First Response Timing
 
