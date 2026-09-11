@@ -4,6 +4,8 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 ## 2026-09-11
 
+Release: `v0.7.3-rc.1` (pre-release; stable latest remains `v0.7.2`).
+
 ### First Response Timing
 
 - Added `gen_ai.client.operation.time_to_first_chunk` (seconds) from native model-call terminal diagnostics, with canonical low-cardinality tags and bounded per-call deduplication.

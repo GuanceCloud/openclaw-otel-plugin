@@ -7,6 +7,7 @@
 - 版本号以 [package.json](./package.json) 的 `version` 为准
 - 建议遵循 semver：`MAJOR.MINOR.PATCH`
 - Git tag 建议使用 `vX.Y.Z`，例如 `v0.2.0`
+- RC 使用 `vX.Y.Z-rc.N`，GitHub Release 标记为 pre-release，不更新正式版 latest；OSS 如需分发，仅上传带版本包及其校验文件。
 
 ## 环境要求
 
