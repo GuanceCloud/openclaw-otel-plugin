@@ -34,6 +34,7 @@ import {
   skillSpanName,
   stringAttrs,
   traceAttrs,
+  takeModelFirstChunkAttrs,
 } from "./service-utils.js";
 
 type SessionEvent = {
@@ -889,6 +890,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
             __suppress_session_output_summary: true,
             session_update_time: endTs,
             turn_index: index + 1,
+            ...takeModelFirstChunkAttrs(run, turn.provider ?? snapshot?.lastProvider,
+              turn.model ?? snapshot?.lastModel, startTs, endTs),
             "span.kind": "model",
             "openclaw.input.preview": turn.inputPreview,
             "openclaw.output.preview": outputPreview,

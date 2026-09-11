@@ -2,6 +2,14 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-09-11
+
+### First Response Timing
+
+- Added `gen_ai.client.operation.time_to_first_chunk` (seconds) from native model-call terminal diagnostics, with canonical low-cardinality tags and bounded per-call deduplication.
+- Added standard `gen_ai.response.time_to_first_chunk` attributes (seconds) to uniquely matched runtime/transcript LLM spans, replacing the unpublished custom first-chunk event without changing span structure or duration.
+- Documented first-response observation semantics (not strict effective-token TTFT), failure samples, and omission of missing/invalid/replayed timing data.
+
 ## 2026-07-15
 
 ### Result Status Rename

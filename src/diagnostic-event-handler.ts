@@ -22,6 +22,7 @@ import {
   setError,
   stringAttrs,
   traceAttrs,
+  takeModelFirstChunkAttrs,
 } from "./service-utils.js";
 import {
   shouldCloseForSessionState,
@@ -135,6 +136,8 @@ type DiagnosticEventHandlerDeps = {
 };
 
 export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
+  // Bound deduplication state for a long-lived gateway; retries have distinct call IDs.
+  const recordedFirstChunks = new Map<string, number>();
   const {
     trace,
     instruments,
@@ -373,6 +376,51 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     cleanupExpiredRoots();
 
     switch (evt.type) {
+      case "model.call.completed":
+      case "model.call.error": {
+        const latencyMs = evt.timeToFirstByteMs;
+        const validLatency = typeof latencyMs === "number" && Number.isFinite(latencyMs)
+          && latencyMs >= 0 && Number.isFinite(evt.durationMs) && evt.durationMs >= latencyMs;
+        const run = getRun(evt, false);
+        if (run?.runId === evt.runId && evt.callId && Number.isFinite(evt.ts)
+          && Number.isFinite(evt.durationMs) && evt.durationMs >= 0) {
+          const timings = run.modelCallTimings ??= new Map();
+          if (!timings.has(evt.callId)) {
+            if (timings.size >= 1000) run.modelCallTimingsOverflow = true;
+            else timings.set(evt.callId, {
+              provider: evt.provider, model: evt.model,
+              startTs: evt.ts - evt.durationMs, endTs: evt.ts,
+              firstChunkSeconds: validLatency ? latencyMs! / 1000 : undefined,
+            });
+          }
+        }
+        if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs) || latencyMs < 0
+          || !Number.isFinite(evt.durationMs) || evt.durationMs < latencyMs
+          || !evt.runId || !evt.callId) {
+          break;
+        }
+        const now = Date.now();
+        for (const [key, recordedAt] of recordedFirstChunks) {
+          if (now - recordedAt < 60 * 60 * 1000) break;
+          recordedFirstChunks.delete(key);
+        }
+        const key = JSON.stringify([evt.sessionId, evt.sessionKey, evt.runId, evt.callId]);
+        if (recordedFirstChunks.has(key)) break;
+        const status = evt.type === "model.call.error" ? "error" : "completed";
+        const attrs = {
+          agent_runtime: "openclaw",
+          operation_name: "chat",
+          provider_name: evt.provider,
+          request_model: evt.model,
+          status,
+        };
+        instruments.genAiClientTimeToFirstChunk?.record(latencyMs / 1000, attrs);
+        recordedFirstChunks.set(key, now);
+        if (recordedFirstChunks.size > 10000) {
+          recordedFirstChunks.delete(recordedFirstChunks.keys().next().value!);
+        }
+        break;
+      }
       case "session.state": {
         const existingRun = evt.state === "processing"
           ? getRun(evt, false)
@@ -732,6 +780,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         if (run?.modelSpan) {
           run.modelSpan.setAttributes(traceAttrs({
             ...enrichedModelUsageAttrs,
+            ...takeModelFirstChunkAttrs(run, evt.provider, evt.model, run.modelStartTs, evt.ts),
             session_update_time: evt.ts,
           }));
           run.modelSpan.setStatus({ code: SpanStatusCode.OK });
@@ -760,7 +809,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
             "llm",
             evt,
-            enrichedModelUsageAttrs,
+            {
+              ...enrichedModelUsageAttrs,
+              ...takeModelFirstChunkAttrs(run, evt.provider, evt.model, modelStartTs, evt.ts),
+            },
             evt.durationMs,
             getActiveSkillCtx(run) ?? run?.ctx,
           );

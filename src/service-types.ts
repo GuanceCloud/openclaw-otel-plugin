@@ -122,6 +122,15 @@ export type ActiveRunSpan = {
   modelCtx?: any;
   modelStartTs?: number;
   modelEndTs?: number;
+  modelCallTimings?: Map<string, {
+    provider: string;
+    model: string;
+    startTs: number;
+    endTs: number;
+    firstChunkSeconds?: number;
+    used?: boolean;
+  }>;
+  modelCallTimingsOverflow?: boolean;
   aggregate: RunAggregate;
 };
 
@@ -144,6 +153,7 @@ export type RuntimeMetadata = {
 export type MetricInstruments = {
   genAiWorkflowDuration: any;
   genAiClientOperationDuration: any;
+  genAiClientTimeToFirstChunk: any;
   genAiClientTokenUsage: any;
   genAiAgentOperationCount: any;
   genAiAgentOperationDuration: any;

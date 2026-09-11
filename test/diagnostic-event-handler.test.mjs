@@ -3,6 +3,61 @@ import assert from "node:assert/strict";
 
 import { createDiagnosticEventHandler } from "../dist/src/diagnostic-event-handler.js";
 
+test("first-chunk timing records per-call seconds without root events or cross-run timing", () => {
+  const records = [];
+  const events = [];
+  const run = { runId: "run-1", span: { addEvent: (...args) => events.push(args) } };
+  const handler = createDiagnosticEventHandler({
+    instruments: { genAiClientTimeToFirstChunk: { record: (...args) => records.push(args) } },
+    cleanupExpiredRoots() {},
+    getRun: () => run,
+  });
+  const call = {
+    type: "model.call.completed", runId: "run-1", callId: "call-1",
+    sessionId: "session-1", provider: "openai", model: "model-a",
+    ts: 5000, durationMs: 2000, timeToFirstByteMs: 250,
+  };
+  handler(call);
+  handler(call);
+  handler({ ...call, callId: "retry", type: "model.call.error", timeToFirstByteMs: 0 });
+  handler({ ...call, runId: "run-2" });
+  assert.deepEqual(records.map(([value]) => value), [0.25, 0, 0.25]);
+  assert.deepEqual(records[0][1], {
+    agent_runtime: "openclaw", operation_name: "chat", provider_name: "openai",
+    request_model: "model-a", status: "completed",
+  });
+  assert.equal(records[1][1].status, "error");
+  assert.equal(events.length, 0);
+  assert.equal(run.modelCallTimings.size, 2);
+  assert.equal(run.modelCallTimings.get("call-1").firstChunkSeconds, 0.25);
+  assert.equal(run.modelCallTimings.get("retry").firstChunkSeconds, 0);
+});
+
+test("first-chunk timing ignores absent or invalid observations and start events", () => {
+  const records = [];
+  const handler = createDiagnosticEventHandler({
+    instruments: { genAiClientTimeToFirstChunk: { record: (...args) => records.push(args) } },
+    cleanupExpiredRoots() {},
+    getRun: () => undefined,
+  });
+  const call = {
+    type: "model.call.error", runId: "run", callId: "call",
+    provider: "openai", model: "model-a", durationMs: 1000, ts: 2000,
+  };
+  for (const timeToFirstByteMs of [undefined, null, -1, NaN, Infinity, 1001, "200"]) {
+    handler({ ...call, timeToFirstByteMs });
+  }
+  for (const durationMs of [undefined, NaN, Infinity, -1]) {
+    handler({ ...call, timeToFirstByteMs: 100, durationMs });
+  }
+  handler({ ...call, callId: undefined, timeToFirstByteMs: 100 });
+  handler({ ...call, type: "model.call.started" });
+  assert.equal(records.length, 0);
+  handler({ ...call, timeToFirstByteMs: 100 });
+  assert.equal(records.length, 1);
+  assert.equal(records[0][0], 0.1);
+});
+
 function createFakeSpan(name) {
   return {
     name,
@@ -20,6 +75,37 @@ function createFakeSpan(name) {
     addEvent() {},
   };
 }
+
+test("native first response is exported as a standard llm tag before span end", () => {
+  const children = [];
+  const run = { runId: "r", ctx: "run", mainStartTs: 1000 };
+  const handler = createDiagnosticEventHandler({
+    instruments: {}, SpanStatusCode: { OK: 1 }, SeverityNumber: { INFO: 9 },
+    trace: { setSpan: (_ctx, span) => span },
+    cleanupExpiredRoots() {}, getRun: () => run,
+    loadSessionSnapshot: () => undefined,
+    enrichWithTranscript: (_key, attrs) => attrs,
+    updateAggregateTokens() {}, ensureRuntimeLifecycleSpans: () => run,
+    getActiveSkillCtx: () => undefined,
+    emitDiagnosticLog() {}, emitModelTurnDebugLog() {}, emitRuntimeOrchestrationSpan() {},
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      children.push({ name, attrs, durationMs, parentCtx, span });
+      return { span, effectiveDurationMs: durationMs, startTime: new Date(evt.ts - durationMs), endTime: new Date(evt.ts) };
+    },
+  });
+  handler({ type: "model.call.completed", runId: "r", callId: "c", provider: "p", model: "m",
+    ts: 2000, durationMs: 1000, timeToFirstByteMs: 250 });
+  handler({ type: "model.usage", sessionKey: "s", provider: "p", model: "m", ts: 2000,
+    durationMs: 1000, usage: { input: 1, output: 2 } });
+  assert.equal(children.length, 1);
+  assert.equal(children[0].name, "llm");
+  assert.equal(children[0].attrs["gen_ai.response.time_to_first_chunk"], 0.25);
+  assert.equal(children[0].attrs.time_to_first_chunk_ms, undefined);
+  assert.equal(children[0].durationMs, 1000);
+  assert.equal(children[0].parentCtx, "run");
+  assert.equal(children[0].span.ended, true);
+});
 
 test("message.processed emits assistant span but not standalone thinking span", () => {
   const childCalls = [];

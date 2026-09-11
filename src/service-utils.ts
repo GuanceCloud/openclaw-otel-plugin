@@ -14,6 +14,28 @@ import type {
 } from "./service-types.js";
 
 const PREVIEW_LIMIT = 1200;
+
+export function takeModelFirstChunkAttrs(
+  run: ActiveRunSpan | undefined,
+  provider: string | undefined,
+  model: string | undefined,
+  startTs: number | undefined,
+  endTs: number | undefined,
+): Record<string, number> {
+  if (!run || run.modelCallTimingsOverflow || !provider || !model
+    || !Number.isFinite(startTs) || !Number.isFinite(endTs)) return {};
+  // Count all overlapping calls, including retries without a first response.
+  // Keep consumed entries so a later aggregate span cannot reuse their timing.
+  const calls = [...(run.modelCallTimings?.values() ?? [])].filter((call) =>
+    call.provider === provider && call.model === model
+    && call.startTs < endTs! && call.endTs > startTs!);
+  if (calls.length !== 1) return {};
+  const call = calls[0];
+  if (call.used || call.startTs < startTs! || call.endTs > endTs!
+    || call.firstChunkSeconds === undefined) return {};
+  call.used = true;
+  return { "gen_ai.response.time_to_first_chunk": call.firstChunkSeconds };
+}
 const REASONING_PREVIEW_LIMIT = 360;
 const REPLAY_FINALIZATION_STATE_VERSION = 1;
 const REPLAY_FINALIZATION_STATE_MAX_SESSIONS = 2048;

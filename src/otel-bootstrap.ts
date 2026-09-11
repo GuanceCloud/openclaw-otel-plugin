@@ -436,6 +436,13 @@ export async function startOtelBootstrap(
       description: "GenAI client operation duration in seconds",
       unit: "s",
     }),
+    genAiClientTimeToFirstChunk: meter.createHistogram("gen_ai.client.operation.time_to_first_chunk", {
+      description: "Time to the first observed model response chunk (not first effective token)",
+      unit: "s",
+      advice: {
+        explicitBucketBoundaries: [0, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120],
+      },
+    }),
     genAiClientTokenUsage: meter.createHistogram("gen_ai.client.token.usage", {
       description: "GenAI client input and output token usage",
       unit: "{token}",

@@ -35,8 +35,25 @@ import {
   setError,
   stringAttrs,
   traceAttrs,
+  takeModelFirstChunkAttrs,
   writeReplayFinalizationState,
 } from "../dist/src/service-utils.js";
+
+test("first-chunk span attributes require a unique contained model call and are consumed once", () => {
+  const call = { provider: "openai", model: "m", startTs: 1000, endTs: 2000, firstChunkSeconds: 0.25 };
+  const run = { modelCallTimings: new Map([["a", { ...call }], ["b", { ...call, startTs: 3000, endTs: 4000, firstChunkSeconds: 0 }]]) };
+  assert.deepEqual(takeModelFirstChunkAttrs(run, "other", "m", 1000, 2000), {});
+  assert.deepEqual(takeModelFirstChunkAttrs(run, "openai", "other", 1000, 2000), {});
+  assert.deepEqual(takeModelFirstChunkAttrs(run, "openai", "m", 1500, 2000), {});
+  assert.deepEqual(takeModelFirstChunkAttrs(run, "openai", "m", 0, 5000), {});
+  assert.deepEqual(takeModelFirstChunkAttrs(run, "openai", "m", 1000, 2000), { "gen_ai.response.time_to_first_chunk": 0.25 });
+  assert.deepEqual(takeModelFirstChunkAttrs(run, "openai", "m", 1000, 2000), {});
+  assert.deepEqual(takeModelFirstChunkAttrs(run, "openai", "m", 3000, 4000), { "gen_ai.response.time_to_first_chunk": 0 });
+  const retry = { modelCallTimings: new Map([["a", { ...call }], ["b", { ...call, firstChunkSeconds: undefined }]]) };
+  assert.deepEqual(takeModelFirstChunkAttrs(retry, "openai", "m", 1000, 2000), {});
+  assert.deepEqual(takeModelFirstChunkAttrs(undefined, "openai", "m", 1000, 2000), {});
+  assert.deepEqual(takeModelFirstChunkAttrs({ ...run, modelCallTimingsOverflow: true }, "openai", "m", 1000, 2000), {});
+});
 
 test("normalizeFinalStatus maps upstream terminal aliases to canonical values", () => {
   assert.equal(normalizeFinalStatus("success"), "completed");

@@ -6,6 +6,7 @@
 
 - `gen_ai.workflow.duration`
 - `gen_ai.client.operation.duration`
+- `gen_ai.client.operation.time_to_first_chunk`
 - `gen_ai.client.token.usage`
 - `gen_ai.agent.operation.count`
 - `gen_ai.agent.operation.duration`
@@ -24,7 +25,17 @@
 | `gen_ai.agent.operation.count` | Counter | `1` | 基础：`session_id`, `gen_ai.conversation.id`, `gen_ai.operation.name`, `status`；模型调用：`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`；tool 调用：`gen_ai.tool.name`；skill 调用：`gen_ai.skill.name` | Agent 侧 operation 次数。每个 `llm`、`tool:*`、`skill:*` span 记录 1 个点。 |
 | `gen_ai.agent.operation.duration` | Histogram | `ms` | 与 `gen_ai.client.operation.duration` 使用同一组 operation attrs | Agent 侧 operation 耗时兼容指标，覆盖模型调用、tool 执行和 skill 执行窗口。 |
 
-## Tag 说明
+## 首块响应延迟
+
+`gen_ai.client.operation.time_to_first_chunk` 为 Histogram，单位 `s`。按每次模型调用采集，tags 使用 `agent_runtime`、`operation_name=chat`、`provider_name`、`request_model`、`status`，不携带 session/run/call ID，也不新增 tag alias 双写。
+
+数据来自 OpenClaw `model.call.completed` / `model.call.error` 的 `timeToFirstByteMs`，按调用 ID 去重。只有有限、非负且不超过调用耗时的值才上报；首块后失败的调用仍计入，`status=error`。没有该字段的旧版或运行路径不产生采样点，不补零，也不从 transcript 推算。
+
+看板名称建议使用“首块响应延迟”，可聚合 P50/P95/P99。该字段表示宿主首次观察到响应块的时间，可能是空事件；宿主只观察最终结果时也可能记录最终结果到达时间，因此不等同于首个有效 token 的严格 TTFT，也不代表用户消息到首字的端到端等待时间。
+
+能够唯一关联到 `llm` 的调用，延迟同时写入 Trace tag `gen_ai.response.time_to_first_chunk`（秒），不再生成自定义事件。
+
+## 通用 Tag 说明
 
 | tag | 含义 |
 | --- | --- |

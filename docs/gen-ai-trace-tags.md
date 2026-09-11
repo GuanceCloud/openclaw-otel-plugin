@@ -33,6 +33,18 @@ invoke_agent
 └── assistant
 ```
 
+## 首块响应时间
+
+首块响应时间使用 GenAI 标准属性，写在对应 `llm` span 的 tag 上，不放在 `invoke_agent`，不改变 span 结构或 duration。
+
+| Span tag | 含义 |
+| --- | --- |
+| `gen_ai.response.time_to_first_chunk` | double，单位秒；从模型请求开始到首块响应，例如 `0.25` 表示 250 ms。不是严格有效 token TTFT。 |
+
+来源为 OpenClaw 原生调用终态事件的 `timeToFirstByteMs`，除以 1000。按 call ID 缓存在匹配的活跃 run 中；runtime 或 transcript 生成 `llm` 时，仅在相同 provider/model、span 时间范围完整包含唯一一次调用且无重叠歧义时写入一次。包含多次调用/重试、缺失或迟到数据、纯历史回放均不猜测补值。每个 run 最多缓存 1000 次调用，超限停止关联 tag；不影响指标采集。
+
+不再生成自定义 `model.first_chunk` 事件和 `time_to_first_chunk_ms` 字段。标准定义见 [OpenTelemetry GenAI 属性](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/)，数据源限制见 [首块响应延迟](./gen-ai-metrics.md#首块响应延迟)。
+
 ## Skill 语义边界
 
 - 当前代码把 OpenClaw `skill` 定义为 **agent 执行中的能力层 / orchestration context**，不是一次独立的模型调用
