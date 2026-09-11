@@ -3,12 +3,14 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-11
 
-Release: `v0.7.3-rc.5` (pre-release; stable latest remains `v0.7.2`).
+Release: `v0.7.3-rc.6` (pre-release; stable latest remains `v0.7.2`).
 
 ### OpenClaw 2026.9.3 Compatibility
 
 - Replaced the removed `openclaw/plugin-sdk` root SDK import with the supported focused `plugin-sdk/core` and `plugin-sdk/diagnostic-runtime` entry points.
 - Added a release-bundle regression test that rejects a root `plugin-sdk` runtime import.
+- Retain the first observed `sessionId -> sessionKey` mapping so id-only model diagnostics remain attached to the active `invoke_agent` trace.
+- Fixed the plugin stop path so active requests are concluded before the OTEL SDK flushes buffered spans.
 
 ### Input Preview Privacy
 

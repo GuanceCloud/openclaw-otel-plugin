@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   buildRunScopeAttrs,
   buildTranscriptReplayEvent,
+  createSessionKeyResolver,
   buildGenAiClientModelMetricAttrs,
   buildGenAiClientSkillMetricAttrs,
   buildGenAiClientTokenMetricAttrs,
@@ -39,6 +40,18 @@ import {
   takeModelFirstChunkAttrs,
   writeReplayFinalizationState,
 } from "../dist/src/service-utils.js";
+
+test("session key resolver keeps id-only model diagnostics on the active session", () => {
+  const resolver = createSessionKeyResolver(() => undefined);
+
+  assert.equal(
+    resolver.resolve({ sessionKey: "agent:main:chat:user-1", sessionId: "session-1" }),
+    "agent:main:chat:user-1",
+  );
+  assert.equal(resolver.resolve({ sessionId: "session-1" }), "agent:main:chat:user-1");
+  resolver.clear();
+  assert.equal(resolver.resolve({ sessionId: "session-1" }), "session-1");
+});
 
 test("first-chunk span attributes require a unique contained model call and are consumed once", () => {
   const call = { provider: "openai", model: "m", startTs: 1000, endTs: 2000, firstChunkSeconds: 0.25 };

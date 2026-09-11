@@ -336,6 +336,41 @@ export function sessionIdentity(evt: {
   return evt.sessionKey ?? evt.sessionId;
 }
 
+export function createSessionKeyResolver(
+  resolveSessionKeyById?: (sessionId: string) => string | undefined,
+): {
+  resolve(evt: { sessionKey?: string; sessionId?: string }): string | undefined;
+  clear(): void;
+} {
+  const sessionKeyById = new Map<string, string>();
+
+  return {
+    resolve(evt) {
+      const sessionKey = typeof evt.sessionKey === "string" && evt.sessionKey.trim()
+        ? evt.sessionKey.trim()
+        : undefined;
+      const sessionId = typeof evt.sessionId === "string" && evt.sessionId.trim()
+        ? evt.sessionId.trim()
+        : undefined;
+      if (sessionKey) {
+        if (sessionId) {
+          sessionKeyById.set(sessionId, sessionKey);
+        }
+        return sessionKey;
+      }
+      if (!sessionId) {
+        return undefined;
+      }
+      return sessionKeyById.get(sessionId)
+        ?? resolveSessionKeyById?.(sessionId)
+        ?? sessionId;
+    },
+    clear() {
+      sessionKeyById.clear();
+    },
+  };
+}
+
 export function resolveSessionSpanName(
   evt: { sessionKey?: string; sessionId?: string },
   fallback: string,

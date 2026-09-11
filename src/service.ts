@@ -27,6 +27,7 @@ import {
   buildRunScopeAttrs,
   buildTranscriptReplayEvent,
   clipPreview,
+  createSessionKeyResolver,
   createRunState,
   durationMsToSeconds,
   endSpanSafely,
@@ -93,6 +94,10 @@ export function createOtelPluginService(
   const replayWatermarkBySession = new Map<string, string>();
   const replayTrajectorySourceSeqBySession = new Map<string, number>();
   const pendingTrajectoryReplayRunIdsBySession = new Map<string, Set<string>>();
+  let concludeActiveRequest: ((
+    evt: { sessionKey?: string; sessionId?: string; runId?: string; ts?: number },
+    attrs: Record<string, string | number | boolean>,
+  ) => void) | null = null;
   let requestSequence = 0;
   let recentSessionSweepAt = 0;
   const sessionMetricTokenState = new Map<string, {
@@ -114,6 +119,9 @@ export function createOtelPluginService(
       }
 
       sessionStore = createSessionSnapshotStore(ctx.stateDir);
+      const sessionKeyResolver = createSessionKeyResolver((sessionId) =>
+        sessionStore?.resolveSessionKeyById(sessionId),
+      );
       const runtimeMetadata = resolveRuntimeMetadata(ctx.stateDir);
       const {
         sdk: otelSdk,
@@ -407,13 +415,7 @@ export function createOtelPluginService(
         typeof evt.ts === "number" ? eventTime(evt.ts) : new Date();
 
       const resolveSessionKey = (evt: { sessionKey?: string; sessionId?: string }) => {
-        if (typeof evt.sessionKey === "string" && evt.sessionKey.trim()) {
-          return evt.sessionKey.trim();
-        }
-        if (typeof evt.sessionId === "string" && evt.sessionId.trim()) {
-          return sessionStore?.resolveSessionKeyById(evt.sessionId.trim()) ?? evt.sessionId.trim();
-        }
-        return sessionIdentity(evt);
+        return sessionKeyResolver.resolve(evt) ?? sessionIdentity(evt);
       };
 
       const resolveRunId = (evt: { runId?: string }) =>
@@ -1618,7 +1620,7 @@ export function createOtelPluginService(
         releaseRequestKey(sessionKey, requestKey);
       };
 
-      const concludeActiveRequest = (
+      concludeActiveRequest = (
         evt: { sessionKey?: string; sessionId?: string; runId?: string; ts?: number },
         attrs: Record<string, string | number | boolean>,
       ) => {
@@ -1898,7 +1900,7 @@ export function createOtelPluginService(
       }
       for (const current of Array.from(activeRuns.values())) {
         if (current.sessionIdentity) {
-          concludeActiveRequest(
+          concludeActiveRequest?.(
             {
               sessionKey: current.sessionIdentity,
               runId: current.runId,
@@ -1937,6 +1939,7 @@ export function createOtelPluginService(
       sessionStore = null;
       await sdk?.shutdown();
       sdk = null;
+      concludeActiveRequest = null;
     },
   };
 }
