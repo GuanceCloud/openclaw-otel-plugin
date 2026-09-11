@@ -1,8 +1,10 @@
 import type {
-  DiagnosticEventPayload,
   OpenClawPluginService,
-} from "openclaw/plugin-sdk";
-import { onInternalDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
+} from "openclaw/plugin-sdk/core";
+import {
+  onInternalDiagnosticEvent,
+  type DiagnosticEventPayload,
+} from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { OtelPluginConfig } from "./config.js";
 import { createDiagnosticEventHandler } from "./diagnostic-event-handler.js";
 import { startOtelBootstrap } from "./otel-bootstrap.js";

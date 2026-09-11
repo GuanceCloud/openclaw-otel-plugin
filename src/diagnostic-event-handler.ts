@@ -1,4 +1,4 @@
-import type { DiagnosticEventPayload } from "openclaw/plugin-sdk";
+import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { ActiveRunSpan, MetricInstruments, SessionSnapshot } from "./service-types.js";
 import {
   addEvent,

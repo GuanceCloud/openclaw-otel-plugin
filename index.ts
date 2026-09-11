@@ -1,4 +1,4 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { resolveOtelPluginConfig } from "./src/config.js";
 import { createOtelPluginService } from "./src/service.js";
 

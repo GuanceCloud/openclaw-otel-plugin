@@ -3,7 +3,12 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-11
 
-Release: `v0.7.3-rc.4` (pre-release; stable latest remains `v0.7.2`).
+Release: `v0.7.3-rc.5` (pre-release; stable latest remains `v0.7.2`).
+
+### OpenClaw 2026.9.3 Compatibility
+
+- Replaced the removed `openclaw/plugin-sdk` root SDK import with the supported focused `plugin-sdk/core` and `plugin-sdk/diagnostic-runtime` entry points.
+- Added a release-bundle regression test that rejects a root `plugin-sdk` runtime import.
 
 ### Input Preview Privacy
 

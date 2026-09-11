@@ -9,7 +9,7 @@ await build({
   platform: "node",
   format: "cjs",
   target: "node22",
-  external: ["openclaw/plugin-sdk"],
+  external: ["openclaw/plugin-sdk/*"],
   outfile: "dist/index.cjs",
 });
 
