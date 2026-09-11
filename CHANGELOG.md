@@ -1,6 +1,9 @@
 # Changelog
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
+## Unreleased
+
+- Fixed input previews leaking `Conversation info (untrusted metadata)` session context.
 
 ## 2026-09-11
 
