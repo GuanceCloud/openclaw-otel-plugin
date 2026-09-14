@@ -3,6 +3,16 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-14
 
+Release: `v0.7.3-rc.14` (pre-release; stable latest remains `v0.7.2`).
+
+### Per-Model Tool Context Completion
+
+- Correlate OpenClaw native model calls containing `:model:N` with the matching assistant transcript turn. The first tool-planning `llm` now exports its `gen_ai.output.messages` tool call, including call ID, name, and arguments; later `llm` input retains the preceding user message, tool call, and tool result.
+- Runtime `tool:*` and `skill:*` spans now use their actual observed start and end timestamps instead of an artificial 120 ms duration. A 1 ms minimum is retained only for invalid or equal timestamps.
+- Extend transcript-persistence retry for native LLM preview completion to about 10.7 seconds. This delays export only; it does not alter the LLM span's timestamp or duration.
+
+## 2026-09-14
+
 Release: `v0.7.3-rc.13` (pre-release; stable latest remains `v0.7.2`).
 
 ### SQLite Transcript Preview And Native Span Deduplication
