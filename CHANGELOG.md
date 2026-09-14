@@ -3,6 +3,16 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-14
 
+Release: `v0.7.3-rc.13` (pre-release; stable latest remains `v0.7.2`).
+
+### SQLite Transcript Preview And Native Span Deduplication
+
+- Read OpenClaw v2026.9.4 session transcripts from `agents/<agent>/agent/openclaw-agent.sqlite`, including ordered user and assistant transcript events. Native `llm` spans now receive `gen_ai.input.messages` and `gen_ai.output.messages` after the transcript is persisted.
+- Keep one native `llm` and one terminal `assistant` span when terminal lifecycle events omit a matching `runId`. Per-request emission state is retained on the owning `invoke_agent` root span, preventing transcript replay from duplicating the native model and assistant spans.
+- Verified locally against OpenClaw v2026.9.4: `invoke_agent -> llm + assistant`, native first-response latency, and standard input/output message attributes are exported together.
+
+## 2026-09-14
+
 Release: `v0.7.3-rc.12` (pre-release; stable latest remains `v0.7.2`).
 
 ### Transcript Preview Completion

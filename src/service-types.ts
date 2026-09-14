@@ -7,6 +7,8 @@ export type ActiveRootSpan = {
   ctx: any;
   startedAt: number;
   lastTouchedAt: number;
+  modelSpanEmitted?: boolean;
+  assistantSpanEmitted?: boolean;
 };
 
 export type ActiveSkillSpan = {

@@ -1,10 +1,63 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import os from "node:os";
 import path from "node:path";
 
 import { createSessionSnapshotStore } from "../dist/src/session-store.js";
+
+test("session store reads OpenClaw SQLite transcript messages", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const dbDir = path.join(stateDir, "agents", "main", "agent");
+  fs.mkdirSync(dbDir, { recursive: true });
+  const dbPath = path.join(dbDir, "openclaw-agent.sqlite");
+  const database = new DatabaseSync(dbPath);
+  database.exec(`
+    CREATE TABLE session_nodes (
+      session_key TEXT PRIMARY KEY,
+      current_session_id TEXT NOT NULL,
+      entry_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE transcript_events (
+      session_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      event_json TEXT NOT NULL,
+      PRIMARY KEY (session_id, seq)
+    );
+  `);
+  database.prepare("INSERT INTO session_nodes VALUES (?, ?, ?, ?)").run(
+    "agent:main:sqlite-test",
+    "sqlite-session",
+    JSON.stringify({ createdAt: 1_000, modelProvider: "openai", model: "gpt-test" }),
+    2_000,
+  );
+  const insertEvent = database.prepare("INSERT INTO transcript_events VALUES (?, ?, ?)");
+  insertEvent.run("sqlite-session", 0, JSON.stringify({ type: "session", cwd: "/workspace" }));
+  insertEvent.run("sqlite-session", 1, JSON.stringify({
+    type: "message", timestamp: "2026-09-14T09:00:00.000Z",
+    message: { role: "user", content: "SQLite input", timestamp: 1_100, idempotencyKey: "run-sqlite:user" },
+  }));
+  insertEvent.run("sqlite-session", 2, JSON.stringify({
+    type: "message", timestamp: "2026-09-14T09:00:02.000Z",
+    message: {
+      role: "assistant", content: [{ type: "text", text: "SQLite output" }], timestamp: 1_200,
+      provider: "openai", model: "gpt-test", stopReason: "stop",
+    },
+  }));
+  database.close();
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const snapshot = store.loadSessionSnapshot("agent:main:sqlite-test");
+  assert.ok(snapshot);
+  assert.equal(snapshot.sessionId, "sqlite-session");
+  assert.equal(snapshot.runId, "run-sqlite");
+  assert.equal(snapshot.lastUserText, "SQLite input");
+  assert.equal(snapshot.lastAssistantText, "SQLite output");
+  assert.equal(snapshot.createdAt, 1_000);
+});
 
 test("session store reads sessions index from agents/main and extracts invoked skills", () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));

@@ -167,6 +167,14 @@ function collectTracePayloadSummary(
           typeof attrs["gen_ai.response_time_to_first_chunk"] === "number"
             ? attrs["gen_ai.response_time_to_first_chunk"]
             : undefined,
+        gen_ai_input_messages_length:
+          typeof attrs["gen_ai.input.messages"] === "string"
+            ? attrs["gen_ai.input.messages"].length
+            : undefined,
+        gen_ai_output_messages_length:
+          typeof attrs["gen_ai.output.messages"] === "string"
+            ? attrs["gen_ai.output.messages"].length
+            : undefined,
       };
       return summary;
     })

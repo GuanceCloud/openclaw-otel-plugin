@@ -1,5 +1,5 @@
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
-import type { ActiveRunSpan, MetricInstruments, SessionSnapshot } from "./service-types.js";
+import type { ActiveRootSpan, ActiveRunSpan, MetricInstruments, SessionSnapshot } from "./service-types.js";
 import {
   addEvent,
   buildGenAiClientTokenMetricAttrs,
@@ -67,7 +67,7 @@ type DiagnosticEventHandlerDeps = {
   SeverityNumber: any;
   cleanupExpiredRoots(): void;
   beginRequestTrace(evt: UserSpanEvent & { messageId?: string | number }): void;
-  getRoot(evt: SessionEvent, createIfMissing?: boolean): { span: any; ctx?: any } | undefined;
+  getRoot(evt: SessionEvent, createIfMissing?: boolean): ActiveRootSpan | undefined;
   getRun(evt: SessionEvent, createIfMissing?: boolean): ActiveRunSpan | undefined;
   ensureUserSpan(evt: UserSpanEvent): ActiveRunSpan | undefined;
   syncRootFromRun(evt: SessionEvent): void;
@@ -349,6 +349,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     span.setStatus({ code: SpanStatusCode.OK });
     span.end(endTime);
     run.assistantSpanEmitted = true;
+    const root = getRoot(evt, false);
+    if (root) {
+      root.assistantSpanEmitted = true;
+    }
   };
 
   const withSnapshotRunId = <T extends SessionEvent>(
@@ -536,6 +540,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                 finalizeNativeModelSpan();
               }
               run.modelSpanEmitted = true;
+              const root = getRoot(evt, false);
+              if (root) {
+                root.modelSpanEmitted = true;
+              }
               run.modelEndTs = evt.ts;
               run.orchestrationCursorTs = evt.ts;
               updateAggregateTokens(evt);
@@ -708,7 +716,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           if (isHeartbeatSessionSnapshot(snapshot)) {
             break;
           }
-          const hasActiveTrace = Boolean(activeRun || getRoot(evt, false));
+          const activeRoot = getRoot(evt, false);
+          const hasActiveTrace = Boolean(activeRun || activeRoot);
+          const hasNativeModelSpan = activeRun?.modelSpanEmitted === true
+            || activeRoot?.modelSpanEmitted === true;
           const replayAlreadyFinalized = hasReplayWatermark(replaySessionKey, snapshot);
           if (replayAlreadyFinalized && !hasActiveTrace) {
             break;
@@ -720,7 +731,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             break;
           }
           let emittedTranscriptModelSpans = false;
-          if (replaySnapshotIsFresh) {
+          if (replaySnapshotIsFresh && !hasNativeModelSpan) {
             emittedTranscriptModelSpans = emitTranscriptModelSpans(replayEvt);
             emitTranscriptToolSpans(replayEvt);
             if (!emittedTranscriptModelSpans) {
@@ -751,7 +762,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               outcome: evt.state,
             },
           );
-          const shouldEmitAssistantSpan = replaySnapshotFreshness !== false
+          const shouldEmitAssistantSpan = activeRoot?.assistantSpanEmitted !== true
+            && replaySnapshotFreshness !== false
             && (hasActiveTrace || snapshot?.runCompleted === true);
           if (shouldEmitAssistantSpan) {
             emitAssistantSpan(replayEvt, getRun(replayEvt, false), snapshot, {
@@ -1058,13 +1070,17 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         if (isHeartbeatSessionSnapshot(snapshot)) {
           break;
         }
-        const hasActiveTrace = Boolean(activeRun || getRoot(evt, false));
+        const activeRoot = getRoot(evt, false);
+        const hasActiveTrace = Boolean(activeRun || activeRoot);
+        const hasNativeModelSpan = activeRun?.modelSpanEmitted === true
+          || activeRoot?.modelSpanEmitted === true;
         const replayAlreadyFinalized = hasReplayWatermark(replaySessionKey, snapshot);
         const replaySnapshotFreshness = snapshotIsFreshForQueuedRequest(snapshot, activeRun, evt.ts);
         const replaySnapshotIsFresh = replaySnapshotFreshness === true;
         const replayEvt = withSnapshotRunId(evt, snapshot, replaySnapshotFreshness);
         const replaySnapshotCompleted = snapshot?.runCompleted === true;
-        const shouldEmitAssistantSpan = replaySnapshotFreshness !== false
+        const shouldEmitAssistantSpan = activeRoot?.assistantSpanEmitted !== true
+          && replaySnapshotFreshness !== false
           && (hasActiveTrace || replaySnapshotCompleted);
         const replaySnapshotOutputPreview = replaySnapshotIsFresh
           ? clipPreview(snapshot?.lastAssistantText)
@@ -1083,6 +1099,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         };
         const shouldAttemptReplay = (
           (!replayAlreadyFinalized || hasActiveTrace)
+          && !hasNativeModelSpan
           && replaySnapshotIsFresh
           && (hasActiveTrace || replaySnapshotCompleted)
         );

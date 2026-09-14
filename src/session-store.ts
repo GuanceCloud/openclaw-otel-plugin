@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import type {
   CompletedTrajectoryRun,
@@ -34,6 +35,13 @@ type ConfiguredAgent = {
   isDefault?: boolean;
 };
 
+type SqliteSessionRecord = {
+  dbPath: string;
+  sessionId: string;
+  updatedAt?: number;
+  createdAt?: number;
+};
+
 function listSessionsIndexPaths(stateDir: string): string[] {
   const agentsDir = path.join(stateDir, "agents");
   const discovered: string[] = [];
@@ -58,9 +66,48 @@ function listSessionsIndexPaths(stateDir: string): string[] {
   ].filter((candidate) => fs.existsSync(candidate)));
 }
 
+function listAgentSqlitePaths(stateDir: string): string[] {
+  const agentsDir = path.join(stateDir, "agents");
+  try {
+    return fs.readdirSync(agentsDir, { withFileTypes: true })
+      .filter((dirent) => dirent.isDirectory())
+      .map((dirent) => path.join(agentsDir, dirent.name, "agent", "openclaw-agent.sqlite"))
+      .filter((candidate) => fs.existsSync(candidate));
+  } catch {
+    return [];
+  }
+}
+
 function getAgentNameFromSessionsIndexPath(sessionsIndexPath: string): string | undefined {
   const agentDir = path.basename(path.dirname(path.dirname(sessionsIndexPath)));
   return agentDir.trim() || undefined;
+}
+
+function getAgentNameFromSqlitePath(sqlitePath: string): string | undefined {
+  const agentDir = path.basename(path.dirname(path.dirname(sqlitePath)));
+  return agentDir.trim() || undefined;
+}
+
+function readSqliteTranscriptEvents(dbPath: string, sessionId: string): Array<Record<string, unknown>> {
+  const database = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const rows = database
+      .prepare("SELECT event_json FROM transcript_events WHERE session_id = ? ORDER BY seq ASC")
+      .all(sessionId) as Array<{ event_json?: unknown }>;
+    return rows.flatMap((row) => {
+      if (typeof row.event_json !== "string") {
+        return [];
+      }
+      try {
+        const event = JSON.parse(row.event_json);
+        return event && typeof event === "object" ? [event as Record<string, unknown>] : [];
+      } catch {
+        return [];
+      }
+    });
+  } finally {
+    database.close();
+  }
 }
 
 function parseMessageTimestamp(value: unknown): number | undefined {
@@ -549,6 +596,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
   const transcriptSnapshotBySession = new Map<string, SessionSnapshot>();
   const latestAssistantTextBySession = new Map<string, string>();
   const sessionFileBySessionKey = new Map<string, string>();
+  const sessionSqliteBySessionKey = new Map<string, SqliteSessionRecord>();
   const sessionKeyBySessionId = new Map<string, string>();
   const configuredAgentsById = new Map(resolveConfiguredAgents(stateDir).map((agent) => [agent.id, agent]));
   const sessionSkillsBySessionKey = new Map<string, SkillCatalogEntry[]>();
@@ -633,6 +681,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
   const refreshSessionsIndex = () => {
     try {
       sessionFileBySessionKey.clear();
+      sessionSqliteBySessionKey.clear();
       sessionKeyBySessionId.clear();
       sessionSkillsBySessionKey.clear();
       sessionModelBySessionKey.clear();
@@ -695,6 +744,71 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           // Try the next sessions index file.
         }
       }
+      for (const sqlitePath of listAgentSqlitePaths(stateDir)) {
+        try {
+          const database = new DatabaseSync(sqlitePath, { readOnly: true });
+          const rows = database
+            .prepare("SELECT session_key, current_session_id, entry_json, updated_at FROM session_nodes")
+            .all() as Array<{
+              session_key?: unknown;
+              current_session_id?: unknown;
+              entry_json?: unknown;
+              updated_at?: unknown;
+            }>;
+          database.close();
+          const agentDir = getAgentNameFromSqlitePath(sqlitePath);
+          const configuredAgent = agentDir ? configuredAgentsById.get(agentDir) : undefined;
+          const sessionAgentId = configuredAgent?.id ?? agentDir;
+          const sessionAgentName = configuredAgent?.name ?? configuredAgent?.id ?? agentDir;
+          for (const row of rows) {
+            const sessionKey = typeof row.session_key === "string" ? row.session_key.trim() : "";
+            const sessionId = typeof row.current_session_id === "string" ? row.current_session_id.trim() : "";
+            if (!sessionKey || !sessionId) {
+              continue;
+            }
+            let entry: Record<string, unknown> = {};
+            if (typeof row.entry_json === "string") {
+              try {
+                const parsed = JSON.parse(row.entry_json);
+                if (parsed && typeof parsed === "object") {
+                  entry = parsed as Record<string, unknown>;
+                }
+              } catch {
+                // The transcript remains readable when optional entry metadata is malformed.
+              }
+            }
+            const updatedAt = typeof row.updated_at === "number" ? row.updated_at : undefined;
+            const createdAt = typeof entry.createdAt === "number"
+              ? entry.createdAt
+              : typeof entry.sessionStartedAt === "number"
+                ? entry.sessionStartedAt
+                : undefined;
+            sessionFileBySessionKey.set(sessionKey, sqlitePath);
+            sessionSqliteBySessionKey.set(sessionKey, { dbPath: sqlitePath, sessionId, updatedAt, createdAt });
+            sessionKeyBySessionId.set(sessionId, sessionKey);
+            if (Array.isArray((entry.skillsSnapshot as Record<string, unknown> | undefined)?.resolvedSkills)) {
+              const skillEntries = ((entry.skillsSnapshot as Record<string, unknown>).resolvedSkills as Array<Record<string, unknown>>)
+                .map((skill) => parseSkillCatalogEntryFromResolvedSkill(stateDir, skill))
+                .filter(Boolean) as SkillCatalogEntry[];
+              if (skillEntries.length > 0) {
+                sessionSkillsBySessionKey.set(sessionKey, skillEntries);
+              }
+            }
+            sessionModelBySessionKey.set(sessionKey, {
+              provider: typeof entry.modelProvider === "string" ? entry.modelProvider : undefined,
+              model: typeof entry.model === "string" ? entry.model : undefined,
+            });
+            sessionMetaBySessionKey.set(sessionKey, {
+              sessionId,
+              agentId: sessionAgentId,
+              agentName: sessionAgentName,
+              updatedAt,
+            });
+          }
+        } catch {
+          // SQLite may be briefly unavailable during an OpenClaw transaction.
+        }
+      }
       refreshWorkspaceSkills();
     } catch {
       // Ignore transient file read issues; diagnostics spans can still be emitted.
@@ -706,18 +820,22 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       return undefined;
     }
     let sessionFile = sessionFileBySessionKey.get(sessionKey);
-    if (!sessionFile) {
+    let sqliteSession = sessionSqliteBySessionKey.get(sessionKey);
+    if (!sessionFile && !sqliteSession) {
       refreshSessionsIndex();
       sessionFile = sessionFileBySessionKey.get(sessionKey);
+      sqliteSession = sessionSqliteBySessionKey.get(sessionKey);
     }
     if (!sessionFile) {
       return undefined;
     }
     try {
       const stats = fs.statSync(sessionFile);
-      const trajectoryMtimeMs = readTrajectoryMtimeMs(sessionFile);
+      const trajectoryMtimeMs = sqliteSession?.updatedAt ?? readTrajectoryMtimeMs(sessionFile);
       const cached = transcriptSnapshotBySession.get(sessionKey);
       if (
+        !sqliteSession
+        &&
         cached
         && cached.sessionFile === sessionFile
         && cached.mtimeMs === stats.mtimeMs
@@ -729,7 +847,9 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         }
         return cached;
       }
-      const lines = readJsonLines(sessionFile);
+      const lines = sqliteSession
+        ? readSqliteTranscriptEvents(sqliteSession.dbPath, sqliteSession.sessionId)
+        : readJsonLines(sessionFile);
       let lastUserText: string | undefined;
       let lastUserTs: number | undefined;
       let lastAssistantText: string | undefined;
@@ -946,13 +1066,17 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       )) {
         mentionedSkillNames.add(skillName);
       }
-      const latestRunState = readSessionLatestRunState(sessionFile);
-      const resolvedRunId = currentRunMessageRunId ?? latestRunState.runId ?? readSessionLatestRunId(sessionFile);
+      const latestRunState = sqliteSession
+        ? {}
+        : readSessionLatestRunState(sessionFile);
+      const resolvedRunId = currentRunMessageRunId
+        ?? latestRunState.runId
+        ?? (sqliteSession ? undefined : readSessionLatestRunId(sessionFile));
       const resolvedRunState = (
         resolvedRunId
         && resolvedRunId !== latestRunState.runId
       )
-        ? readSessionRunState(sessionFile, resolvedRunId)
+        ? sqliteSession ? {} : readSessionRunState(sessionFile, resolvedRunId)
         : latestRunState;
       const inferredRunCompleted = (
         resolvedRunState.runCompleted !== true
@@ -966,14 +1090,14 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       const snapshot: SessionSnapshot = {
         sessionFile,
         sessionKey,
-        sessionId: sessionMetaBySessionKey.get(sessionKey)?.sessionId,
+        sessionId: sessionMetaBySessionKey.get(sessionKey)?.sessionId ?? sqliteSession?.sessionId,
         agentId: sessionMetaBySessionKey.get(sessionKey)?.agentId,
         agentName: sessionMetaBySessionKey.get(sessionKey)?.agentName,
         runId: resolvedRunId,
         runCompleted: resolvedRunState.runCompleted === true || inferredRunCompleted,
         runTerminalType: inferredRunTerminalType,
         runFinalStatus: inferredRunFinalStatus,
-        createdAt: readSessionCreatedAt(sessionFile),
+        createdAt: sqliteSession?.createdAt ?? readSessionCreatedAt(sessionFile),
         updatedAt: sessionMetaBySessionKey.get(sessionKey)?.updatedAt,
         chatType: sessionMetaBySessionKey.get(sessionKey)?.chatType,
         lastChannel: sessionMetaBySessionKey.get(sessionKey)?.lastChannel,

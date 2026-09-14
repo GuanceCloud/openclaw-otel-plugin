@@ -915,6 +915,9 @@ export function createOtelPluginService(
         }
         const transcriptEvt = buildTranscriptReplayEvent(sessionKey, snapshot);
         const activeRun = getRun(transcriptEvt, false);
+        if (activeRun?.modelSpanEmitted) {
+          return;
+        }
         const hasActiveTrace = Boolean(activeRun || getRoot(transcriptEvt, false));
         const replayAlreadyFinalized = hasReplayWatermark(sessionKey, snapshot);
         const replaySnapshotFreshness = resolveTranscriptReplayFreshness({
