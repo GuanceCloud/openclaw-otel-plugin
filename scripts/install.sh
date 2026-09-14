@@ -44,6 +44,8 @@ Environment variables:
   OPENCLAW_PLUGIN_DIR        Install directory. Default: ~/.openclaw/extensions/openclaw-otel-plugin
   OPENCLAW_CONFIG_FILE       OpenClaw config file. Default: ~/.openclaw/openclaw.json
   OPENCLAW_PLUGIN_NAME       Plugin package name prefix. Default: openclaw-otel-plugin
+  OPENCLAW_RUNTIME_ROOT      OpenClaw package directory to link as the plugin SDK.
+                             Defaults to the configured gateway service runtime.
   OPENCLAW_PLUGIN_INSTALL_TYPE
                              Install config type. Default: gtrace. Can be set to otlp
 EOF
@@ -363,19 +365,42 @@ install_payload() {
 }
 
 link_openclaw_runtime() {
-  require_command npm
-
-  local npm_root
-  npm_root="$(npm root -g 2>/dev/null || true)"
-  if [ -z "$npm_root" ] || [ ! -d "${npm_root}/openclaw" ]; then
+  local runtime_root="${OPENCLAW_RUNTIME_ROOT:-}"
+  if [ -z "$runtime_root" ] && command -v systemctl >/dev/null 2>&1; then
+    local gateway_exec_start gateway_entry
+    gateway_exec_start="$(systemctl --user show openclaw-gateway.service -p ExecStart --value 2>/dev/null || true)"
+    gateway_entry="$(printf '%s\n' "$gateway_exec_start" | grep -oE '[^ ;]+/openclaw/dist/index\.(js|mjs)' | head -n 1 || true)"
+    if [ -n "$gateway_entry" ]; then
+      runtime_root="${gateway_entry%/dist/index.*}"
+    fi
+  fi
+  if [ -z "$runtime_root" ] && command -v npm >/dev/null 2>&1; then
+    local npm_root
+    npm_root="$(npm root -g 2>/dev/null || true)"
+    runtime_root="${npm_root}/openclaw"
+  fi
+  if [ -z "$runtime_root" ] || [ ! -d "$runtime_root" ]; then
     printf '[install] global openclaw package directory was not found. Make sure OpenClaw CLI is installed correctly\n' >&2
     exit 1
   fi
 
   mkdir -p "${PLUGIN_DIR}/node_modules"
   rm -rf "${PLUGIN_DIR}/node_modules/openclaw"
-  ln -s "${npm_root}/openclaw" "${PLUGIN_DIR}/node_modules/openclaw"
-  log "linked host openclaw runtime from ${npm_root}/openclaw"
+  ln -s "$runtime_root" "${PLUGIN_DIR}/node_modules/openclaw"
+  log "linked host openclaw runtime from ${runtime_root}"
+}
+
+restart_gateway() {
+  if command -v systemctl >/dev/null 2>&1 \
+    && systemctl --user show openclaw-gateway.service -p LoadState --value 2>/dev/null | grep -qx 'loaded'; then
+    systemctl --user restart openclaw-gateway.service
+    return
+  fi
+  if command -v openclaw >/dev/null 2>&1; then
+    openclaw gateway restart
+    return
+  fi
+  log "openclaw command was not found, skipping gateway restart"
 }
 
 configure_openclaw_json() {
@@ -555,11 +580,9 @@ EOF
     log "install type: ${INSTALL_TYPE}"
   fi
 
-  if [ "$RESTART_GATEWAY" -eq 1 ] && command -v openclaw >/dev/null 2>&1; then
+  if [ "$RESTART_GATEWAY" -eq 1 ]; then
     log "restarting openclaw gateway"
-    openclaw gateway restart
-  elif [ "$RESTART_GATEWAY" -eq 1 ]; then
-    log "openclaw command was not found, skipping gateway restart"
+    restart_gateway
   fi
 }
 

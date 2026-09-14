@@ -3,7 +3,12 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-14
 
-Release: `v0.7.3-rc.9` (pre-release; stable latest remains `v0.7.2`).
+Release: `v0.7.3-rc.10` (pre-release; stable latest remains `v0.7.2`).
+
+### Installer Runtime Resolution
+
+- The installer now links the plugin SDK from the configured `openclaw-gateway.service` runtime before falling back to the current shell's global npm root. This prevents an older NVM-selected CLI from overriding a newer running gateway.
+- Gateway restart now targets the configured systemd user service when present, avoiding configuration validation failures from a stale shell `openclaw` binary.
 
 ### First Response Timing Ordering
 
