@@ -75,7 +75,23 @@ type DiagnosticEventHandlerDeps = {
   endRoot(evt: SessionEvent, attrs?: Record<string, string | number | boolean>): void;
   clearRun(evt: SessionEvent): void;
   discardActiveRequest?(evt: SessionEvent): void;
-  updateAggregateTokens(evt: Extract<DiagnosticEventPayload, { type: "model.usage" }>): void;
+  updateAggregateTokens(evt: {
+    sessionKey?: string;
+    sessionId?: string;
+    runId?: string;
+    provider?: string;
+    model?: string;
+    usage?: {
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+      promptTokens?: number;
+      total?: number;
+      totalTokens?: number;
+    };
+    costUsd?: number;
+  }): void;
   loadSessionSnapshot(sessionKey: string | undefined): SessionSnapshot | undefined;
   resolveSessionKey?: (evt: SessionEvent) => string | undefined;
   enrichWithTranscript(
@@ -139,6 +155,13 @@ type DiagnosticEventHandlerDeps = {
 export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
   // Bound deduplication state for a long-lived gateway; retries have distinct call IDs.
   const recordedFirstChunks = new Map<string, number>();
+  // model.usage is a run-level aggregate emitted after the individual provider
+  // calls. Remember native calls briefly so it cannot create a duplicate root LLM.
+  const recentNativeModelCalls = new Map<string, Array<{
+    provider: string;
+    model: string;
+    endTs: number;
+  }>>();
   const {
     trace,
     instruments,
@@ -377,6 +400,46 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
   const runHasId = (run: ActiveRunSpan | undefined, runId: string | undefined): boolean =>
     Boolean(run && runId && (run.runId === runId || run.runIds?.has(runId)));
 
+  const rememberNativeModelCall = (
+    sessionKey: string | undefined,
+    provider: string | undefined,
+    model: string | undefined,
+    endTs: number | undefined,
+  ) => {
+    if (!sessionKey || !provider || !model || !Number.isFinite(endTs)) {
+      return;
+    }
+    const cutoff = endTs! - 60_000;
+    const calls = (recentNativeModelCalls.get(sessionKey) ?? [])
+      .filter((call) => call.endTs >= cutoff);
+    calls.push({ provider, model, endTs: endTs! });
+    recentNativeModelCalls.set(sessionKey, calls.slice(-128));
+  };
+
+  const hasRecentNativeModelCall = (
+    sessionKey: string | undefined,
+    provider: string | undefined,
+    model: string | undefined,
+    endTs: number | undefined,
+  ) => {
+    if (!sessionKey || !provider || !model || !Number.isFinite(endTs)) {
+      return false;
+    }
+    const calls = recentNativeModelCalls.get(sessionKey);
+    if (!calls?.length) {
+      return false;
+    }
+    const cutoff = endTs! - 60_000;
+    const retained = calls.filter((call) => call.endTs >= cutoff);
+    if (retained.length !== calls.length) {
+      recentNativeModelCalls.set(sessionKey, retained);
+    }
+    return retained.some((call) => call.provider === provider
+      && call.model === model
+      && call.endTs <= endTs!
+      && endTs! - call.endTs <= 5_000);
+  };
+
   return (evt: DiagnosticEventPayload) => {
     cleanupExpiredRoots();
 
@@ -387,6 +450,9 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const validLatency = typeof latencyMs === "number" && Number.isFinite(latencyMs)
           && latencyMs >= 0 && Number.isFinite(evt.durationMs) && evt.durationMs >= latencyMs;
         const run = getRun(evt, false);
+        const resolvedSessionKey = resolveSessionKey?.(evt) ?? evt.sessionKey;
+        const usageTotals = resolveUsageTokenTotals(evt.usage);
+        let emittedNativeModelSpan = false;
         if (runHasId(run, evt.runId) && evt.callId && Number.isFinite(evt.ts)
           && Number.isFinite(evt.durationMs) && evt.durationMs >= 0) {
           const timings = run.modelCallTimings ??= new Map();
@@ -408,6 +474,66 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               duration_ms: evt.durationMs,
               time_to_first_chunk_seconds: validLatency ? latencyMs! / 1000 : undefined,
             });
+
+            if (typeof createChildSpan === "function" && run.ctx) {
+              const nativeModelAttrs = enrichWithTranscript(resolvedSessionKey, {
+                "openclaw.provider": evt.provider,
+                "openclaw.model": evt.model,
+                "openclaw.sessionKey": resolvedSessionKey,
+                "openclaw.sessionId": evt.sessionId,
+                "openclaw.model.call_id": evt.callId,
+                "openclaw.model.api": evt.api,
+                "openclaw.model.transport": evt.transport,
+                "openclaw.context.limit": evt.contextTokenBudget,
+                "span.kind": "model",
+                "openclaw.tokens.input": usageTotals.inputTokens,
+                "openclaw.tokens.output": usageTotals.outputTokens,
+                "openclaw.tokens.total": usageTotals.totalTokens,
+                "openclaw.tokens.cache_read": usageTotals.cacheReadTokens,
+                "openclaw.tokens.cache_write": usageTotals.cacheWriteTokens,
+                "llm.provider": evt.provider,
+                "llm.model": evt.model,
+                "llm.input_tokens": usageTotals.inputTokens,
+                "llm.output_tokens": usageTotals.outputTokens,
+                ...(validLatency
+                  ? { "gen_ai.response.time_to_first_chunk": latencyMs! / 1000 }
+                  : {}),
+              });
+              const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
+                "llm",
+                evt,
+                nativeModelAttrs,
+                evt.durationMs,
+                run.ctx,
+              );
+              if (evt.type === "model.call.error") {
+                span.setStatus({ code: SpanStatusCode.ERROR });
+              } else {
+                span.setStatus({ code: SpanStatusCode.OK });
+              }
+              span.end(endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs));
+              run.modelSpanEmitted = true;
+              run.modelEndTs = evt.ts;
+              run.orchestrationCursorTs = evt.ts;
+              updateAggregateTokens(evt);
+              rememberNativeModelCall(resolvedSessionKey, evt.provider, evt.model, evt.ts);
+              emittedNativeModelSpan = true;
+              emitModelTurnDebugLog({
+                source: "native_model_span",
+                trace_id: typeof span.spanContext === "function" ? span.spanContext().traceId : undefined,
+                span_id: typeof span.spanContext === "function" ? span.spanContext().spanId : undefined,
+                session_key: resolvedSessionKey,
+                session_id: evt.sessionId,
+                run_id: evt.runId,
+                model_call_id: evt.callId,
+                provider: evt.provider,
+                model: evt.model,
+                start_ts: startTime.getTime(),
+                end_ts: (endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs)).getTime(),
+                duration_ms: effectiveDurationMs,
+                time_to_first_chunk_seconds: validLatency ? latencyMs! / 1000 : undefined,
+              });
+            }
           }
         }
         if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs) || latencyMs < 0
@@ -434,6 +560,26 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         recordedFirstChunks.set(key, now);
         if (recordedFirstChunks.size > 10000) {
           recordedFirstChunks.delete(recordedFirstChunks.keys().next().value!);
+        }
+        if (emittedNativeModelSpan) {
+          const metricAttrs = buildGenAiClientModelMetricAttrs(evt.provider, evt.model, {
+            session_id: evt.sessionId,
+          });
+          recordGenAiAgentOperationMetrics(instruments, evt.durationMs, metricAttrs);
+          for (const [tokenType, tokenValue] of [
+            ["input", usageTotals.inputTokens],
+            ["output", usageTotals.outputTokens],
+          ] as const) {
+            if (tokenValue > 0) {
+              instruments.genAiClientTokenUsage?.record(
+                tokenValue,
+                buildGenAiClientTokenMetricAttrs(evt.provider, evt.model, {
+                  session_id: evt.sessionId,
+                  token_type: tokenType,
+                }),
+              );
+            }
+          }
         }
         break;
       }
@@ -702,6 +848,18 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const resolvedSessionKey = resolveSessionKey?.(evt) ?? evt.sessionKey;
         const snapshot = resolveSnapshotForEvent(evt);
         const resolvedSessionId = evt.sessionId ?? snapshot?.sessionId;
+        // A completed transcript can be replayed before OpenClaw delivers its
+        // queued model.usage event. Do not let that late event create a second
+        // root trace; the transcript already contains the corresponding LLM span.
+        const transcriptReplayFinalized = hasReplayWatermark(resolvedSessionKey, snapshot);
+        const hasActiveTrace = Boolean(getRun(evt, false) || getRoot(evt, false));
+        const suppressLateRuntimeTrace = transcriptReplayFinalized && !hasActiveTrace;
+        const nativeModelCallsCovered = hasRecentNativeModelCall(
+          resolvedSessionKey,
+          evt.provider,
+          evt.model,
+          evt.ts,
+        );
         const modelStartTs = typeof evt.ts === "number" && typeof evt.durationMs === "number"
           ? evt.ts - Math.max(evt.durationMs, 1)
           : evt.ts;
@@ -726,6 +884,14 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "llm.input_tokens": usageTotals.inputTokens,
           "llm.output_tokens": usageTotals.outputTokens,
         };
+        if (suppressLateRuntimeTrace || nativeModelCallsCovered) {
+          logDiagnosticEvent(evt, modelUsageAttrs, {
+            body: `model.usage ${evt.provider ?? "unknown"}/${evt.model ?? "unknown"} (${nativeModelCallsCovered ? "native calls exported" : "transcript replayed"})`,
+            severityNumber: SeverityNumber.INFO,
+            severityText: "INFO",
+          });
+          break;
+        }
         updateAggregateTokens({
           ...evt,
           usage: {

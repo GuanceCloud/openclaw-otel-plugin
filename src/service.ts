@@ -1748,7 +1748,23 @@ export function createOtelPluginService(
       };
 
       const updateAggregateTokens = (
-        evt: Extract<DiagnosticEventPayload, { type: "model.usage" }>,
+        evt: {
+          sessionKey?: string;
+          sessionId?: string;
+          runId?: string;
+          provider?: string;
+          model?: string;
+          usage?: {
+            input?: number;
+            output?: number;
+            cacheRead?: number;
+            cacheWrite?: number;
+            promptTokens?: number;
+            total?: number;
+            totalTokens?: number;
+          };
+          costUsd?: number;
+        },
       ) => {
         const run = getRun(evt, true);
         const root = getRoot(evt, true);

@@ -107,8 +107,8 @@ test("native first response is exported as a standard llm tag before span end", 
       return { span, effectiveDurationMs: durationMs, startTime: new Date(evt.ts - durationMs), endTime: new Date(evt.ts) };
     },
   });
-  handler({ type: "model.call.completed", runId: "r", callId: "c", provider: "p", model: "m",
-    ts: 2000, durationMs: 1000, timeToFirstByteMs: 250 });
+  handler({ type: "model.call.completed", sessionKey: "s", runId: "r", callId: "c", provider: "p", model: "m",
+    ts: 2000, durationMs: 1000, timeToFirstByteMs: 250, usage: { input: 1, output: 2 } });
   handler({ type: "model.usage", sessionKey: "s", provider: "p", model: "m", ts: 2000,
     durationMs: 1000, usage: { input: 1, output: 2 } });
   assert.equal(children.length, 1);
@@ -118,6 +118,97 @@ test("native first response is exported as a standard llm tag before span end", 
   assert.equal(children[0].durationMs, 1000);
   assert.equal(children[0].parentCtx, "run");
   assert.equal(children[0].span.ended, true);
+});
+
+test("native model calls stay under the live request and suppress the later aggregate llm", () => {
+  const children = [];
+  const aggregateEvents = [];
+  const run = { runId: "run-1", ctx: "invoke-agent", mainStartTs: 1000 };
+  const handler = createDiagnosticEventHandler({
+    instruments: { genAiClientTimeToFirstChunk: { record() {} } },
+    SpanStatusCode: { OK: 1, ERROR: 2 }, SeverityNumber: { INFO: 9 },
+    trace: { setSpan: (_ctx, span) => span },
+    cleanupExpiredRoots() {}, getRun: () => run, getRoot: () => ({ span: createFakeSpan("root") }),
+    loadSessionSnapshot: () => undefined, enrichWithTranscript: (_key, attrs) => attrs,
+    updateAggregateTokens: (evt) => aggregateEvents.push(evt),
+    ensureRuntimeLifecycleSpans() { throw new Error("aggregate model.usage must not create a lifecycle span"); },
+    createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+      const span = createFakeSpan(name);
+      children.push({ name, attrs, durationMs, parentCtx, span });
+      return { span, effectiveDurationMs: durationMs, startTime: new Date(evt.ts - durationMs), endTime: new Date(evt.ts) };
+    },
+    emitDiagnosticLog() {}, emitModelTurnDebugLog() {}, emitRuntimeOrchestrationSpan() {},
+  });
+
+  for (const [index, timeToFirstByteMs] of [3588, 1544, 2957].entries()) {
+    handler({
+      type: "model.call.completed", sessionKey: "session-key", sessionId: "session-id",
+      runId: "run-1", callId: `call-${index + 1}`, provider: "volcengine-plan", model: "ark-code-latest",
+      ts: 10_000 + index * 10_000, durationMs: 5_000, timeToFirstByteMs,
+      usage: { input: 10 + index, output: 2 },
+    });
+  }
+  handler({
+    type: "model.usage", sessionKey: "session-key", sessionId: "session-id",
+    provider: "volcengine-plan", model: "ark-code-latest", ts: 30_100, durationMs: 29_100,
+    usage: { input: 33, output: 6 },
+  });
+
+  assert.equal(children.length, 3);
+  assert.deepEqual(children.map((child) => child.parentCtx), ["invoke-agent", "invoke-agent", "invoke-agent"]);
+  assert.deepEqual(
+    children.map((child) => child.attrs["gen_ai.response.time_to_first_chunk"]),
+    [3.588, 1.544, 2.957],
+  );
+  assert.equal(aggregateEvents.length, 3);
+});
+
+test("late model usage after transcript replay does not duplicate trace or metrics", () => {
+  const lifecycleCalls = [];
+  const aggregateEvents = [];
+  const tokenRecords = [];
+  const handler = createDiagnosticEventHandler({
+    instruments: {
+      genAiClientTokenUsage: { record: (...args) => tokenRecords.push(args) },
+      genAiAgentOperationDuration: { record() {} },
+      genAiAgentOperationCount: { add() {} },
+    },
+    SpanStatusCode: { OK: 1 },
+    SeverityNumber: { INFO: 9 },
+    cleanupExpiredRoots() {},
+    getRun() { return undefined; },
+    getRoot() { return undefined; },
+    loadSessionSnapshot() {
+      return {
+        sessionKey: "agent:main:main",
+        sessionId: "session-1",
+        runCompleted: true,
+        lastUserTs: 1000,
+        lastAssistantTs: 2000,
+        lastAssistantText: "done",
+      };
+    },
+    hasReplayWatermark() { return true; },
+    updateAggregateTokens(event) { aggregateEvents.push(event); },
+    enrichWithTranscript(_key, attrs) { return attrs; },
+    ensureRuntimeLifecycleSpans(...args) { lifecycleCalls.push(args); },
+    emitDiagnosticLog() {},
+  });
+
+  handler({
+    type: "model.usage",
+    sessionKey: "agent:main:main",
+    sessionId: "session-1",
+    provider: "openai",
+    model: "gpt-5.5",
+    ts: 2000,
+    durationMs: 1000,
+    usage: { input: 3, output: 2 },
+  });
+
+  assert.equal(lifecycleCalls.length, 0);
+  assert.equal(aggregateEvents.length, 0);
+  assert.deepEqual(tokenRecords, []);
 });
 
 test("message.processed emits assistant span but not standalone thinking span", () => {

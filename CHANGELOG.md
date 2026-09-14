@@ -3,7 +3,7 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-14
 
-Release: `v0.7.3-rc.8` (pre-release; stable latest remains `v0.7.2`).
+Release: `v0.7.3-rc.9` (pre-release; stable latest remains `v0.7.2`).
 
 ### First Response Timing Ordering
 
@@ -13,6 +13,12 @@ Release: `v0.7.3-rc.8` (pre-release; stable latest remains `v0.7.2`).
 
 - Prevented a completed OpenClaw v2026.6.11 run from being exported twice when transcript replay precedes the terminal trajectory record.
 - Once a transcript trace represents a run, subsequent trajectory replay advances its source cursor without creating another `invoke_agent` trace.
+- Ignore a late `model.usage` event after a completed transcript replay: the replay already emitted the same LLM span and derived token/duration metrics, so processing it again would double-count telemetry as well as create a second standalone `llm` root.
+- For OpenClaw versions that emit native `model.call.completed` / `model.call.error` diagnostics, create one direct `llm` child span per provider call and retain its `gen_ai.response.time_to_first_chunk`; the terminal aggregate `model.usage` event no longer creates a detached duplicate LLM trace.
+
+### OpenClaw v2026.6.11 First Response Limitation
+
+- The Codex/OpenAI diagnostic path in OpenClaw v2026.6.11 emits `durationMs` but omits `timeToFirstByteMs`; consequently the plugin correctly omits `gen_ai.response.time_to_first_chunk` and `gen_ai.client.operation.time_to_first_chunk` for those calls rather than misreporting total duration as first-response latency.
 
 ## 2026-09-11
 
