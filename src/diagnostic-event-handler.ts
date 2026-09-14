@@ -142,6 +142,7 @@ type DiagnosticEventHandlerDeps = {
   emitModelTurnDebugLog(payload: Record<string, unknown>): void;
   deferNativeModelSpanEnd?(options: {
     span: any;
+    rootSpan?: any;
     sessionKey?: string;
     sessionId?: string;
     runId?: string;
@@ -523,6 +524,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               if (deferNativeModelSpanEnd) {
                 deferNativeModelSpanEnd({
                   span,
+                  rootSpan: run.span,
                   sessionKey: resolvedSessionKey,
                   sessionId: evt.sessionId,
                   runId: evt.runId,

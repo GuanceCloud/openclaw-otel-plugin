@@ -78,8 +78,8 @@ export function createOtelPluginService(
   let diagnosticEventDispatcher: ReturnType<typeof createDiagnosticEventDispatcher<DiagnosticEventPayload>> | null = null;
   let sessionMetricsInterval: ReturnType<typeof setInterval> | null = null;
   const pendingPreviewFinalizers = new Map<ReturnType<typeof setTimeout>, () => void>();
-  const pendingPreviewFinalizersByRequest = new Map<string, Set<() => void>>();
-  const pendingRootFinalizations = new Map<string, () => void>();
+  const pendingPreviewFinalizersByRoot = new Map<any, Set<() => void>>();
+  const pendingRootFinalizations = new Map<any, () => void>();
   const activeRoots = new Map<string, ActiveRootSpan>();
   const activeRuns = new Map<string, ActiveRunSpan>();
   const activeRequestKeyBySession = new Map<string, string>();
@@ -1462,18 +1462,25 @@ export function createOtelPluginService(
         return activeRuns.get(requestKey);
       };
 
-      const endRoot = (evt: { sessionKey?: string; sessionId?: string; runId?: string }, attrs?: Record<string, string | number | boolean>) => {
-        const sessionKey = resolveSessionKey(evt);
-        const requestKey = resolveRequestKey(evt, false);
+      const endRoot = (
+        evt: { sessionKey?: string; sessionId?: string; runId?: string },
+        attrs?: Record<string, string | number | boolean>,
+        pendingRoot?: { sessionKey: string; requestKey: string; current: ActiveRootSpan },
+      ) => {
+        const sessionKey = pendingRoot?.sessionKey ?? resolveSessionKey(evt);
+        const requestKey = pendingRoot?.requestKey ?? resolveRequestKey(evt, false);
         if (!sessionKey || !requestKey) {
           return;
         }
-        if (pendingPreviewFinalizersByRequest.get(requestKey)?.size) {
-          pendingRootFinalizations.set(requestKey, () => endRoot(evt, attrs));
+        const current = pendingRoot?.current ?? activeRoots.get(requestKey);
+        if (!current) {
           return;
         }
-        const current = activeRoots.get(requestKey);
-        if (!current) {
+        if (pendingPreviewFinalizersByRoot.get(current.span)?.size) {
+          pendingRootFinalizations.set(
+            current.span,
+            () => endRoot(evt, attrs, { sessionKey, requestKey, current }),
+          );
           return;
         }
         if (current.finalAttrsApplied) {
@@ -1897,6 +1904,7 @@ export function createOtelPluginService(
         ensureRuntimeLifecycleSpans,
         deferNativeModelSpanEnd({
           span,
+          rootSpan,
           sessionKey,
           sessionId,
           runId,
@@ -1908,7 +1916,7 @@ export function createOtelPluginService(
           const retryDelaysMs = [80, 180, 360, 720];
           let attempt = 0;
           let finished = false;
-          const requestKey = resolveRequestKey({ sessionKey, sessionId, runId }, false);
+          // Pair delayed model completion with the exact root span that owns it.
           let finish: () => void;
           finish = () => {
             if (finished) {
@@ -1916,23 +1924,23 @@ export function createOtelPluginService(
             }
             finished = true;
             finalize();
-            if (!requestKey) {
+            if (!rootSpan) {
               return;
             }
-            const finalizers = pendingPreviewFinalizersByRequest.get(requestKey);
+            const finalizers = pendingPreviewFinalizersByRoot.get(rootSpan);
             finalizers?.delete(finish);
             if (finalizers?.size) {
               return;
             }
-            pendingPreviewFinalizersByRequest.delete(requestKey);
-            const finalizeRoot = pendingRootFinalizations.get(requestKey);
-            pendingRootFinalizations.delete(requestKey);
+            pendingPreviewFinalizersByRoot.delete(rootSpan);
+            const finalizeRoot = pendingRootFinalizations.get(rootSpan);
+            pendingRootFinalizations.delete(rootSpan);
             finalizeRoot?.();
           };
-          if (requestKey) {
-            const finalizers = pendingPreviewFinalizersByRequest.get(requestKey) ?? new Set<() => void>();
+          if (rootSpan) {
+            const finalizers = pendingPreviewFinalizersByRoot.get(rootSpan) ?? new Set<() => void>();
             finalizers.add(finish);
-            pendingPreviewFinalizersByRequest.set(requestKey, finalizers);
+            pendingPreviewFinalizersByRoot.set(rootSpan, finalizers);
           }
           const tryFinalize = () => {
             const snapshot = loadSessionSnapshot(sessionKey);
@@ -2013,7 +2021,7 @@ export function createOtelPluginService(
         finalize();
       }
       pendingPreviewFinalizers.clear();
-      pendingPreviewFinalizersByRequest.clear();
+      pendingPreviewFinalizersByRoot.clear();
       pendingRootFinalizations.clear();
       unsubscribeAgent?.();
       unsubscribeAgent = null;

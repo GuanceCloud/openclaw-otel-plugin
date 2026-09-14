@@ -92,7 +92,8 @@ function createFakeSpan(name) {
 test("native first response is exported as a standard llm tag before span end", () => {
   const children = [];
   let deferred;
-  const run = { runId: "r", ctx: "run", mainStartTs: 1000 };
+  const rootSpan = createFakeSpan("invoke_agent");
+  const run = { runId: "r", span: rootSpan, ctx: "run", mainStartTs: 1000 };
   const handler = createDiagnosticEventHandler({
     instruments: {}, SpanStatusCode: { OK: 1 }, SeverityNumber: { INFO: 9 },
     trace: { setSpan: (_ctx, span) => span },
@@ -119,6 +120,7 @@ test("native first response is exported as a standard llm tag before span end", 
   assert.equal(children[0].attrs.time_to_first_chunk_ms, undefined);
   assert.equal(children[0].durationMs, 1000);
   assert.equal(children[0].parentCtx, "run");
+  assert.equal(deferred.rootSpan, rootSpan);
   assert.ok(deferred);
   assert.equal(children[0].span.ended, false);
   deferred.finalize();
