@@ -3,7 +3,7 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-11
 
-Release: `v0.7.3-rc.6` (pre-release; stable latest remains `v0.7.2`).
+Release: `v0.7.3-rc.7` (pre-release; stable latest remains `v0.7.2`).
 
 ### OpenClaw 2026.9.3 Compatibility
 
@@ -25,6 +25,12 @@ Release: `v0.7.3-rc.6` (pre-release; stable latest remains `v0.7.2`).
 - Subscribe to OpenClaw's trusted diagnostic metadata stream, because its public plugin event stream intentionally excludes native `model.call.*` timing events.
 - Encode the standard span attribute for the current trace backend as `gen_ai_response_time_to_first_chunk`; its source semantic-convention name remains `gen_ai.response.time_to_first_chunk`.
 - Documented first-response observation semantics (not strict effective-token TTFT), failure samples, and omission of missing/invalid/replayed timing data.
+
+### RC6 Validation Follow-up
+
+- Kept `model.usage` request correlation on its terminal diagnostic timestamp while independently backdating the LLM span to the model start. This prevents a model start slightly earlier than `message.queued` from creating a second `invoke_agent` trace and leaving the LLM/Token half buffered until gateway shutdown.
+- Preserved the standard first-chunk metric and LLM attribute on the unified live trace; no custom first-chunk event or duplicate timing field is emitted.
+- Resolved id-only `model.usage` diagnostics to their canonical session key before transcript enrichment, restoring sanitized input previews and `gen_ai.input.messages` on the LLM/root trace when OpenClaw omits `sessionKey` from the diagnostic event.
 
 ## 2026-07-15
 

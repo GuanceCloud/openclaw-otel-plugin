@@ -2349,6 +2349,9 @@ test("session.state idle leaves final_status empty when no business outcome is a
 
 test("model.usage emits llm span and preserves model context", () => {
   const childCalls = [];
+  const aggregateEvents = [];
+  const lifecycleCalls = [];
+  const enrichmentSessionKeys = [];
   const run = {
     ctx: { ctx: "run" },
   };
@@ -2382,11 +2385,17 @@ test("model.usage emits llm span and preserves model context", () => {
     endRun() {},
     endRoot() {},
     clearRun() {},
-    updateAggregateTokens() {},
+    updateAggregateTokens(evt) {
+      aggregateEvents.push(evt);
+    },
     loadSessionSnapshot() {
       return undefined;
     },
-    enrichWithTranscript(_sessionKey, attrs) {
+    resolveSessionKey(evt) {
+      return evt.sessionId === "sid-1" ? "s1" : evt.sessionKey;
+    },
+    enrichWithTranscript(sessionKey, attrs) {
+      enrichmentSessionKeys.push(sessionKey);
       return attrs;
     },
     createChildSpan(name, evt, attrs, durationMs, parentCtx) {
@@ -2402,7 +2411,8 @@ test("model.usage emits llm span and preserves model context", () => {
     },
     emitDiagnosticLog() {},
     emitRuntimeOrchestrationSpan() {},
-    ensureRuntimeLifecycleSpans() {
+    ensureRuntimeLifecycleSpans(evt, options) {
+      lifecycleCalls.push({ evt, options });
       return run;
     },
     emitModelTurnDebugLog() {},
@@ -2423,7 +2433,6 @@ test("model.usage emits llm span and preserves model context", () => {
 
   handler({
     type: "model.usage",
-    sessionKey: "s1",
     sessionId: "sid-1",
     ts: 1000,
     channel: "chat",
@@ -2436,6 +2445,7 @@ test("model.usage emits llm span and preserves model context", () => {
   assert.equal(childCalls[0].name, "llm");
   assert.equal(childCalls[0].attrs["span.kind"], "model");
   assert.equal(childCalls[0].attrs["openclaw.model"], "gpt-5");
+  assert.equal(childCalls[0].attrs["openclaw.sessionKey"], "s1");
   assert.equal(childCalls[0].attrs["llm.model"], "gpt-5");
   assert.equal(childCalls[0].attrs["openclaw.tokens.cache_read"], 6400);
   assert.equal(childCalls[0].attrs["openclaw.tokens.total"], 46);
@@ -2445,6 +2455,12 @@ test("model.usage emits llm span and preserves model context", () => {
   assert.equal(childCalls[0].span.ended, true);
   assert.equal(run.modelStartTs, 600);
   assert.equal(run.modelCtx.span.name, "llm");
+  assert.equal(aggregateEvents[0].ts, 1000);
+  assert.equal(aggregateEvents[0].usage.total, 46);
+  assert.equal(lifecycleCalls[0].evt.ts, 1000);
+  assert.equal(lifecycleCalls[0].options.startTsHint, 600);
+  assert.equal(lifecycleCalls[0].options.processingStartTs, 600);
+  assert.deepEqual(enrichmentSessionKeys, ["s1"]);
 });
 
 test("model.usage uses snapshot sessionId for gen_ai client metrics when event sessionId is missing", () => {

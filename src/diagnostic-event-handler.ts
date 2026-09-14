@@ -696,6 +696,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         break;
       }
       case "model.usage": {
+        const resolvedSessionKey = resolveSessionKey?.(evt) ?? evt.sessionKey;
         const snapshot = resolveSnapshotForEvent(evt);
         const resolvedSessionId = evt.sessionId ?? snapshot?.sessionId;
         const modelStartTs = typeof evt.ts === "number" && typeof evt.durationMs === "number"
@@ -706,7 +707,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           "openclaw.channel": evt.channel,
           "openclaw.provider": evt.provider,
           "openclaw.model": evt.model,
-          "openclaw.sessionKey": evt.sessionKey,
+          "openclaw.sessionKey": resolvedSessionKey,
           "openclaw.sessionId": resolvedSessionId,
           "span.kind": "model",
           "openclaw.tokens.input": usageTotals.inputTokens,
@@ -724,7 +725,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         };
         updateAggregateTokens({
           ...evt,
-          ts: modelStartTs,
           usage: {
             ...evt.usage,
             total: usageTotals.totalTokens,
@@ -735,7 +735,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           evt.model,
           { session_id: resolvedSessionId },
         );
-        const enrichedModelUsageAttrs = enrichWithTranscript(evt.sessionKey, modelUsageAttrs);
+        const enrichedModelUsageAttrs = enrichWithTranscript(resolvedSessionKey, modelUsageAttrs);
         const tokenMetrics = [
           ["input", evt.usage.input],
           ["output", evt.usage.output],
@@ -766,10 +766,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           );
         }
         const run = ensureRuntimeLifecycleSpans(
-          {
-            ...evt,
-            ts: modelStartTs,
-          },
+          evt,
           {
             createIfMissing: true,
             startTsHint: modelStartTs,
@@ -803,7 +800,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             source: "runtime",
             trace_id: typeof run.modelSpan.spanContext === "function" ? run.modelSpan.spanContext().traceId : undefined,
             span_id: typeof run.modelSpan.spanContext === "function" ? run.modelSpan.spanContext().spanId : undefined,
-            session_key: evt.sessionKey,
+            session_key: resolvedSessionKey,
             session_id: evt.sessionId,
             provider: evt.provider,
             model: evt.model,
@@ -843,7 +840,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             source: "runtime",
             trace_id: typeof span.spanContext === "function" ? span.spanContext().traceId : undefined,
             span_id: typeof span.spanContext === "function" ? span.spanContext().spanId : undefined,
-            session_key: evt.sessionKey,
+            session_key: resolvedSessionKey,
             session_id: evt.sessionId,
             provider: evt.provider,
             model: evt.model,

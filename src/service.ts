@@ -720,17 +720,26 @@ export function createOtelPluginService(
         }
         const providedSnapshot = options?.snapshot;
         const snapshot = providedSnapshot ?? loadSessionSnapshot(sessionKey);
-        const lifecycleEvt = {
+        // Keep request correlation on the diagnostic event timestamp. A lifecycle
+        // span may be backdated to the model start, which can precede
+        // message.queued because the two event streams use different boundaries.
+        // Using that backdated timestamp for lookup can create a second request
+        // root and split LLM/token data from the live tool trace.
+        const requestEvt = {
           sessionKey: evt.sessionKey,
           sessionId: evt.sessionId,
           runId: evt.runId ?? providedSnapshot?.runId,
-          ts: options?.startTsHint ?? evt.ts,
+          ts: evt.ts,
         };
-        const run = getRun(lifecycleEvt, options?.createIfMissing ?? false);
+        const lifecycleEvt = {
+          ...requestEvt,
+          ts: options?.startTsHint ?? requestEvt.ts,
+        };
+        const run = getRun(requestEvt, options?.createIfMissing ?? false);
         if (!run) {
           return undefined;
         }
-        const root = getRoot(lifecycleEvt, options?.createIfMissing ?? false);
+        const root = getRoot(requestEvt, options?.createIfMissing ?? false);
         const resolvedSessionId = snapshot?.sessionId ?? evt.sessionId;
         const ingressStartTs = typeof run.messageQueuedTs === "number"
           ? run.messageQueuedTs
@@ -1779,7 +1788,7 @@ export function createOtelPluginService(
           "openclaw.skill.count": run.usedSkillNames.size,
         });
 
-        const transcriptAttrs = buildAgentSummaryTraceAttrs(evt.sessionKey, summaryAttrs);
+        const transcriptAttrs = buildAgentSummaryTraceAttrs(sessionKey, summaryAttrs);
         run.span.setAttributes(transcriptAttrs);
         root.span.setAttributes(transcriptAttrs);
         run.modelSpanEmitted = true;
