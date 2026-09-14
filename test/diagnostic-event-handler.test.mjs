@@ -311,7 +311,7 @@ test("message.processed emits assistant span but not standalone thinking span", 
   assert.equal(childCalls[0].parentCtx.ctx, "run");
 });
 
-test("message.processed syncs lifecycle without requesting an output lifecycle span", () => {
+test("message.processed emits terminal assistant even before transcript output is available", () => {
   const childCalls = [];
   const lifecycleCalls = [];
   const run = {
@@ -351,7 +351,6 @@ test("message.processed syncs lifecycle without requesting an output lifecycle s
       return {
         sessionFile: "session.jsonl",
         mtimeMs: 1,
-        lastAssistantText: "final answer",
         lastProvider: "openai",
         lastModel: "gpt-5",
       };
@@ -521,10 +520,10 @@ test("message.processed keeps the active trace open for later transcript growth"
   assert.equal(endRootCalls, 0);
   assert.equal(clearRunCalls, 0);
   assert.equal(run.pendingFinalOutcome, "completed");
-  assert.deepEqual(childCalls.map((call) => call.name), []);
+  assert.deepEqual(childCalls.map((call) => call.name), ["assistant"]);
 });
 
-test("message.processed prefers transcript replay and marks replay watermark for completed sessions", () => {
+test("message.processed emits assistant after transcript replay and marks replay watermark for completed sessions", () => {
   const childCalls = [];
   let transcriptCalls = 0;
   let toolReplayCalls = 0;
@@ -637,7 +636,7 @@ test("message.processed prefers transcript replay and marks replay watermark for
   assert.equal(syntheticCalls, 0);
   assert.equal(watermarkMarked, 1);
   assert.deepEqual(rememberedTrajectoryRuns, [["s1", "run-123"]]);
-  assert.deepEqual(childCalls.map((call) => call.name), []);
+  assert.deepEqual(childCalls.map((call) => call.name), ["assistant"]);
 });
 
 test("message.processed finalizes active trace without replaying stale transcript", () => {
@@ -1087,7 +1086,7 @@ test("message.processed replays completed transcript snapshots even without an a
   assert.deepEqual(rememberedTrajectoryRuns, [["s1", "run-123"]]);
   assert.equal(lifecycleCalls, 1);
   assert.equal(lifecycleEvts[0].runId, "run-123");
-  assert.deepEqual(childCalls.map((call) => call.name), []);
+  assert.deepEqual(childCalls.map((call) => call.name), ["assistant"]);
 });
 
 test("message.processed does not replay stale snapshots while a new trace is active", () => {
@@ -2132,7 +2131,7 @@ test("session.state idle closes active trace without replaying stale transcript"
   assert.equal(watermarkCalls, 0);
 });
 
-test("session.state idle falls back to completed final_status when message.processed never arrived", () => {
+test("session.state idle emits assistant when message.processed never arrived", () => {
   const childCalls = [];
   const endRunCalls = [];
   const endRootCalls = [];
@@ -2236,7 +2235,7 @@ test("session.state idle falls back to completed final_status when message.proce
   assert.equal(endRootCalls[0].final_status, "completed");
   assert.equal(endRunCalls[0].state, "idle");
   assert.equal(endRootCalls[0].state, "idle");
-  assert.deepEqual(childCalls.map((call) => call.name), []);
+  assert.deepEqual(childCalls.map((call) => call.name), ["assistant"]);
 });
 
 test("session.state idle prefers trajectory final status over idle", () => {
@@ -2340,7 +2339,7 @@ test("session.state idle prefers trajectory final status over idle", () => {
 
   assert.equal(endRunCalls[0].final_status, "completed");
   assert.equal(endRootCalls[0].final_status, "completed");
-  assert.deepEqual(childCalls.map((call) => call.name), []);
+  assert.deepEqual(childCalls.map((call) => call.name), ["assistant"]);
 });
 
 test("session.state idle leaves final_status empty when no business outcome is available", () => {
@@ -2445,7 +2444,7 @@ test("session.state idle leaves final_status empty when no business outcome is a
   assert.equal(endRootCalls[0].final_status, undefined);
   assert.equal(endRunCalls[0].state, "idle");
   assert.equal(endRootCalls[0].state, "idle");
-  assert.deepEqual(childCalls.map((call) => call.name), []);
+  assert.deepEqual(childCalls.map((call) => call.name), ["assistant"]);
 });
 
 test("model.usage emits llm span and preserves model context", () => {

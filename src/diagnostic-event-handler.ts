@@ -306,9 +306,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     }
     const outputPreview = options?.outputPreview ?? clipPreview(snapshot?.lastAssistantText);
     const outputLength = options?.outputLength ?? snapshot?.lastAssistantText?.length;
-    if (!outputPreview && !outputLength) {
-      return;
-    }
     const endTs = typeof options?.ts === "number"
       ? options.ts
       : typeof evt.ts === "number"
@@ -729,8 +726,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             },
           );
           const shouldEmitAssistantSpan = replaySnapshotFreshness !== false
-            && (hasActiveTrace || snapshot?.runCompleted === true)
-            && !emittedTranscriptModelSpans;
+            && (hasActiveTrace || snapshot?.runCompleted === true);
           if (shouldEmitAssistantSpan) {
             emitAssistantSpan(replayEvt, getRun(replayEvt, false), snapshot, {
               outputPreview: clipPreview(snapshot?.lastAssistantText),
@@ -1093,7 +1089,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           outputLength: replaySnapshotIsFresh ? snapshot?.lastAssistantText?.length : undefined,
           outcome: evt.outcome,
         });
-        if (shouldEmitAssistantSpan && !emittedTranscriptModelSpans) {
+        if (shouldEmitAssistantSpan) {
           emitAssistantSpan(replayEvt, run, snapshot, {
             outputPreview: replaySnapshotOutputPreview ?? clipPreview(snapshot?.lastAssistantText),
             outputLength: snapshot?.lastAssistantText?.length,

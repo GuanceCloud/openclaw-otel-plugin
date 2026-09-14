@@ -3,6 +3,14 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-14
 
+Release: `v0.7.3-rc.11` (pre-release; stable latest remains `v0.7.2`).
+
+### Trace Completion
+
+- Keep the terminal `assistant` span independent from transcript-model replay. A native or replayed `llm` span no longer suppresses the final assistant output span; the egress span is also retained when OpenClaw writes the transcript after the terminal diagnostic event, with output preview omitted until it is available.
+
+## 2026-09-14
+
 Release: `v0.7.3-rc.10` (pre-release; stable latest remains `v0.7.2`).
 
 ### Installer Runtime Resolution
