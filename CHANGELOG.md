@@ -3,6 +3,15 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-14
 
+Release: `v0.7.3-rc.12` (pre-release; stable latest remains `v0.7.2`).
+
+### Transcript Preview Completion
+
+- Delay final export of a native `llm` span for up to 1.34 seconds while its matching session transcript is persisted. When the same `runId` and a fresh user turn are available, backfill `gen_ai.input.messages` and `gen_ai.output.messages` from the transcript.
+- Preserve the model's original span end timestamp and duration. Timeout, transcript read failure, shutdown, or a mismatched run falls back to export without preview rather than delaying or corrupting the trace.
+
+## 2026-09-14
+
 Release: `v0.7.3-rc.11` (pre-release; stable latest remains `v0.7.2`).
 
 ### Trace Completion

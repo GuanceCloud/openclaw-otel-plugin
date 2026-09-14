@@ -140,6 +140,15 @@ type DiagnosticEventHandlerDeps = {
     },
   ): ActiveRunSpan | undefined;
   emitModelTurnDebugLog(payload: Record<string, unknown>): void;
+  deferNativeModelSpanEnd?(options: {
+    span: any;
+    sessionKey?: string;
+    sessionId?: string;
+    runId?: string;
+    minUserTs?: number;
+    endTime: Date;
+    finalize(): void;
+  }): void;
   getActiveSkillCtx(run: ActiveRunSpan | undefined): any;
   syncTranscriptSkillSummary(evt: { sessionKey?: string; sessionId?: string; ts?: number }): void;
   emitTranscriptModelSpans(evt: SessionEvent): boolean;
@@ -186,6 +195,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     emitRuntimeOrchestrationSpan,
     ensureRuntimeLifecycleSpans,
     emitModelTurnDebugLog = () => {},
+    deferNativeModelSpanEnd,
     getActiveSkillCtx,
     syncTranscriptSkillSummary,
     emitTranscriptModelSpans,
@@ -508,7 +518,21 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               } else {
                 span.setStatus({ code: SpanStatusCode.OK });
               }
-              span.end(endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs));
+              const resolvedEndTime = endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs);
+              const finalizeNativeModelSpan = () => span.end(resolvedEndTime);
+              if (deferNativeModelSpanEnd) {
+                deferNativeModelSpanEnd({
+                  span,
+                  sessionKey: resolvedSessionKey,
+                  sessionId: evt.sessionId,
+                  runId: evt.runId,
+                  minUserTs: startTime.getTime(),
+                  endTime: resolvedEndTime,
+                  finalize: finalizeNativeModelSpan,
+                });
+              } else {
+                finalizeNativeModelSpan();
+              }
               run.modelSpanEmitted = true;
               run.modelEndTs = evt.ts;
               run.orchestrationCursorTs = evt.ts;
@@ -526,7 +550,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                 provider: evt.provider,
                 model: evt.model,
                 start_ts: startTime.getTime(),
-                end_ts: (endTime ?? endTimeFromStart(startTime.getTime(), effectiveDurationMs)).getTime(),
+                end_ts: resolvedEndTime.getTime(),
                 duration_ms: effectiveDurationMs,
                 time_to_first_chunk_seconds: validLatency ? latencyMs! / 1000 : undefined,
               });

@@ -77,6 +77,9 @@ export function createOtelPluginService(
   let unsubscribeTranscript: (() => void) | null = null;
   let diagnosticEventDispatcher: ReturnType<typeof createDiagnosticEventDispatcher<DiagnosticEventPayload>> | null = null;
   let sessionMetricsInterval: ReturnType<typeof setInterval> | null = null;
+  const pendingPreviewFinalizers = new Map<ReturnType<typeof setTimeout>, () => void>();
+  const pendingPreviewFinalizersByRequest = new Map<string, Set<() => void>>();
+  const pendingRootFinalizations = new Map<string, () => void>();
   const activeRoots = new Map<string, ActiveRootSpan>();
   const activeRuns = new Map<string, ActiveRunSpan>();
   const activeRequestKeyBySession = new Map<string, string>();
@@ -1465,6 +1468,10 @@ export function createOtelPluginService(
         if (!sessionKey || !requestKey) {
           return;
         }
+        if (pendingPreviewFinalizersByRequest.get(requestKey)?.size) {
+          pendingRootFinalizations.set(requestKey, () => endRoot(evt, attrs));
+          return;
+        }
         const current = activeRoots.get(requestKey);
         if (!current) {
           return;
@@ -1888,6 +1895,77 @@ export function createOtelPluginService(
         emitDiagnosticLog,
         emitRuntimeOrchestrationSpan,
         ensureRuntimeLifecycleSpans,
+        deferNativeModelSpanEnd({
+          span,
+          sessionKey,
+          sessionId,
+          runId,
+          minUserTs,
+          finalize,
+        }) {
+          // Transcript writes can follow model completion. Delay export only; the
+          // span keeps its original end timestamp and duration.
+          const retryDelaysMs = [80, 180, 360, 720];
+          let attempt = 0;
+          let finished = false;
+          const requestKey = resolveRequestKey({ sessionKey, sessionId, runId }, false);
+          let finish: () => void;
+          finish = () => {
+            if (finished) {
+              return;
+            }
+            finished = true;
+            finalize();
+            if (!requestKey) {
+              return;
+            }
+            const finalizers = pendingPreviewFinalizersByRequest.get(requestKey);
+            finalizers?.delete(finish);
+            if (finalizers?.size) {
+              return;
+            }
+            pendingPreviewFinalizersByRequest.delete(requestKey);
+            const finalizeRoot = pendingRootFinalizations.get(requestKey);
+            pendingRootFinalizations.delete(requestKey);
+            finalizeRoot?.();
+          };
+          if (requestKey) {
+            const finalizers = pendingPreviewFinalizersByRequest.get(requestKey) ?? new Set<() => void>();
+            finalizers.add(finish);
+            pendingPreviewFinalizersByRequest.set(requestKey, finalizers);
+          }
+          const tryFinalize = () => {
+            const snapshot = loadSessionSnapshot(sessionKey);
+            const sameRun = !runId || snapshot?.runId === runId;
+            const freshUser = minUserTs === undefined
+              || (typeof snapshot?.lastUserTs === "number" && snapshot.lastUserTs >= minUserTs);
+            if (sameRun && freshUser && snapshot?.lastAssistantText) {
+              span.setAttributes(traceAttrs(enrichWithTranscript(sessionKey, {
+                __min_snapshot_user_ts: minUserTs,
+                "openclaw.sessionId": sessionId,
+                "openclaw.input.preview": normalizeUserInputPreview(snapshot.lastUserText),
+                "openclaw.input.length": snapshot.lastUserText?.length,
+                "openclaw.output.preview": clipPreview(snapshot.lastAssistantText),
+                "openclaw.output.length": snapshot.lastAssistantText.length,
+                "openclaw.output.kind": "text",
+              })));
+              finish();
+              return;
+            }
+            const delayMs = retryDelaysMs[attempt++];
+            if (delayMs === undefined) {
+              finish();
+              return;
+            }
+            const timer = setTimeout(() => {
+              pendingPreviewFinalizers.delete(timer);
+              tryFinalize();
+            }, delayMs);
+            timer.unref?.();
+            pendingPreviewFinalizers.set(timer, finish);
+          };
+          tryFinalize();
+        },
         emitModelTurnDebugLog,
         SeverityNumber,
         getActiveSkillCtx,
@@ -1930,6 +2008,13 @@ export function createOtelPluginService(
       unsubscribeDiagnostic = null;
       diagnosticEventDispatcher?.dispose();
       diagnosticEventDispatcher = null;
+      for (const [timer, finalize] of pendingPreviewFinalizers) {
+        clearTimeout(timer);
+        finalize();
+      }
+      pendingPreviewFinalizers.clear();
+      pendingPreviewFinalizersByRequest.clear();
+      pendingRootFinalizations.clear();
       unsubscribeAgent?.();
       unsubscribeAgent = null;
       unsubscribeTranscript?.();
