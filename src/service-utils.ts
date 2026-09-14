@@ -1326,7 +1326,14 @@ export function clipPreview(text: string | undefined): string | undefined {
   if (!text) {
     return undefined;
   }
-  const normalized = stripAnsiEscapeCodes(text).replace(/\s+/g, " ").trim();
+  // Keep paragraph and Markdown line boundaries readable in trace previews while
+  // still normalizing horizontal whitespace and platform-specific line endings.
+  const normalized = stripAnsiEscapeCodes(text)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u2028\u2029]/g, "\n")
+    .replace(/[^\S\r\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   if (!normalized) {
     return undefined;
   }

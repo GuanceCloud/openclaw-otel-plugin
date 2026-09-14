@@ -17,6 +17,7 @@ import {
   buildToolAttrs,
   buildSessionMetricAttrs,
   computeSessionMetricDelta,
+  clipPreview,
   durationMsToSeconds,
   loadSnapshotForEvent,
   normalizeUserInputPreview,
@@ -41,6 +42,13 @@ import {
   takeModelFirstChunkAttrs,
   writeReplayFinalizationState,
 } from "../dist/src/service-utils.js";
+
+test("clipPreview preserves normalized line breaks", () => {
+  assert.equal(
+    clipPreview("# 标题\r\n\r\n第一段\t内容\n\n\n第二段"),
+    "# 标题\n\n第一段 内容\n\n第二段",
+  );
+});
 
 test("diagnostic dispatcher lets native model-call timing arrive before trace lifecycle events", async () => {
   const handled = [];
