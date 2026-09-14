@@ -1,6 +1,19 @@
 # Changelog
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
+## 2026-09-14
+
+Release: `v0.7.3-rc.8` (pre-release; stable latest remains `v0.7.2`).
+
+### First Response Timing Ordering
+
+- Process trace lifecycle diagnostics after OpenClaw v2026.6.11's queued native `model.call.*` terminal event, so a valid `timeToFirstByteMs` is available before the corresponding LLM span is ended.
+
+### Trace Deduplication
+
+- Prevented a completed OpenClaw v2026.6.11 run from being exported twice when transcript replay precedes the terminal trajectory record.
+- Once a transcript trace represents a run, subsequent trajectory replay advances its source cursor without creating another `invoke_agent` trace.
+
 ## 2026-09-11
 
 Release: `v0.7.3-rc.7` (pre-release; stable latest remains `v0.7.2`).

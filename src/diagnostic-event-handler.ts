@@ -133,6 +133,7 @@ type DiagnosticEventHandlerDeps = {
   annotateToolLoop(evt: Extract<DiagnosticEventPayload, { type: "tool.loop" }>): boolean;
   hasReplayWatermark?(sessionKey: string | undefined, snapshot: SessionSnapshot | undefined): boolean;
   markReplayWatermark?(sessionKey: string | undefined, snapshot: SessionSnapshot | undefined): void;
+  rememberTrajectoryReplayRunId?(sessionKey: string | undefined, runId: string | undefined): void;
 };
 
 export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
@@ -171,6 +172,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     annotateToolLoop,
     hasReplayWatermark = () => false,
     markReplayWatermark = () => {},
+    rememberTrajectoryReplayRunId = () => {},
   } = deps;
 
   const logDiagnosticEvent = (
@@ -555,6 +557,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             if (!emittedTranscriptModelSpans) {
               emitSyntheticModelSpan(replayEvt);
             }
+            rememberTrajectoryReplayRunId(replaySessionKey, snapshot?.runId);
           }
           const replayFinalAttrs = (!hasActiveTrace && replaySnapshotIsFresh)
             ? {
@@ -906,6 +909,9 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           } else {
             emitSyntheticModelSpan(replayEvt);
             emittedReplayPayload = true;
+          }
+          if (emittedReplayPayload) {
+            rememberTrajectoryReplayRunId(replaySessionKey, snapshot?.runId);
           }
         }
         if (replayAlreadyFinalized && !hasActiveTrace) {

@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   buildRunScopeAttrs,
   buildTranscriptReplayEvent,
+  createDiagnosticEventDispatcher,
   createSessionKeyResolver,
   buildGenAiClientModelMetricAttrs,
   buildGenAiClientSkillMetricAttrs,
@@ -40,6 +41,46 @@ import {
   takeModelFirstChunkAttrs,
   writeReplayFinalizationState,
 } from "../dist/src/service-utils.js";
+
+test("diagnostic dispatcher lets native model-call timing arrive before trace lifecycle events", async () => {
+  const handled = [];
+  const dispatcher = createDiagnosticEventDispatcher((event) => handled.push(event.type));
+
+  dispatcher.dispatch({ type: "message.queued" });
+  dispatcher.dispatch({ type: "model.call.completed" });
+  dispatcher.dispatch({ type: "model.usage" });
+
+  assert.deepEqual(handled, ["model.call.completed"]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(handled, ["model.call.completed", "message.queued", "model.usage"]);
+  dispatcher.dispose();
+});
+
+test("diagnostic dispatcher preserves OpenClaw v2026.6.11 queued model completion before synchronous usage", async () => {
+  const handled = [];
+  const dispatcher = createDiagnosticEventDispatcher((event) => handled.push(event.type));
+
+  // v2026.6.11 queues model.call.completed before synchronously emitting model.usage.
+  setImmediate(() => dispatcher.dispatch({ type: "model.call.completed" }));
+  dispatcher.dispatch({ type: "model.usage" });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(handled, ["model.call.completed", "model.usage"]);
+  dispatcher.dispose();
+});
+
+test("diagnostic dispatcher cancels deferred events during service shutdown", async () => {
+  const handled = [];
+  const dispatcher = createDiagnosticEventDispatcher((event) => handled.push(event.type));
+
+  dispatcher.dispatch({ type: "model.usage" });
+  dispatcher.dispose();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(handled, []);
+});
 
 test("session key resolver keeps id-only model diagnostics on the active session", () => {
   const resolver = createSessionKeyResolver(() => undefined);

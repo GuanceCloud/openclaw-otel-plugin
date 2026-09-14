@@ -47,6 +47,41 @@ export const MAX_OPENCLAW_THINKING_MS = 1500;
 const HEARTBEAT_REQUEST_TEXT = "[OpenClaw heartbeat poll]";
 const HEARTBEAT_RESPONSE_TEXT = "HEARTBEAT_OK";
 const RUNTIME_CONTINUE_REQUEST_TEXT = "Continue the OpenClaw runtime event.";
+const DEFERRED_DIAGNOSTIC_EVENT_TYPES = new Set([
+  "message.queued",
+  "model.usage",
+  "message.processed",
+  "session.state",
+]);
+
+export function createDiagnosticEventDispatcher<T extends { type: string }>(
+  handleEvent: (event: T) => void,
+): {
+  dispatch(event: T): void;
+  dispose(): void;
+} {
+  const pending = new Set<ReturnType<typeof setImmediate>>();
+
+  return {
+    dispatch(event) {
+      if (!DEFERRED_DIAGNOSTIC_EVENT_TYPES.has(event.type)) {
+        handleEvent(event);
+        return;
+      }
+      const handle = setImmediate(() => {
+        pending.delete(handle);
+        handleEvent(event);
+      });
+      pending.add(handle);
+    },
+    dispose() {
+      for (const handle of pending) {
+        clearImmediate(handle);
+      }
+      pending.clear();
+    },
+  };
+}
 
 export function redactSensitiveText(text: string): string {
   return text;

@@ -27,6 +27,7 @@ import {
   buildRunScopeAttrs,
   buildTranscriptReplayEvent,
   clipPreview,
+  createDiagnosticEventDispatcher,
   createSessionKeyResolver,
   createRunState,
   durationMsToSeconds,
@@ -74,6 +75,7 @@ export function createOtelPluginService(
   let unsubscribeDiagnostic: (() => void) | null = null;
   let unsubscribeAgent: (() => void) | null = null;
   let unsubscribeTranscript: (() => void) | null = null;
+  let diagnosticEventDispatcher: ReturnType<typeof createDiagnosticEventDispatcher<DiagnosticEventPayload>> | null = null;
   let sessionMetricsInterval: ReturnType<typeof setInterval> | null = null;
   const activeRoots = new Map<string, ActiveRootSpan>();
   const activeRuns = new Map<string, ActiveRunSpan>();
@@ -939,6 +941,7 @@ export function createOtelPluginService(
         } else {
           emitSyntheticModelSpan(transcriptEvt);
         }
+        rememberPendingTrajectoryReplayRunId(sessionKey, snapshot.runId);
         if (snapshot.runCompleted !== true) {
           return;
         }
@@ -1035,12 +1038,20 @@ export function createOtelPluginService(
 
         for (const trajectoryRun of completedRuns) {
           const pendingRunIds = pendingTrajectoryReplayRunIdsBySession.get(sessionKey);
-          if (trajectoryRun.runId && pendingRunIds?.has(trajectoryRun.runId)) {
+          const latestSnapshot = loadSessionSnapshot(sessionKey);
+          const alreadyRepresentedByTranscript = Boolean(
+            trajectoryRun.runId
+            && latestSnapshot?.runId === trajectoryRun.runId
+            && hasReplayWatermark(sessionKey, latestSnapshot),
+          );
+          if (
+            (trajectoryRun.runId && pendingRunIds?.has(trajectoryRun.runId))
+            || alreadyRepresentedByTranscript
+          ) {
             markTrajectoryReplaySourceSeq(sessionKey, trajectoryRun.sourceSeq);
             forgetPendingTrajectoryReplayRunId(sessionKey, trajectoryRun.runId);
             continue;
           }
-          const latestSnapshot = loadSessionSnapshot(sessionKey);
           const sessionId = trajectoryRun.sessionId ?? latestSnapshot?.sessionId;
           const userText = trajectoryRun.finalPromptText ?? trajectoryRun.userText;
           const assistantText = trajectoryRun.assistantText;
@@ -1872,11 +1883,13 @@ export function createOtelPluginService(
         annotateToolLoop,
         hasReplayWatermark,
         markReplayWatermark,
+        rememberTrajectoryReplayRunId: rememberPendingTrajectoryReplayRunId,
       });
+      diagnosticEventDispatcher = createDiagnosticEventDispatcher(handleDiagnosticEvent);
 
       // Model-call timing is emitted by OpenClaw as a trusted diagnostic event.
       // This subscription exposes event metadata only, never the private model-content payload.
-      unsubscribeDiagnostic = onInternalDiagnosticEvent((evt) => handleDiagnosticEvent(evt));
+      unsubscribeDiagnostic = onInternalDiagnosticEvent((evt) => diagnosticEventDispatcher?.dispatch(evt));
 
       reportSessionMetrics();
       sessionMetricsInterval = setInterval(reportSessionMetrics, config.flushIntervalMs);
@@ -1899,6 +1912,8 @@ export function createOtelPluginService(
     async stop() {
       unsubscribeDiagnostic?.();
       unsubscribeDiagnostic = null;
+      diagnosticEventDispatcher?.dispose();
+      diagnosticEventDispatcher = null;
       unsubscribeAgent?.();
       unsubscribeAgent = null;
       unsubscribeTranscript?.();

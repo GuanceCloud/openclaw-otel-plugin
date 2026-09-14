@@ -439,6 +439,7 @@ test("message.processed prefers transcript replay and marks replay watermark for
   let toolReplayCalls = 0;
   let syntheticCalls = 0;
   let watermarkMarked = 0;
+  const rememberedTrajectoryRuns = [];
   const run = {
     ctx: { ctx: "run" },
     modelCtx: { ctx: "model" },
@@ -527,6 +528,9 @@ test("message.processed prefers transcript replay and marks replay watermark for
     markReplayWatermark() {
       watermarkMarked += 1;
     },
+    rememberTrajectoryReplayRunId(sessionKey, runId) {
+      rememberedTrajectoryRuns.push([sessionKey, runId]);
+    },
   });
 
   handler({
@@ -541,6 +545,7 @@ test("message.processed prefers transcript replay and marks replay watermark for
   assert.equal(toolReplayCalls, 1);
   assert.equal(syntheticCalls, 0);
   assert.equal(watermarkMarked, 1);
+  assert.deepEqual(rememberedTrajectoryRuns, [["s1", "run-123"]]);
   assert.deepEqual(childCalls.map((call) => call.name), []);
 });
 
@@ -890,6 +895,7 @@ test("message.processed replays completed transcript snapshots even without an a
   let toolReplayCalls = 0;
   let lifecycleCalls = 0;
   const lifecycleEvts = [];
+  const rememberedTrajectoryRuns = [];
   const snapshot = {
     sessionFile: "session.jsonl",
     mtimeMs: 1,
@@ -972,6 +978,9 @@ test("message.processed replays completed transcript snapshots even without an a
       return false;
     },
     markReplayWatermark() {},
+    rememberTrajectoryReplayRunId(sessionKey, runId) {
+      rememberedTrajectoryRuns.push([sessionKey, runId]);
+    },
   });
 
   handler({
@@ -984,6 +993,7 @@ test("message.processed replays completed transcript snapshots even without an a
 
   assert.equal(transcriptCalls, 1);
   assert.equal(toolReplayCalls, 1);
+  assert.deepEqual(rememberedTrajectoryRuns, [["s1", "run-123"]]);
   assert.equal(lifecycleCalls, 1);
   assert.equal(lifecycleEvts[0].runId, "run-123");
   assert.deepEqual(childCalls.map((call) => call.name), []);
