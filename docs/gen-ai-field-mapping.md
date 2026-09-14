@@ -32,8 +32,8 @@
 | `usage_output_tokens` | `gen_ai.usage.output_tokens` | `llm` | 输出 token 数。`invoke_agent` 不再汇总该字段。 |
 | `usage_cache_read_input_tokens` | `gen_ai.usage.cache_read.input_tokens` | `llm` | provider cache read input token 数。`invoke_agent` 不再汇总该字段。 |
 | `usage_cache_write_input_tokens` | `gen_ai.usage.cache_creation.input_tokens` | `llm` | provider cache creation / write input token 数。`invoke_agent` 不再汇总该字段。 |
-| `input_preview` | `gen_ai.input.messages` | 模型 / Agent 相关 span | 使用已脱敏、截断后的 preview 构造 JSON 字符串，形如 `[{role:"user",parts:[{type:"text",content:"..."}]}]`。 |
-| `output_preview`、`output_summary`、`output_kind` | `gen_ai.output.messages` | 模型 / Agent 相关 span | 使用已脱敏、截断后的 preview / summary 构造 JSON 字符串；`output_kind=tool_call` 且有 tool 身份时输出 `tool_call` part。 |
+| `input_preview` | `gen_ai.input.messages` | 模型 / Agent 相关 span | 使用已脱敏、截断后的 preview 构造 JSON 字符串。存在 transcript 时按单次 LLM 调用保留此前 user、assistant `tool_call` 与 tool result 消息。 |
+| `output_preview`、`output_summary`、`output_kind` | `gen_ai.output.messages` | 模型 / Agent 相关 span | 使用已脱敏、截断后的 preview / summary 构造 JSON 字符串；工具轮输出 `tool_call` part，并携带调用 ID、名称和参数。 |
 | `tool_name` | `gen_ai.tool.name` | `tool:*` span、tool operation 指标 | tool 名称。 |
 | `skill_name` | `gen_ai.skill.name` | skill operation 指标 | skill 名称，用于 `gen_ai.operation.name=skill` 的指标维度。 |
 | `tool_call_id` | `gen_ai.tool.call.id` | `tool:*` span | tool call 标识。 |

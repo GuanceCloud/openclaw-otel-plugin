@@ -347,11 +347,11 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     }
     const baseStartTs =
       source === "transcript"
-        ? run.mainStartTs + MIN_VISIBLE_CHILD_MS
+        ? run.mainStartTs + 1
         : typeof evt.ts === "number"
           ? evt.ts
           : Date.now();
-    const startTs = Math.max(baseStartTs, run.mainStartTs + MIN_VISIBLE_CHILD_MS);
+    const startTs = Math.max(baseStartTs, run.mainStartTs + 1);
     const span = tracer.startSpan(
       skillSpanName(normalizedSkillName),
       {
@@ -431,7 +431,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
     });
     tool.skillMetadata = mergeSkillMetadata(tool.skillMetadata, metadata);
     run.usedSkillNames.add(normalizedSkillName);
-    const startTs = Math.max(tool.startedAt, run.mainStartTs + MIN_VISIBLE_CHILD_MS);
+    const startTs = Math.max(tool.startedAt, run.mainStartTs + 1);
     const span = tracer.startSpan(
       skillSpanName(normalizedSkillName),
       {
@@ -551,7 +551,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         : undefined,
     };
     const startTs = typeof evt.ts === "number"
-      ? Math.max(evt.ts, run.mainStartTs + MIN_VISIBLE_CHILD_MS)
+      ? Math.max(evt.ts, run.mainStartTs + 1)
       : Date.now();
     const parentCtx = run.ctx;
     const span = tracer.startSpan(
@@ -713,16 +713,16 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       evt.sessionId,
       run.aggregate.lastModel ?? snapshot?.lastModel,
     );
-    const durationMs = Math.max(0, eventTimestamp(evt).getTime() - tool.startedAt);
+    const endTs = typeof evt.ts === "number"
+      ? new Date(Math.max(evt.ts, tool.startedAt + 1))
+      : undefined;
+    const durationMs = Math.max((endTs?.getTime() ?? eventTimestamp(evt).getTime()) - tool.startedAt, 1);
     recordGenAiAgentOperation(durationMs, genAiToolMetricAttrs);
     if (isError) {
       setError(tool.span, SpanStatusCode.ERROR, resultPreview ?? "tool error");
     } else {
       tool.span.setStatus({ code: SpanStatusCode.OK });
     }
-    const endTs = typeof evt.ts === "number"
-      ? new Date(Math.max(evt.ts, tool.startedAt + MIN_VISIBLE_CHILD_MS))
-      : undefined;
     if (tool.skillName && tool.skillSpan) {
       tool.skillSpan.setAttributes(traceAttrs({
         ...buildSessionSpanAttrs(evt),

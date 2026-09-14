@@ -14,6 +14,7 @@ import type {
   TranscriptToolCall,
 } from "./service-types.js";
 import {
+  clipPreview,
   clipValuePreview,
   buildSkillCatalogEntry,
   extractContentText,
@@ -41,6 +42,17 @@ type SqliteSessionRecord = {
   updatedAt?: number;
   createdAt?: number;
 };
+
+function stringifyTranscriptMessages(messages: Array<Record<string, unknown>>): string | undefined {
+  if (messages.length === 0) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(messages);
+  } catch {
+    return undefined;
+  }
+}
 
 function listSessionsIndexPaths(stateDir: string): string[] {
   const agentsDir = path.join(stateDir, "agents");
@@ -872,6 +884,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       let currentRunToolCallSkillNamesById: Record<string, string> = {};
       const currentRunToolCalls = new Map<string, TranscriptToolCall>();
       const currentRunAssistantTurns: TranscriptAssistantTurn[] = [];
+      const currentRunInputMessages: Array<Record<string, unknown>> = [];
       let currentRunCursorTs: number | undefined;
       let currentRunInputPreview: string | undefined;
       let currentRunMessageRunId: string | undefined;
@@ -899,8 +912,15 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           currentRunToolCallSkillNamesById = {};
           currentRunToolCalls.clear();
           currentRunAssistantTurns.length = 0;
+          currentRunInputMessages.length = 0;
           currentRunCursorTs = lastUserTs;
           currentRunInputPreview = normalizeUserInputPreview(userText);
+          if (currentRunInputPreview) {
+            currentRunInputMessages.push({
+              role: "user",
+              parts: [{ type: "text", content: currentRunInputPreview }],
+            });
+          }
           currentRunCacheReadRaw = undefined;
           currentRunCacheWriteRaw = undefined;
           currentRunLastAssistantStopReason = undefined;
@@ -909,6 +929,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           const assistantText = extractContentText(message.content, "text");
           const assistantThinking = extractContentText(message.content, "thinking");
           const turnToolCallNames: string[] = [];
+          const turnToolCalls: Array<Pick<TranscriptToolCall, "callId" | "name" | "args">> = [];
           const startedAt = resolveEnvelopeTimestamp(line.timestamp, message.timestamp);
           lastAssistantText = assistantText ?? lastAssistantText;
           lastAssistantThinking = assistantThinking ?? lastAssistantThinking;
@@ -935,6 +956,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
                 continue;
               }
               turnToolCallNames.push(toolName);
+              turnToolCalls.push({ callId: toolCallId, name: toolName, args });
               const existing = currentRunToolCalls.get(toolCallId);
               currentRunToolCalls.set(toolCallId, {
                 callId: toolCallId,
@@ -962,6 +984,29 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           const outputPreview = assistantText
             ? clipValuePreview(assistantText)
             : summarizeToolCallOutput(turnToolCallNames);
+          const outputParts: Array<Record<string, unknown>> = [];
+          if (assistantText) {
+            outputParts.push({ type: "text", content: outputPreview ?? assistantText });
+          }
+          for (const toolCall of turnToolCalls) {
+            outputParts.push({
+              type: "tool_call",
+              id: toolCall.callId,
+              name: toolCall.name,
+              arguments: clipValuePreview(toolCall.args) ?? "",
+            });
+          }
+          if (assistantThinking) {
+            outputParts.push({ type: "reasoning", content: clipValuePreview(assistantThinking) ?? assistantThinking });
+          }
+          const inputMessages = stringifyTranscriptMessages(currentRunInputMessages);
+          const outputMessages = outputParts.length > 0
+            ? stringifyTranscriptMessages([{
+              role: "assistant",
+              parts: outputParts,
+              finish_reason: turnToolCalls.length > 0 ? "tool_call" : "stop",
+            }])
+            : undefined;
           const turnUsage = message.usage && typeof message.usage === "object"
             ? (() => {
               const rawUsage = message.usage as Record<string, unknown>;
@@ -1001,11 +1046,20 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
               ? { usage: turnUsage }
               : {}),
             inputPreview: currentRunInputPreview,
+            inputMessages,
             thinking: assistantThinking,
             text: assistantText,
             outputPreview,
+            outputMessages,
             outputKind: assistantText ? "text" : turnToolCallNames.length > 0 ? "tool_call" : undefined,
+            ...(turnToolCalls.length > 0 ? { toolCalls: turnToolCalls } : {}),
           });
+          if (outputParts.length > 0) {
+            currentRunInputMessages.push({
+              role: "assistant",
+              parts: outputParts,
+            });
+          }
           currentRunCursorTs = startedAt ?? currentRunCursorTs;
           if (message.usage && typeof message.usage === "object") {
             const input = turnUsage?.input ?? 0;
@@ -1048,7 +1102,24 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             endedAt: resolveEnvelopeTimestamp(line.timestamp, message.timestamp),
           });
           currentRunCursorTs = resolveEnvelopeTimestamp(line.timestamp, message.timestamp) ?? currentRunCursorTs;
-          currentRunInputPreview = clipValuePreview(message.details ?? extractContentText(message.content, "text"));
+          const resultPreview = clipValuePreview(message.details ?? extractContentText(message.content, "text"));
+          const argsPreview = clipValuePreview(existing?.args);
+          currentRunInputPreview = clipPreview([
+            currentRunInputPreview,
+            argsPreview ? `${toolName}(${argsPreview})` : toolName,
+            resultPreview ? `${toolName} result: ${resultPreview}` : undefined,
+          ].filter((value): value is string => Boolean(value)).join("\n"));
+          if (resultPreview) {
+            currentRunInputMessages.push({
+              role: "tool",
+              parts: [{
+                type: "tool_call_result",
+                id: toolCallId,
+                name: toolName,
+                content: resultPreview,
+              }],
+            });
+          }
         }
       }
 

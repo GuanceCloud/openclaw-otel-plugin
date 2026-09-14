@@ -27,6 +27,7 @@ import {
   buildRunScopeAttrs,
   buildTranscriptReplayEvent,
   clipPreview,
+  clipValuePreview,
   createDiagnosticEventDispatcher,
   createSessionKeyResolver,
   createRunState,
@@ -1911,12 +1912,13 @@ export function createOtelPluginService(
           sessionKey,
           sessionId,
           runId,
+          turnIndex,
           minUserTs,
           finalize,
         }) {
           // Transcript writes can follow model completion. Delay export only; the
           // span keeps its original end timestamp and duration.
-          const retryDelaysMs = [80, 180, 360, 720];
+          const retryDelaysMs = [80, 180, 360, 720, 1440, 2880, 5000];
           let attempt = 0;
           let finished = false;
           // Pair delayed model completion with the exact root span that owns it.
@@ -1950,15 +1952,24 @@ export function createOtelPluginService(
             const sameRun = !runId || snapshot?.runId === runId;
             const freshUser = minUserTs === undefined
               || (typeof snapshot?.lastUserTs === "number" && snapshot.lastUserTs >= minUserTs);
-            if (sameRun && freshUser && snapshot?.lastAssistantText) {
+            const turn = typeof turnIndex === "number"
+              ? snapshot?.lastRunAssistantTurns?.[turnIndex]
+              : snapshot?.lastRunAssistantTurns?.at(-1);
+            const toolCall = turn?.toolCalls?.length === 1 ? turn.toolCalls[0] : undefined;
+            if (sameRun && freshUser && turn) {
               span.setAttributes(traceAttrs(enrichWithTranscript(sessionKey, {
                 __min_snapshot_user_ts: minUserTs,
                 "openclaw.sessionId": sessionId,
-                "openclaw.input.preview": normalizeUserInputPreview(snapshot.lastUserText),
-                "openclaw.input.length": snapshot.lastUserText?.length,
-                "openclaw.output.preview": clipPreview(snapshot.lastAssistantText),
-                "openclaw.output.length": snapshot.lastAssistantText.length,
-                "openclaw.output.kind": "text",
+                "openclaw.input.preview": turn.inputPreview ?? normalizeUserInputPreview(snapshot.lastUserText),
+                "openclaw.input.length": turn.inputPreview?.length ?? snapshot.lastUserText?.length,
+                "openclaw.output.preview": turn.outputPreview ?? clipPreview(snapshot.lastAssistantText),
+                "openclaw.output.length": turn.text?.length ?? turn.outputPreview?.length ?? snapshot.lastAssistantText?.length,
+                "openclaw.output.kind": turn.outputKind ?? "text",
+                "gen_ai.input.messages": turn.inputMessages,
+                "gen_ai.output.messages": turn.outputMessages,
+                tool_call_id: toolCall?.callId,
+                tool_name: toolCall?.name,
+                tool_args_preview: toolCall ? clipValuePreview(toolCall.args) : undefined,
               })));
               finish();
               return;

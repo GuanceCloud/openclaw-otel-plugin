@@ -913,7 +913,7 @@ test("tool completion records tool and skill client operation durations", () => 
   }));
   assert.deepEqual(simplified, [
     {
-      value: 0.38,
+      value: 0.499,
       operation_name: "execute_tool",
       tool_name: "Skill",
       gen_ai_skill_name: undefined,
@@ -922,7 +922,7 @@ test("tool completion records tool and skill client operation durations", () => 
       status: "completed",
     },
     {
-      value: 0.38,
+      value: 0.499,
       operation_name: "skill",
       tool_name: undefined,
       gen_ai_skill_name: "dashboard",
@@ -931,7 +931,7 @@ test("tool completion records tool and skill client operation durations", () => 
       status: "completed",
     },
   ]);
-  assert.deepEqual(agentDurationRecords.map(({ value }) => value), [380, 380]);
+  assert.deepEqual(agentDurationRecords.map(({ value }) => value), [499, 499]);
   assert.deepEqual(agentCountRecords.map(({ value, attrs }) => ({
     value,
     operation_name: attrs["gen_ai.operation.name"],

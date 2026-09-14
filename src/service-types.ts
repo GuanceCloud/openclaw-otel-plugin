@@ -185,10 +185,13 @@ export type TranscriptAssistantTurn = {
     totalTokens?: number;
   };
   inputPreview?: string;
+  inputMessages?: string;
   thinking?: string;
   text?: string;
   outputPreview?: string;
+  outputMessages?: string;
   outputKind?: string;
+  toolCalls?: Array<Pick<TranscriptToolCall, "callId" | "name" | "args">>;
 };
 
 export type SessionSnapshot = {

@@ -79,6 +79,7 @@ type DiagnosticEventHandlerDeps = {
     sessionKey?: string;
     sessionId?: string;
     runId?: string;
+    turnIndex?: number;
     provider?: string;
     model?: string;
     usage?: {
@@ -412,6 +413,12 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
   const runHasId = (run: ActiveRunSpan | undefined, runId: string | undefined): boolean =>
     Boolean(run && runId && (run.runId === runId || run.runIds?.has(runId)));
 
+  const resolveModelTurnIndex = (callId: string | undefined, fallback: number): number => {
+    const match = typeof callId === "string" ? callId.match(/:model:(\d+)$/) : undefined;
+    const parsed = match ? Number(match[1]) : NaN;
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed - 1 : fallback;
+  };
+
   const rememberNativeModelCall = (
     sessionKey: string | undefined,
     provider: string | undefined,
@@ -511,6 +518,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                   ? { "gen_ai.response.time_to_first_chunk": latencyMs! / 1000 }
                   : {}),
               });
+            const turnIndex = resolveModelTurnIndex(evt.callId, timings.size - 1);
               const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
                 "llm",
                 evt,
@@ -532,7 +540,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                   sessionKey: resolvedSessionKey,
                   sessionId: evt.sessionId,
                   runId: evt.runId,
-                  minUserTs: startTime.getTime(),
+                  turnIndex,
+                  minUserTs: run.messageQueuedTs,
                   endTime: resolvedEndTime,
                   finalize: finalizeNativeModelSpan,
                 });

@@ -7,6 +7,10 @@ import path from "node:path";
 
 import { createSessionSnapshotStore } from "../dist/src/session-store.js";
 
+function withoutTranscriptMessageContexts(turns) {
+  return turns?.map(({ inputMessages, outputMessages, toolCalls, ...turn }) => turn);
+}
+
 test("session store reads OpenClaw SQLite transcript messages", () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
   const dbDir = path.join(stateDir, "agents", "main", "agent");
@@ -155,7 +159,7 @@ test("session store reads sessions index from agents/main and extracts invoked s
       version: undefined,
     },
   ]);
-  assert.deepEqual(snapshot.lastRunAssistantTurns, [
+  assert.deepEqual(withoutTranscriptMessageContexts(snapshot.lastRunAssistantTurns), [
     {
       startedAt: undefined,
       endedAt: undefined,
@@ -252,7 +256,7 @@ test("session store keeps invoked skills scoped to the latest run only", () => {
   assert.ok(snapshot);
   assert.deepEqual(snapshot.invokedSkillNames, []);
   assert.deepEqual(snapshot.toolCallSkillNamesById, {});
-  assert.deepEqual(snapshot.lastRunAssistantTurns, [
+  assert.deepEqual(withoutTranscriptMessageContexts(snapshot.lastRunAssistantTurns), [
     {
       startedAt: Date.parse("2026-05-08T09:01:00.000Z"),
       endedAt: Date.parse("2026-05-08T09:01:10.000Z"),
@@ -348,7 +352,7 @@ test("session store aggregates session token totals and trace count", () => {
   assert.equal(snapshot.traceCount, 2);
   assert.equal(snapshot.lastUserTs, 2000);
   assert.equal(snapshot.lastAssistantTs, 2600);
-  assert.deepEqual(snapshot.lastRunAssistantTurns, [
+  assert.deepEqual(withoutTranscriptMessageContexts(snapshot.lastRunAssistantTurns), [
     {
       startedAt: 2000,
       endedAt: 2600,
@@ -530,7 +534,7 @@ test("session store derives per-turn cache usage from cumulative transcript cach
     cacheWrite: 0,
     totalTokens: 36,
   });
-  assert.deepEqual(snapshot.lastRunAssistantTurns, [
+  assert.deepEqual(withoutTranscriptMessageContexts(snapshot.lastRunAssistantTurns), [
     {
       startedAt: 1000,
       endedAt: 1300,
@@ -625,7 +629,7 @@ test("session store prefers line timestamps for assistant turns", () => {
   assert.ok(snapshot);
   assert.equal(snapshot.lastUserTs, Date.parse("2026-05-07T04:57:01.370Z"));
   assert.equal(snapshot.lastAssistantTs, Date.parse("2026-05-07T04:57:10.380Z"));
-  assert.deepEqual(snapshot.lastRunAssistantTurns, [
+  assert.deepEqual(withoutTranscriptMessageContexts(snapshot.lastRunAssistantTurns), [
     {
       startedAt: Date.parse("2026-05-07T04:57:01.370Z"),
       endedAt: Date.parse("2026-05-07T04:57:10.380Z"),
@@ -1223,7 +1227,7 @@ test("session store reads string user content and derives runId from idempotency
   assert.ok(snapshot);
   assert.equal(snapshot.runId, "run-from-idempotency");
   assert.equal(snapshot.lastUserText, "删除 `/home/liurui/dashboard/owl-reports` 目录。");
-  assert.deepEqual(snapshot.lastRunAssistantTurns, [
+  assert.deepEqual(withoutTranscriptMessageContexts(snapshot.lastRunAssistantTurns), [
     {
       startedAt: Date.parse("2026-06-02T10:48:20.753Z"),
       endedAt: Date.parse("2026-06-02T10:48:22.634Z"),
@@ -1243,4 +1247,55 @@ test("session store reads string user content and derives runId from idempotency
       outputKind: "tool_call",
     },
   ]);
+  assert.deepEqual(JSON.parse(snapshot.lastRunAssistantTurns?.[0]?.outputMessages), [{
+    role: "assistant",
+    parts: [{
+      type: "tool_call",
+      id: "call-1",
+      name: "exec",
+      arguments: "{\"command\":\"ls -la /home/liurui/dashboard/owl-reports\"}",
+    }],
+    finish_reason: "tool_call",
+  }]);
+});
+
+test("session store keeps tool calls and results in the next model turn input", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-otel-plugin-"));
+  const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const sessionFile = path.join(sessionsDir, "tool-context.jsonl");
+  fs.writeFileSync(path.join(sessionsDir, "sessions.json"), JSON.stringify({
+    toolContext: { sessionFile, sessionId: "tool-context" },
+  }));
+  const lines = [
+    { type: "message", timestamp: 1_000, message: { role: "user", content: "查询天气" } },
+    { type: "message", timestamp: 1_100, message: {
+      role: "assistant", content: [{ type: "toolCall", id: "weather-1", name: "read", arguments: { path: "/tmp/weather" } }],
+    } },
+    { type: "message", timestamp: 1_200, message: {
+      role: "toolResult", toolCallId: "weather-1", toolName: "read", content: "晴天 25C",
+    } },
+    { type: "message", timestamp: 1_300, message: {
+      role: "assistant", content: [{ type: "text", text: "今天晴天。" }],
+    } },
+  ];
+  fs.writeFileSync(sessionFile, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+  const store = createSessionSnapshotStore(stateDir);
+  store.refreshSessionsIndex();
+  const turns = store.loadSessionSnapshot("toolContext")?.lastRunAssistantTurns;
+  assert.ok(turns);
+  assert.deepEqual(JSON.parse(turns[0].outputMessages), [{
+    role: "assistant",
+    parts: [{ type: "tool_call", id: "weather-1", name: "read", arguments: "{\"path\":\"/tmp/weather\"}" }],
+    finish_reason: "tool_call",
+  }]);
+  assert.deepEqual(JSON.parse(turns[1].inputMessages), [
+    { role: "user", parts: [{ type: "text", content: "查询天气" }] },
+    { role: "assistant", parts: [{ type: "tool_call", id: "weather-1", name: "read", arguments: "{\"path\":\"/tmp/weather\"}" }] },
+    { role: "tool", parts: [{ type: "tool_call_result", id: "weather-1", name: "read", content: "晴天 25C" }] },
+  ]);
+  assert.match(turns[1].inputPreview, /查询天气/);
+  assert.match(turns[1].inputPreview, /read\(\{"path":"\/tmp\/weather"\}\)/);
+  assert.match(turns[1].inputPreview, /read result: 晴天 25C/);
 });
