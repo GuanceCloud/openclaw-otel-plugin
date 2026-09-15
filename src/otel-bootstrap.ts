@@ -27,6 +27,7 @@ import type {
 } from "@opentelemetry/sdk-trace-base";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import type { OtelPluginConfig } from "./config.js";
+import { OPENCLAW_OTEL_PLUGIN_VERSION } from "./plugin-version.js";
 import type { MetricInstruments, OtelBootstrapResult, RuntimeMetadata } from "./service-types.js";
 import { resolveOtelUrl } from "./trace-runtime.js";
 
@@ -66,6 +67,7 @@ export function buildOtelResourceAttrs(
         : "openclaw",
     agent_version: runtimeMetadata?.openclawVersion,
     ...configuredResourceAttrs,
+    telemetry_version: OPENCLAW_OTEL_PLUGIN_VERSION,
   });
 }
 

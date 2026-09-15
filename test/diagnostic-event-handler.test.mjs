@@ -2571,6 +2571,38 @@ test("model.usage emits llm span and preserves model context", () => {
   assert.deepEqual(enrichmentSessionKeys, ["s1"]);
 });
 
+test("unassociated model.usage records aggregate data without creating an empty trace", () => {
+  const aggregateEvents = [];
+  const logs = [];
+  let lifecycleCalls = 0;
+  const handler = createDiagnosticEventHandler({
+    instruments: {},
+    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+    SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
+    cleanupExpiredRoots() {},
+    getRoot() { return undefined; },
+    getRun() { return undefined; },
+    updateAggregateTokens(evt) { aggregateEvents.push(evt); },
+    loadSessionSnapshot() { return undefined; },
+    enrichWithTranscript(_sessionKey, attrs) { return attrs; },
+    emitDiagnosticLog(_evt, _attrs, options) { logs.push(options); },
+    ensureRuntimeLifecycleSpans() { lifecycleCalls += 1; },
+  });
+
+  handler({
+    type: "model.usage",
+    sessionKey: "session-without-queued-request",
+    ts: 1000,
+    provider: "openai",
+    model: "gpt-5",
+    usage: { input: 476, output: 481 },
+  });
+
+  assert.equal(aggregateEvents.length, 1);
+  assert.equal(lifecycleCalls, 0);
+  assert.match(logs.at(-1).body, /unassociated; metrics only/);
+});
+
 test("model.usage uses snapshot sessionId for gen_ai client metrics when event sessionId is missing", () => {
   const tokenRecords = [];
   const operationDurations = [];

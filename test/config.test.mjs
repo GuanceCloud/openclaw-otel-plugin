@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 import { resolveOtelPluginConfig } from "../dist/src/config.js";
 
@@ -8,6 +9,10 @@ test("resolveOtelPluginConfig supports the telemetry master switch", () => {
   assert.equal(resolveOtelPluginConfig({ enabled: false }).enabled, false);
 });
 import { buildOtelResourceAttrs } from "../dist/src/otel-bootstrap.js";
+
+const pluginVersion = JSON.parse(
+  fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version;
 
 test("resolveOtelPluginConfig keeps openclaw as the default agent runtime resource attribute", () => {
   const config = resolveOtelPluginConfig({});
@@ -150,6 +155,7 @@ test("buildOtelResourceAttrs keeps configured agent identity tags but does not a
     "service.name": "openclaw-otel-plugin",
     agent_runtime: "openclaw",
     agent_version: "2026.5.28",
+    telemetry_version: pluginVersion,
     team: "platform",
     agent_id: "configured-agent-id",
     agent_name: "configured-agent-name",
@@ -196,6 +202,7 @@ test("buildOtelResourceAttrs drops runtime_environment even when configured expl
     "service.name": "openclaw-otel-plugin",
     agent_runtime: "openclaw",
     agent_version: "2026.5.28",
+    telemetry_version: pluginVersion,
     team: "platform",
   });
 });

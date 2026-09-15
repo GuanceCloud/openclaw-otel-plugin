@@ -1,7 +1,12 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import { build } from "esbuild";
+import packageJson from "../package.json" with { type: "json" };
 
 await rm("dist", { recursive: true, force: true });
+
+const define = {
+  __OPENCLAW_OTEL_PLUGIN_VERSION__: JSON.stringify(packageJson.version),
+};
 
 await build({
   entryPoints: ["index.ts"],
@@ -9,6 +14,7 @@ await build({
   platform: "node",
   format: "cjs",
   target: "node22",
+  define,
   external: ["openclaw/plugin-sdk/*"],
   outfile: "dist/index.cjs",
 });
@@ -16,6 +22,7 @@ await build({
 await build({
   entryPoints: [
     "src/config.ts",
+    "src/plugin-version.ts",
     "src/service.ts",
     "src/otel-bootstrap.ts",
     "src/session-store.ts",
@@ -26,6 +33,7 @@ await build({
   platform: "node",
   format: "esm",
   target: "node22",
+  define,
   outdir: "dist",
   outbase: ".",
 });

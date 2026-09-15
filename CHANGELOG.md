@@ -1,6 +1,15 @@
 # Changelog
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
+## 2026-09-15
+
+Release: `v0.7.3-rc.15` (pre-release; stable latest remains `v0.7.2`).
+
+### Empty Aggregate Trace Filtering
+
+- Do not create a standalone trace from an unassociated OpenClaw `model.usage` aggregate event. Such events have no owning `message.queued` request or transcript turn; they continue to contribute available aggregate metrics and diagnostic logs, but no longer appear as `0 ns` traces without input or output.
+- Add the resource attribute `telemetry_version` to every exported trace, metric, and log. Its value is injected from the release artifact version and cannot be overridden by user configuration, allowing all Agent telemetry integrations to identify the collecting implementation version consistently.
+
 ## 2026-09-14
 
 Release: `v0.7.3-rc.14` (pre-release; stable latest remains `v0.7.2`).

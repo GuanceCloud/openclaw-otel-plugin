@@ -977,10 +977,22 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             genAiModelMetricAttrs,
           );
         }
+        // model.usage is a process-level aggregate event in some OpenClaw
+        // versions. Without a request opened by message.queued it has neither
+        // a trustworthy duration nor a user/transcript turn, so it must not
+        // bootstrap a standalone empty trace.
+        if (!hasActiveTrace) {
+          logDiagnosticEvent(evt, modelUsageAttrs, {
+            body: `model.usage ${evt.provider ?? "unknown"}/${evt.model ?? "unknown"} (unassociated; metrics only)`,
+            severityNumber: SeverityNumber.INFO,
+            severityText: "INFO",
+          });
+          break;
+        }
         const run = ensureRuntimeLifecycleSpans(
           evt,
           {
-            createIfMissing: true,
+            createIfMissing: false,
             startTsHint: modelStartTs,
             processingStartTs: modelStartTs,
             nextActionTs: typeof modelStartTs === "number" ? modelStartTs + MIN_VISIBLE_CHILD_MS : undefined,

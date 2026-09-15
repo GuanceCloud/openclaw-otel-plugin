@@ -215,6 +215,7 @@ invoke_agent
 | --- | --- |
 | `agent_runtime` | agent runtime 名称，当前为 `openclaw` |
 | `agent_version` | agent / runtime 版本 |
+| `telemetry_version` | 采集实现构建版本；由安装包写入，不允许通过用户配置覆盖。所有 Agent OTEL 插件统一使用该字段，用于定位数据由哪个采集版本产生 |
 | `app_name` | 业务应用名称 |
 | `app_id` | 业务应用标识 |
 
