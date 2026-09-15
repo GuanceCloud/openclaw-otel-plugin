@@ -3,6 +3,18 @@
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 ## 2026-09-15
 
+Release: `v0.7.3` (stable).
+
+### OpenClaw Native LLM Trace Completion
+
+- Export native LLM input/output transcript messages after persistence, including first-turn tool calls and subsequent turns' user, tool-call, and tool-result context.
+- Export standard `gen_ai.response.time_to_first_chunk` when OpenClaw reports the native first response, without modifying LLM span duration.
+- Preserve real observed runtime tool and skill durations instead of a fixed visibility window.
+- Ignore unassociated `model.usage` aggregates when creating traces, preventing empty `0 ns` records without input or output while retaining available metrics and diagnostic logs.
+- Add the universal Resource attribute `telemetry_version` to every trace, metric, and log. It identifies the telemetry artifact version and is populated from the release build.
+
+## 2026-09-15
+
 Release: `v0.7.3-rc.15` (pre-release; stable latest remains `v0.7.2`).
 
 ### Empty Aggregate Trace Filtering
