@@ -1,6 +1,14 @@
 # Changelog
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
+
+## 2026-09-20
+
+### GenAI Token Accounting
+
+- Include OpenClaw `cacheRead` and `cacheWrite` in `gen_ai.client.token.usage` input and the corresponding GenAI input usage attributes. Use a trustworthy per-call usage total to avoid duplicate cache counts when upstream input already includes them.
+- Keep output tokens unchanged and preserve separate cache read/write breakdowns.
+
 ## 2026-09-15
 
 Release: `v0.7.3` (stable).

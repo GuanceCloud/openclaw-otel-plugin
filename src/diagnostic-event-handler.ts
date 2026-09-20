@@ -470,7 +470,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           && latencyMs >= 0 && Number.isFinite(evt.durationMs) && evt.durationMs >= latencyMs;
         const run = getRun(evt, false);
         const resolvedSessionKey = resolveSessionKey?.(evt) ?? evt.sessionKey;
-        const usageTotals = resolveUsageTokenTotals(evt.usage);
+        const usageTotals = resolveUsageTokenTotals(evt.usage, { trustTotalTokens: true });
         let emittedNativeModelSpan = false;
         if (runHasId(run, evt.runId) && evt.callId && Number.isFinite(evt.ts)
           && Number.isFinite(evt.durationMs) && evt.durationMs >= 0) {
@@ -906,7 +906,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const modelStartTs = typeof evt.ts === "number" && typeof evt.durationMs === "number"
           ? evt.ts - Math.max(evt.durationMs, 1)
           : evt.ts;
-        const usageTotals = resolveUsageTokenTotals(evt.usage);
+        const usageTotals = resolveUsageTokenTotals(evt.usage, { trustTotalTokens: true });
         const modelUsageAttrs = {
           "openclaw.channel": evt.channel,
           "openclaw.provider": evt.provider,
@@ -949,25 +949,19 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         );
         const enrichedModelUsageAttrs = enrichWithTranscript(resolvedSessionKey, modelUsageAttrs);
         const tokenMetrics = [
-          ["input", evt.usage.input],
-          ["output", evt.usage.output],
-          ["cache_read", evt.usage.cacheRead],
-          ["cache_write", evt.usage.cacheWrite],
-          ["prompt", evt.usage.promptTokens],
-          ["total", usageTotals.totalTokens],
+          ["input", usageTotals.inputTokens],
+          ["output", usageTotals.outputTokens],
         ] as const;
         for (const [tokenType, tokenValue] of tokenMetrics) {
-          if (typeof tokenValue === "number" && tokenValue > 0) {
-            if (tokenType === "input" || tokenType === "output") {
-              const genAiTokenMetricAttrs = buildGenAiClientTokenMetricAttrs(evt.provider, evt.model, {
-                session_id: resolvedSessionId,
-                token_type: tokenType,
-              });
-              instruments.genAiClientTokenUsage?.record(
-                tokenValue,
-                genAiTokenMetricAttrs,
-              );
-            }
+          if (tokenValue > 0) {
+            const genAiTokenMetricAttrs = buildGenAiClientTokenMetricAttrs(evt.provider, evt.model, {
+              session_id: resolvedSessionId,
+              token_type: tokenType,
+            });
+            instruments.genAiClientTokenUsage?.record(
+              tokenValue,
+              genAiTokenMetricAttrs,
+            );
           }
         }
         if (typeof evt.durationMs === "number") {

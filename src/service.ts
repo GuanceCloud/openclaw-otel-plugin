@@ -1547,14 +1547,16 @@ export function createOtelPluginService(
         releaseRequestKey(sessionKey, requestKey);
       };
 
-      const resolveSnapshotUsageTotals = (snapshot: ReturnType<typeof loadSessionSnapshot>) => ({
-        inputTokens: snapshot?.sessionUsageTotals?.input ?? snapshot?.lastAssistantUsage?.input ?? 0,
-        outputTokens: snapshot?.sessionUsageTotals?.output ?? snapshot?.lastAssistantUsage?.output ?? 0,
-        cacheReadTokens: snapshot?.sessionUsageTotals?.cacheRead ?? snapshot?.lastAssistantUsage?.cacheRead ?? 0,
-        cacheWriteTokens: snapshot?.sessionUsageTotals?.cacheWrite ?? snapshot?.lastAssistantUsage?.cacheWrite ?? 0,
-        totalTokens: snapshot?.sessionUsageTotals?.totalTokens
-          ?? resolveUsageTokenTotals(snapshot?.lastAssistantUsage).totalTokens,
-      });
+      const resolveSnapshotUsageTotals = (snapshot: ReturnType<typeof loadSessionSnapshot>) => {
+        const lastUsageTotals = resolveUsageTokenTotals(snapshot?.lastAssistantUsage);
+        return {
+          inputTokens: snapshot?.sessionUsageTotals?.input ?? lastUsageTotals.inputTokens,
+          outputTokens: snapshot?.sessionUsageTotals?.output ?? lastUsageTotals.outputTokens,
+          cacheReadTokens: snapshot?.sessionUsageTotals?.cacheRead ?? lastUsageTotals.cacheReadTokens,
+          cacheWriteTokens: snapshot?.sessionUsageTotals?.cacheWrite ?? lastUsageTotals.cacheWriteTokens,
+          totalTokens: snapshot?.sessionUsageTotals?.totalTokens ?? lastUsageTotals.totalTokens,
+        };
+      };
 
       const syncRootFromRun = (evt: { sessionKey?: string; sessionId?: string; runId?: string }) => {
         const sessionKey = resolveSessionKey(evt);

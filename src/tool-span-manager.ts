@@ -218,6 +218,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       | {
         input?: number;
         output?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
         totalTokens?: number;
       }
       | undefined,

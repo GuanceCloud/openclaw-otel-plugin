@@ -131,9 +131,13 @@ test("native first response is exported as a standard llm tag before span end", 
 test("native model calls stay under the live request and suppress the later aggregate llm", () => {
   const children = [];
   const aggregateEvents = [];
+  const tokenRecords = [];
   const run = { runId: "run-1", ctx: "invoke-agent", mainStartTs: 1000 };
   const handler = createDiagnosticEventHandler({
-    instruments: { genAiClientTimeToFirstChunk: { record() {} } },
+    instruments: {
+      genAiClientTimeToFirstChunk: { record() {} },
+      genAiClientTokenUsage: { record: (value, attrs) => tokenRecords.push([attrs["gen_ai.token.type"], value]) },
+    },
     SpanStatusCode: { OK: 1, ERROR: 2 }, SeverityNumber: { INFO: 9 },
     trace: { setSpan: (_ctx, span) => span },
     cleanupExpiredRoots() {}, getRun: () => run, getRoot: () => ({ span: createFakeSpan("root") }),
@@ -153,7 +157,9 @@ test("native model calls stay under the live request and suppress the later aggr
       type: "model.call.completed", sessionKey: "session-key", sessionId: "session-id",
       runId: "run-1", callId: `call-${index + 1}`, provider: "volcengine-plan", model: "ark-code-latest",
       ts: 10_000 + index * 10_000, durationMs: 5_000, timeToFirstByteMs,
-      usage: { input: 10 + index, output: 2 },
+      usage: index === 0
+        ? { input: 10, output: 2, cacheRead: 50, cacheWrite: 5, totalTokens: 67 }
+        : { input: 10 + index, output: 2 },
     });
   }
   handler({
@@ -169,6 +175,11 @@ test("native model calls stay under the live request and suppress the later aggr
     [3.588, 1.544, 2.957],
   );
   assert.equal(aggregateEvents.length, 3);
+  assert.deepEqual(tokenRecords, [
+    ["input", 65], ["output", 2],
+    ["input", 11], ["output", 2],
+    ["input", 12], ["output", 2],
+  ]);
 });
 
 test("late model usage after transcript replay does not duplicate trace or metrics", () => {
@@ -2458,6 +2469,7 @@ test("session.state idle leaves final_status empty when no business outcome is a
 test("model.usage emits llm span and preserves model context", () => {
   const childCalls = [];
   const aggregateEvents = [];
+  const tokenRecords = [];
   const lifecycleCalls = [];
   const enrichmentSessionKeys = [];
   const run = {
@@ -2475,6 +2487,7 @@ test("model.usage emits llm span and preserves model context", () => {
       diagnosticsCostUsdCounter: { add() {} },
       diagnosticsRunDurationMs: { record() {} },
       diagnosticsContextTokens: { record() {} },
+      genAiClientTokenUsage: { record: (value, attrs) => tokenRecords.push({ value, attrs }) },
     },
     SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
     SeverityNumber: { INFO: "INFO", ERROR: "ERROR" },
@@ -2556,7 +2569,7 @@ test("model.usage emits llm span and preserves model context", () => {
   assert.equal(childCalls[0].attrs["openclaw.sessionKey"], "s1");
   assert.equal(childCalls[0].attrs["llm.model"], "gpt-5");
   assert.equal(childCalls[0].attrs["openclaw.tokens.cache_read"], 6400);
-  assert.equal(childCalls[0].attrs["openclaw.tokens.total"], 46);
+  assert.equal(childCalls[0].attrs["openclaw.tokens.total"], 6446);
   assert.equal(childCalls[0].attrs["llm.total_tokens"], undefined);
   assert.equal(childCalls[0].parentCtx.ctx, "run");
   assert.equal(childCalls[0].span.status.code, "OK");
@@ -2564,7 +2577,11 @@ test("model.usage emits llm span and preserves model context", () => {
   assert.equal(run.modelStartTs, 600);
   assert.equal(run.modelCtx.span.name, "llm");
   assert.equal(aggregateEvents[0].ts, 1000);
-  assert.equal(aggregateEvents[0].usage.total, 46);
+  assert.equal(aggregateEvents[0].usage.total, 6446);
+  assert.deepEqual(tokenRecords.map(({ value, attrs }) => [attrs["gen_ai.token.type"], value]), [
+    ["input", 6412],
+    ["output", 34],
+  ]);
   assert.equal(lifecycleCalls[0].evt.ts, 1000);
   assert.equal(lifecycleCalls[0].options.startTsHint, 600);
   assert.equal(lifecycleCalls[0].options.processingStartTs, 600);

@@ -1329,9 +1329,9 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
   assert.deepEqual(getRunCalls, [true, false, false]);
   assert.equal(modelSpan.options.kind, "client");
   assert.equal(modelSpan.options.attributes["span.kind"], "model");
-  assert.equal(modelSpan.options.attributes.usage_input_tokens, 12);
+  assert.equal(modelSpan.options.attributes.usage_input_tokens, 24);
   assert.equal(modelSpan.options.attributes.usage_output_tokens, 34);
-  assert.equal(modelSpan.options.attributes.usage_total_tokens, 46);
+  assert.equal(modelSpan.options.attributes.usage_total_tokens, 58);
   assert.equal(modelSpan.options.attributes.usage_cache_read_input_tokens, 5);
   assert.equal(modelSpan.options.attributes.usage_cache_write_input_tokens, 7);
   assert.equal(modelSpan.options.attributes.usage_cache_total_tokens, 12);
@@ -1358,7 +1358,7 @@ test("synthetic model span creates a run when transcript metadata exists", () =>
       session_id: attrs.session_id,
     })),
     [
-      { value: 12, token_type: "input", request_model: "gpt-5", session_id: "sid-1" },
+      { value: 24, token_type: "input", request_model: "gpt-5", session_id: "sid-1" },
       { value: 34, token_type: "output", request_model: "gpt-5", session_id: "sid-1" },
     ],
   );

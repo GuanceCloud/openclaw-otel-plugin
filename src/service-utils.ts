@@ -111,6 +111,7 @@ export function resolveUsageTokenTotals(
       totalTokens?: number;
     }
     | undefined,
+  options: { trustTotalTokens?: boolean } = {},
 ): {
   inputTokens: number;
   outputTokens: number;
@@ -118,7 +119,7 @@ export function resolveUsageTokenTotals(
   cacheWriteTokens: number;
   totalTokens: number;
 } {
-  const inputTokens = typeof usage?.input === "number" ? usage.input : 0;
+  const uncachedInputTokens = typeof usage?.input === "number" ? usage.input : 0;
   const outputTokens = typeof usage?.output === "number" ? usage.output : 0;
   const cacheReadTokens = typeof usage?.cacheRead === "number" ? usage.cacheRead : 0;
   const cacheWriteTokens = typeof usage?.cacheWrite === "number" ? usage.cacheWrite : 0;
@@ -127,6 +128,23 @@ export function resolveUsageTokenTotals(
     : typeof usage?.total === "number"
       ? usage.total
       : 0;
+  const usageTotalTokens = typeof usage?.total === "number"
+    ? usage.total
+    : options.trustTotalTokens && typeof usage?.totalTokens === "number"
+      ? usage.totalTokens
+      : undefined;
+  const cachedInputTokens = cacheReadTokens + cacheWriteTokens;
+  // OpenClaw normally reports uncached input and both cache buckets separately.
+  // OTel input usage includes those buckets. A provider usage total can identify
+  // an already-inclusive input; transcript totalTokens may instead be a context
+  // snapshot, so only callers with a per-call total should trust that field.
+  const inputAlreadyIncludesCache = cachedInputTokens > 0
+    && uncachedInputTokens >= cachedInputTokens
+    && typeof usageTotalTokens === "number"
+    && usageTotalTokens > 0
+    && usageTotalTokens === uncachedInputTokens + outputTokens;
+  const inputTokens = uncachedInputTokens
+    + (inputAlreadyIncludesCache ? 0 : cachedInputTokens);
   const totalTokens = inputTokens > 0 || outputTokens > 0
     ? inputTokens + outputTokens
     : rawTotalTokens;

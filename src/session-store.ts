@@ -26,6 +26,7 @@ import {
   normalizeUserInputPreview,
   parseSessionKey,
   readJsonLines,
+  resolveUsageTokenTotals,
   summarizeToolCallOutput,
   uniqStrings,
 } from "./service-utils.js";
@@ -1067,9 +1068,13 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             const cacheRead = turnUsage?.cacheRead ?? 0;
             const cacheWrite = turnUsage?.cacheWrite ?? 0;
             const totalTokens = turnUsage?.totalTokens ?? 0;
-            const additiveTotalTokens = input > 0 || output > 0
-              ? input + output
-              : totalTokens;
+            const usageTotals = resolveUsageTokenTotals({
+              input,
+              output,
+              cacheRead,
+              cacheWrite,
+              totalTokens,
+            });
             lastAssistantUsage = {
               input: input || undefined,
               output: output || undefined,
@@ -1077,11 +1082,11 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
               cacheWrite: cacheWrite || undefined,
               totalTokens: totalTokens || undefined,
             };
-            sessionUsageTotals.input += input;
-            sessionUsageTotals.output += output;
+            sessionUsageTotals.input += usageTotals.inputTokens;
+            sessionUsageTotals.output += usageTotals.outputTokens;
             sessionUsageTotals.cacheRead += cacheRead;
             sessionUsageTotals.cacheWrite += cacheWrite;
-            sessionUsageTotals.totalTokens += additiveTotalTokens;
+            sessionUsageTotals.totalTokens += usageTotals.totalTokens;
           }
         }
         if (message.role === "toolResult") {
