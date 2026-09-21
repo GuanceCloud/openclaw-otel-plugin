@@ -107,6 +107,7 @@ export function resolveUsageTokenTotals(
       output?: number;
       cacheRead?: number;
       cacheWrite?: number;
+      promptTokens?: number;
       total?: number;
       totalTokens?: number;
     }
@@ -118,7 +119,7 @@ export function resolveUsageTokenTotals(
   cacheWriteTokens: number;
   totalTokens: number;
 } {
-  const inputTokens = typeof usage?.input === "number" ? usage.input : 0;
+  const uncachedInputTokens = typeof usage?.input === "number" ? usage.input : 0;
   const outputTokens = typeof usage?.output === "number" ? usage.output : 0;
   const cacheReadTokens = typeof usage?.cacheRead === "number" ? usage.cacheRead : 0;
   const cacheWriteTokens = typeof usage?.cacheWrite === "number" ? usage.cacheWrite : 0;
@@ -127,6 +128,13 @@ export function resolveUsageTokenTotals(
     : typeof usage?.total === "number"
       ? usage.total
       : 0;
+  // OpenClaw promptTokens is the complete input, including both cache buckets.
+  // When absent, its separate input/cache counters provide the OTel input total.
+  // A provider total is not reliable evidence that input already includes cache.
+  const inputTokens = typeof usage?.promptTokens === "number"
+    && Number.isFinite(usage.promptTokens) && usage.promptTokens >= 0
+    ? usage.promptTokens
+    : uncachedInputTokens + cacheReadTokens + cacheWriteTokens;
   const totalTokens = inputTokens > 0 || outputTokens > 0
     ? inputTokens + outputTokens
     : rawTotalTokens;

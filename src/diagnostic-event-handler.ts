@@ -949,25 +949,19 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         );
         const enrichedModelUsageAttrs = enrichWithTranscript(resolvedSessionKey, modelUsageAttrs);
         const tokenMetrics = [
-          ["input", evt.usage.input],
-          ["output", evt.usage.output],
-          ["cache_read", evt.usage.cacheRead],
-          ["cache_write", evt.usage.cacheWrite],
-          ["prompt", evt.usage.promptTokens],
-          ["total", usageTotals.totalTokens],
+          ["input", usageTotals.inputTokens],
+          ["output", usageTotals.outputTokens],
         ] as const;
         for (const [tokenType, tokenValue] of tokenMetrics) {
-          if (typeof tokenValue === "number" && tokenValue > 0) {
-            if (tokenType === "input" || tokenType === "output") {
-              const genAiTokenMetricAttrs = buildGenAiClientTokenMetricAttrs(evt.provider, evt.model, {
-                session_id: resolvedSessionId,
-                token_type: tokenType,
-              });
-              instruments.genAiClientTokenUsage?.record(
-                tokenValue,
-                genAiTokenMetricAttrs,
-              );
-            }
+          if (tokenValue > 0) {
+            const genAiTokenMetricAttrs = buildGenAiClientTokenMetricAttrs(evt.provider, evt.model, {
+              session_id: resolvedSessionId,
+              token_type: tokenType,
+            });
+            instruments.genAiClientTokenUsage?.record(
+              tokenValue,
+              genAiTokenMetricAttrs,
+            );
           }
         }
         if (typeof evt.durationMs === "number") {

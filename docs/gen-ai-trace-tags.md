@@ -281,10 +281,10 @@ invoke_agent
 | `gen_ai.conversation.id` | OpenClaw `session_id` 对应的 conversation id |
 | `gen_ai.input.messages` | 使用现有 `input_preview` 构造的官方 input messages JSON 字符串 |
 | `gen_ai.output.messages` | 使用现有 `output_preview` / `output_summary` / tool preview 构造的官方 output messages JSON 字符串 |
-| `gen_ai.usage.input_tokens` | 输入 token 数；当前主要落在 `llm` |
+| `gen_ai.usage.input_tokens` | 输入 token 总数，优先取有效的 OpenClaw `promptTokens`，否则取 `input + cacheRead + cacheWrite`；当前主要落在 `llm` |
 | `gen_ai.usage.output_tokens` | 输出 token 数；当前主要落在 `llm` |
-| `gen_ai.usage.cache_read.input_tokens` | cache read input token 数；当前主要落在 `llm` |
-| `gen_ai.usage.cache_creation.input_tokens` | cache creation / write input token 数；当前主要落在 `llm` |
+| `gen_ai.usage.cache_read.input_tokens` | cache read input token 数，属于 input 子集；当前主要落在 `llm` |
+| `gen_ai.usage.cache_creation.input_tokens` | cache creation / write input token 数，属于 input 子集；当前主要落在 `llm`，沿用已有字段名 |
 | `gen_ai.tool.name` | tool 名称 |
 | `gen_ai.tool.call.id` | tool call 标识 |
 | `gen_ai.tool.call.arguments` | tool 参数 preview，当前为字符串 |
@@ -332,9 +332,9 @@ invoke_agent
 | `output_summary` | 输出摘要 / 思考摘要 |
 | `output_text_length` | 最终文本长度 |
 | `output_kind` | 输出类型，例如 `text`、`tool_call` |
-| `usage_input_tokens` | 输入 token 数 |
+| `usage_input_tokens` | 输入 token 总数，包含 cache read / write |
 | `usage_output_tokens` | 输出 token 数 |
-| `usage_total_tokens` | 总 token 数 |
+| `usage_total_tokens` | 输入加输出 token 总数 |
 | `usage_cache_read_input_tokens` | cache read token 数 |
 | `usage_cache_write_input_tokens` | cache write token 数 |
 | `usage_cache_total_tokens` | cache read + cache write token 总数 |

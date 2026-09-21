@@ -327,6 +327,7 @@ test("session store aggregates session token totals and trace count", () => {
         usage: {
           input: 13,
           output: 5,
+          promptTokens: 20,
           totalTokens: 18,
         },
       },
@@ -343,11 +344,11 @@ test("session store aggregates session token totals and trace count", () => {
 
   assert.ok(snapshot);
   assert.deepEqual(snapshot.sessionUsageTotals, {
-    input: 24,
+    input: 34,
     output: 12,
     cacheRead: 2,
     cacheWrite: 1,
-    totalTokens: 36,
+    totalTokens: 46,
   });
   assert.equal(snapshot.traceCount, 2);
   assert.equal(snapshot.lastUserTs, 2000);
@@ -363,6 +364,7 @@ test("session store aggregates session token totals and trace count", () => {
         output: 5,
         cacheRead: undefined,
         cacheWrite: undefined,
+        promptTokens: 20,
         totalTokens: 18,
       },
       inputPreview: "second",
@@ -377,6 +379,7 @@ test("session store aggregates session token totals and trace count", () => {
     output: 5,
     cacheRead: undefined,
     cacheWrite: undefined,
+    promptTokens: 20,
     totalTokens: 18,
   });
 });
@@ -528,11 +531,11 @@ test("session store derives per-turn cache usage from cumulative transcript cach
 
   assert.ok(snapshot);
   assert.deepEqual(snapshot.sessionUsageTotals, {
-    input: 24,
+    input: 32024,
     output: 12,
     cacheRead: 32000,
     cacheWrite: 0,
-    totalTokens: 36,
+    totalTokens: 32036,
   });
   assert.deepEqual(withoutTranscriptMessageContexts(snapshot.lastRunAssistantTurns), [
     {

@@ -406,7 +406,7 @@ test("shouldFallbackRunBoundEventToActiveRequest blocks stale explicit run ids f
   );
 });
 
-test("resolveUsageTokenTotals keeps cache tokens separate from llm total tokens", () => {
+test("resolveUsageTokenTotals includes OpenClaw cache read in OTel input without changing output", () => {
   assert.deepEqual(
     resolveUsageTokenTotals({
       input: 504,
@@ -416,13 +416,69 @@ test("resolveUsageTokenTotals keeps cache tokens separate from llm total tokens"
       totalTokens: 65237,
     }),
     {
-      inputTokens: 504,
+      inputTokens: 65144,
       outputTokens: 93,
       cacheReadTokens: 64640,
       cacheWriteTokens: 0,
-      totalTokens: 597,
+      totalTokens: 65237,
     },
   );
+  const verifiedWindow = resolveUsageTokenTotals({
+    input: 80249, output: 3326, cacheRead: 232704, total: 316279,
+  });
+  assert.equal(verifiedWindow.inputTokens, 312953);
+  assert.equal(verifiedWindow.outputTokens, 3326);
+  assert.equal(verifiedWindow.totalTokens, 316279);
+});
+
+test("resolveUsageTokenTotals includes cache write and retains usage without cache", () => {
+  assert.deepEqual(resolveUsageTokenTotals({
+    input: 12, output: 34, cacheRead: 5, cacheWrite: 7, totalTokens: 58,
+  }), {
+    inputTokens: 24, outputTokens: 34, cacheReadTokens: 5,
+    cacheWriteTokens: 7, totalTokens: 58,
+  });
+  assert.deepEqual(resolveUsageTokenTotals({ input: 12, output: 34, totalTokens: 46 }), {
+    inputTokens: 12, outputTokens: 34, cacheReadTokens: 0,
+    cacheWriteTokens: 0, totalTokens: 46,
+  });
+});
+
+test("resolveUsageTokenTotals prefers promptTokens and never infers cache inclusion from total", () => {
+  assert.deepEqual(resolveUsageTokenTotals({
+    input: 12, output: 34, cacheRead: 5, cacheWrite: 7,
+    promptTokens: 24, total: 46,
+  }), {
+    inputTokens: 24, outputTokens: 34, cacheReadTokens: 5,
+    cacheWriteTokens: 7, totalTokens: 58,
+  });
+  assert.equal(resolveUsageTokenTotals({
+    input: 24, output: 34, cacheRead: 5, cacheWrite: 7, total: 58,
+  }).inputTokens, 36);
+  assert.equal(resolveUsageTokenTotals({
+    input: 12, output: 34, cacheRead: 6400, totalTokens: 46,
+  }).inputTokens, 6412);
+  assert.equal(resolveUsageTokenTotals({
+    input: 24, output: 34, cacheRead: 5, cacheWrite: 7, promptTokens: 24,
+  }).inputTokens, 24);
+  assert.deepEqual(resolveUsageTokenTotals({ cacheRead: 5 }), {
+    inputTokens: 5, outputTokens: 0, cacheReadTokens: 5,
+    cacheWriteTokens: 0, totalTokens: 5,
+  });
+});
+
+test("resolveUsageTokenTotals accepts finite non-negative promptTokens and falls back otherwise", () => {
+  for (const promptTokens of [undefined, -1, Number.NaN, Infinity]) {
+    assert.equal(resolveUsageTokenTotals({
+      input: 12, output: 34, cacheRead: 5, cacheWrite: 7, promptTokens,
+    }).inputTokens, 24);
+  }
+  assert.deepEqual(resolveUsageTokenTotals({
+    input: 12, output: 34, cacheRead: 5, cacheWrite: 7, promptTokens: 0,
+  }), {
+    inputTokens: 0, outputTokens: 34, cacheReadTokens: 5,
+    cacheWriteTokens: 7, totalTokens: 34,
+  });
 });
 
 test("resolveRequestClassification marks runtime continue prompts as internal requests", () => {

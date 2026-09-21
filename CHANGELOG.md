@@ -1,6 +1,20 @@
 # Changelog
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
+
+## 2026-09-21
+
+### GenAI Token Accounting
+
+- Prefer OpenClaw's complete `promptTokens` for GenAI input usage, falling back to `input + cacheRead + cacheWrite` when unavailable. Provider `total` fields no longer determine whether cache is included.
+
+## 2026-09-20
+
+### GenAI Token Accounting
+
+- Include OpenClaw `cacheRead` and `cacheWrite` in `gen_ai.client.token.usage` input and the corresponding GenAI input usage attributes.
+- Keep output tokens unchanged and preserve separate cache read/write breakdowns.
+
 ## 2026-09-15
 
 Release: `v0.7.3` (stable).

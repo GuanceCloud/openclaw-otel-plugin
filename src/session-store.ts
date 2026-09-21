@@ -26,6 +26,7 @@ import {
   normalizeUserInputPreview,
   parseSessionKey,
   readJsonLines,
+  resolveUsageTokenTotals,
   summarizeToolCallOutput,
   uniqStrings,
 } from "./service-utils.js";
@@ -453,6 +454,7 @@ function resolveTrajectoryUsage(raw: unknown): RunUsageTotals | undefined {
     output: typeof record.output === "number" ? record.output : undefined,
     cacheRead: typeof record.cacheRead === "number" ? record.cacheRead : undefined,
     cacheWrite: typeof record.cacheWrite === "number" ? record.cacheWrite : undefined,
+    ...(typeof record.promptTokens === "number" ? { promptTokens: record.promptTokens } : {}),
     total: typeof record.total === "number"
       ? record.total
       : typeof record.totalTokens === "number"
@@ -1031,6 +1033,9 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
                 output,
                 cacheRead,
                 cacheWrite,
+                ...(typeof rawUsage.promptTokens === "number"
+                  ? { promptTokens: rawUsage.promptTokens }
+                  : {}),
                 totalTokens: typeof rawUsage.totalTokens === "number"
                   ? rawUsage.totalTokens
                   : undefined,
@@ -1067,21 +1072,31 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             const cacheRead = turnUsage?.cacheRead ?? 0;
             const cacheWrite = turnUsage?.cacheWrite ?? 0;
             const totalTokens = turnUsage?.totalTokens ?? 0;
-            const additiveTotalTokens = input > 0 || output > 0
-              ? input + output
-              : totalTokens;
+            const usageTotals = resolveUsageTokenTotals({
+              input,
+              output,
+              cacheRead,
+              cacheWrite,
+              ...(typeof turnUsage?.promptTokens === "number"
+                ? { promptTokens: turnUsage.promptTokens }
+                : {}),
+              totalTokens,
+            });
             lastAssistantUsage = {
               input: input || undefined,
               output: output || undefined,
               cacheRead: cacheRead || undefined,
               cacheWrite: cacheWrite || undefined,
+              ...(typeof turnUsage?.promptTokens === "number"
+                ? { promptTokens: turnUsage.promptTokens }
+                : {}),
               totalTokens: totalTokens || undefined,
             };
-            sessionUsageTotals.input += input;
-            sessionUsageTotals.output += output;
+            sessionUsageTotals.input += usageTotals.inputTokens;
+            sessionUsageTotals.output += usageTotals.outputTokens;
             sessionUsageTotals.cacheRead += cacheRead;
             sessionUsageTotals.cacheWrite += cacheWrite;
-            sessionUsageTotals.totalTokens += additiveTotalTokens;
+            sessionUsageTotals.totalTokens += usageTotals.totalTokens;
           }
         }
         if (message.role === "toolResult") {
