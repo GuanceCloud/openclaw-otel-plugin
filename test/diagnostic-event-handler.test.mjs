@@ -158,7 +158,7 @@ test("native model calls stay under the live request and suppress the later aggr
       runId: "run-1", callId: `call-${index + 1}`, provider: "volcengine-plan", model: "ark-code-latest",
       ts: 10_000 + index * 10_000, durationMs: 5_000, timeToFirstByteMs,
       usage: index === 0
-        ? { input: 10, output: 2, cacheRead: 50, cacheWrite: 5, totalTokens: 67 }
+        ? { input: 10, output: 2, cacheRead: 50, cacheWrite: 5, promptTokens: 65, totalTokens: 12 }
         : { input: 10 + index, output: 2 },
     });
   }
@@ -2559,7 +2559,7 @@ test("model.usage emits llm span and preserves model context", () => {
     channel: "chat",
     provider: "openai",
     model: "gpt-5",
-    usage: { input: 12, output: 34, cacheRead: 6400, total: 6446 },
+    usage: { input: 12, output: 34, cacheRead: 6400, promptTokens: 6412, total: 46 },
     durationMs: 400,
   });
 

@@ -470,7 +470,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           && latencyMs >= 0 && Number.isFinite(evt.durationMs) && evt.durationMs >= latencyMs;
         const run = getRun(evt, false);
         const resolvedSessionKey = resolveSessionKey?.(evt) ?? evt.sessionKey;
-        const usageTotals = resolveUsageTokenTotals(evt.usage, { trustTotalTokens: true });
+        const usageTotals = resolveUsageTokenTotals(evt.usage);
         let emittedNativeModelSpan = false;
         if (runHasId(run, evt.runId) && evt.callId && Number.isFinite(evt.ts)
           && Number.isFinite(evt.durationMs) && evt.durationMs >= 0) {
@@ -906,7 +906,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const modelStartTs = typeof evt.ts === "number" && typeof evt.durationMs === "number"
           ? evt.ts - Math.max(evt.durationMs, 1)
           : evt.ts;
-        const usageTotals = resolveUsageTokenTotals(evt.usage, { trustTotalTokens: true });
+        const usageTotals = resolveUsageTokenTotals(evt.usage);
         const modelUsageAttrs = {
           "openclaw.channel": evt.channel,
           "openclaw.provider": evt.provider,

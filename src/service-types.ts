@@ -71,6 +71,7 @@ export type RunUsageTotals = {
   output?: number;
   cacheRead?: number;
   cacheWrite?: number;
+  promptTokens?: number;
   total?: number;
 };
 
@@ -182,6 +183,7 @@ export type TranscriptAssistantTurn = {
     output?: number;
     cacheRead?: number;
     cacheWrite?: number;
+    promptTokens?: number;
     totalTokens?: number;
   };
   inputPreview?: string;
@@ -230,6 +232,7 @@ export type SessionSnapshot = {
     output?: number;
     cacheRead?: number;
     cacheWrite?: number;
+    promptTokens?: number;
     totalTokens?: number;
   };
   sessionUsageTotals?: SessionUsageTotals;

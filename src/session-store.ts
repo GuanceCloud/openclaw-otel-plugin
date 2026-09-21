@@ -454,6 +454,7 @@ function resolveTrajectoryUsage(raw: unknown): RunUsageTotals | undefined {
     output: typeof record.output === "number" ? record.output : undefined,
     cacheRead: typeof record.cacheRead === "number" ? record.cacheRead : undefined,
     cacheWrite: typeof record.cacheWrite === "number" ? record.cacheWrite : undefined,
+    ...(typeof record.promptTokens === "number" ? { promptTokens: record.promptTokens } : {}),
     total: typeof record.total === "number"
       ? record.total
       : typeof record.totalTokens === "number"
@@ -1032,6 +1033,9 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
                 output,
                 cacheRead,
                 cacheWrite,
+                ...(typeof rawUsage.promptTokens === "number"
+                  ? { promptTokens: rawUsage.promptTokens }
+                  : {}),
                 totalTokens: typeof rawUsage.totalTokens === "number"
                   ? rawUsage.totalTokens
                   : undefined,
@@ -1073,6 +1077,9 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
               output,
               cacheRead,
               cacheWrite,
+              ...(typeof turnUsage?.promptTokens === "number"
+                ? { promptTokens: turnUsage.promptTokens }
+                : {}),
               totalTokens,
             });
             lastAssistantUsage = {
@@ -1080,6 +1087,9 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
               output: output || undefined,
               cacheRead: cacheRead || undefined,
               cacheWrite: cacheWrite || undefined,
+              ...(typeof turnUsage?.promptTokens === "number"
+                ? { promptTokens: turnUsage.promptTokens }
+                : {}),
               totalTokens: totalTokens || undefined,
             };
             sessionUsageTotals.input += usageTotals.inputTokens;

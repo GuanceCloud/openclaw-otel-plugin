@@ -1068,6 +1068,7 @@ export function createOtelPluginService(
             output: trajectoryRun.usage?.output,
             cacheRead: trajectoryRun.usage?.cacheRead,
             cacheWrite: trajectoryRun.usage?.cacheWrite,
+            promptTokens: trajectoryRun.usage?.promptTokens,
             total: trajectoryRun.usage?.total,
           });
           const requestClassification = resolveRequestClassification({

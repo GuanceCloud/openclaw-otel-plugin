@@ -220,6 +220,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         output?: number;
         cacheRead?: number;
         cacheWrite?: number;
+        promptTokens?: number;
         totalTokens?: number;
       }
       | undefined,
@@ -274,6 +275,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         output?: number;
         cacheRead?: number;
         cacheWrite?: number;
+        promptTokens?: number;
         totalTokens?: number;
       }
       | undefined,

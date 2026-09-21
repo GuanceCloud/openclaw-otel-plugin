@@ -281,7 +281,7 @@ invoke_agent
 | `gen_ai.conversation.id` | OpenClaw `session_id` 对应的 conversation id |
 | `gen_ai.input.messages` | 使用现有 `input_preview` 构造的官方 input messages JSON 字符串 |
 | `gen_ai.output.messages` | 使用现有 `output_preview` / `output_summary` / tool preview 构造的官方 output messages JSON 字符串 |
-| `gen_ai.usage.input_tokens` | 输入 token 总数，包含 cache read / write；当前主要落在 `llm` |
+| `gen_ai.usage.input_tokens` | 输入 token 总数，优先取有效的 OpenClaw `promptTokens`，否则取 `input + cacheRead + cacheWrite`；当前主要落在 `llm` |
 | `gen_ai.usage.output_tokens` | 输出 token 数；当前主要落在 `llm` |
 | `gen_ai.usage.cache_read.input_tokens` | cache read input token 数，属于 input 子集；当前主要落在 `llm` |
 | `gen_ai.usage.cache_creation.input_tokens` | cache creation / write input token 数，属于 input 子集；当前主要落在 `llm`，沿用已有字段名 |

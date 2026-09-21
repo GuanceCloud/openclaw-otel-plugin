@@ -444,25 +444,40 @@ test("resolveUsageTokenTotals includes cache write and retains usage without cac
   });
 });
 
-test("resolveUsageTokenTotals does not count cache details twice when input is inclusive", () => {
+test("resolveUsageTokenTotals prefers promptTokens and never infers cache inclusion from total", () => {
   assert.deepEqual(resolveUsageTokenTotals({
-    input: 24, output: 34, cacheRead: 5, cacheWrite: 7, total: 58,
+    input: 12, output: 34, cacheRead: 5, cacheWrite: 7,
+    promptTokens: 24, total: 46,
   }), {
     inputTokens: 24, outputTokens: 34, cacheReadTokens: 5,
     cacheWriteTokens: 7, totalTokens: 58,
   });
   assert.equal(resolveUsageTokenTotals({
-    input: 24, output: 34, cacheRead: 5, cacheWrite: 7, totalTokens: 58,
-  }, { trustTotalTokens: true }).inputTokens, 24);
-  assert.equal(resolveUsageTokenTotals({
-    input: 12, output: 34, cacheRead: 5, cacheWrite: 7, totalTokens: 46,
-  }).inputTokens, 24);
+    input: 24, output: 34, cacheRead: 5, cacheWrite: 7, total: 58,
+  }).inputTokens, 36);
   assert.equal(resolveUsageTokenTotals({
     input: 12, output: 34, cacheRead: 6400, totalTokens: 46,
-  }, { trustTotalTokens: true }).inputTokens, 6412);
+  }).inputTokens, 6412);
+  assert.equal(resolveUsageTokenTotals({
+    input: 24, output: 34, cacheRead: 5, cacheWrite: 7, promptTokens: 24,
+  }).inputTokens, 24);
   assert.deepEqual(resolveUsageTokenTotals({ cacheRead: 5 }), {
     inputTokens: 5, outputTokens: 0, cacheReadTokens: 5,
     cacheWriteTokens: 0, totalTokens: 5,
+  });
+});
+
+test("resolveUsageTokenTotals accepts finite non-negative promptTokens and falls back otherwise", () => {
+  for (const promptTokens of [undefined, -1, Number.NaN, Infinity]) {
+    assert.equal(resolveUsageTokenTotals({
+      input: 12, output: 34, cacheRead: 5, cacheWrite: 7, promptTokens,
+    }).inputTokens, 24);
+  }
+  assert.deepEqual(resolveUsageTokenTotals({
+    input: 12, output: 34, cacheRead: 5, cacheWrite: 7, promptTokens: 0,
+  }), {
+    inputTokens: 0, outputTokens: 34, cacheReadTokens: 5,
+    cacheWriteTokens: 7, totalTokens: 34,
   });
 });
 

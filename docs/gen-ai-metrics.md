@@ -25,7 +25,7 @@
 | `gen_ai.agent.operation.count` | Counter | `1` | 基础：`session_id`, `gen_ai.conversation.id`, `gen_ai.operation.name`, `status`；模型调用：`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`；tool 调用：`gen_ai.tool.name`；skill 调用：`gen_ai.skill.name` | Agent 侧 operation 次数。每个 `llm`、`tool:*`、`skill:*` span 记录 1 个点。 |
 | `gen_ai.agent.operation.duration` | Histogram | `ms` | 与 `gen_ai.client.operation.duration` 使用同一组 operation attrs | Agent 侧 operation 耗时兼容指标，覆盖模型调用、tool 执行和 skill 执行窗口。 |
 
-OpenClaw 的标准 usage 把普通 `input`、`cacheRead`、`cacheWrite` 分列；插件将三项合成符合 OpenTelemetry GenAI 语义的 input。若上游单次用量总数明确表明 `input` 已包含缓存明细，则直接使用该 input，避免重复计数。缓存明细作为 input 的子集保留在 trace 属性中，不另报 `gen_ai.token.type`。
+OpenClaw 的标准 usage 把普通 `input`、`cacheRead`、`cacheWrite` 分列，并可提供已包含缓存的 `promptTokens`。插件优先使用有效（有限、非负）的 `promptTokens` 作为符合 OpenTelemetry GenAI 语义的完整 input；缺失或无效时计算 `input + cacheRead + cacheWrite`。`total` / `totalTokens` 不用于推断缓存是否已经包含在 input 中。缓存明细作为 input 的子集保留在 trace 属性中，不另报 `gen_ai.token.type`。
 
 ## 首块响应延迟
 
