@@ -4,6 +4,8 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 ## 2026-09-21
 
+Release: `v0.7.4` (stable).
+
 ### GenAI Token Accounting
 
 - Prefer OpenClaw's complete `promptTokens` for GenAI input usage, falling back to `input + cacheRead + cacheWrite` when unavailable. Provider `total` fields no longer determine whether cache is included.
