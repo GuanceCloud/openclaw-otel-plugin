@@ -576,6 +576,29 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             }
           }
         }
+        // Usage and operation metrics do not depend on first-chunk timing.
+        // A native span also suppresses the later model.usage aggregate, so
+        // record its metrics before any optional timing validation can exit.
+        if (emittedNativeModelSpan) {
+          const metricAttrs = buildGenAiClientModelMetricAttrs(evt.provider, evt.model, {
+            session_id: evt.sessionId,
+          });
+          recordGenAiAgentOperationMetrics(instruments, evt.durationMs, metricAttrs);
+          for (const [tokenType, tokenValue] of [
+            ["input", usageTotals.inputTokens],
+            ["output", usageTotals.outputTokens],
+          ] as const) {
+            if (tokenValue > 0) {
+              instruments.genAiClientTokenUsage?.record(
+                tokenValue,
+                buildGenAiClientTokenMetricAttrs(evt.provider, evt.model, {
+                  session_id: evt.sessionId,
+                  token_type: tokenType,
+                }),
+              );
+            }
+          }
+        }
         if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs) || latencyMs < 0
           || !Number.isFinite(evt.durationMs) || evt.durationMs < latencyMs
           || !evt.runId || !evt.callId) {
@@ -600,26 +623,6 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         recordedFirstChunks.set(key, now);
         if (recordedFirstChunks.size > 10000) {
           recordedFirstChunks.delete(recordedFirstChunks.keys().next().value!);
-        }
-        if (emittedNativeModelSpan) {
-          const metricAttrs = buildGenAiClientModelMetricAttrs(evt.provider, evt.model, {
-            session_id: evt.sessionId,
-          });
-          recordGenAiAgentOperationMetrics(instruments, evt.durationMs, metricAttrs);
-          for (const [tokenType, tokenValue] of [
-            ["input", usageTotals.inputTokens],
-            ["output", usageTotals.outputTokens],
-          ] as const) {
-            if (tokenValue > 0) {
-              instruments.genAiClientTokenUsage?.record(
-                tokenValue,
-                buildGenAiClientTokenMetricAttrs(evt.provider, evt.model, {
-                  session_id: evt.sessionId,
-                  token_type: tokenType,
-                }),
-              );
-            }
-          }
         }
         break;
       }
