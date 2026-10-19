@@ -2,6 +2,12 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-10-19
+
+### Model Call Metrics
+
+- Preserve token usage and operation metrics when native model calls have missing or invalid first-chunk timing. Timing validation now only controls the first-chunk metric, retaining existing per-call and aggregate deduplication.
+
 ## 2026-09-21
 
 Release: `v0.7.4` (stable).
