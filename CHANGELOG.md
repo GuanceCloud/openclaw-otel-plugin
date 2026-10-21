@@ -7,6 +7,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 ### Model Call Metrics
 
 - Preserve token usage and operation metrics when native model calls have missing or invalid first-chunk timing. Timing validation now only controls the first-chunk metric, retaining existing per-call and aggregate deduplication.
+- Keep native model-call operation metrics consistent with span outcomes: failed calls use `status=error`, and completed calls use `status=completed`. Token metrics retain their existing tags.
 
 ## 2026-09-21
 
