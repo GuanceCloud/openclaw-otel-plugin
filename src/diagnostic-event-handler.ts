@@ -850,6 +850,12 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           }
           const replaySnapshotFreshness = snapshotIsFreshForQueuedRequest(snapshot, activeRun, evt.ts);
           const replaySnapshotIsFresh = replaySnapshotFreshness === true;
+          if (hasActiveTrace && !hasRunTelemetryPayload(activeRun) && !replaySnapshotIsFresh) {
+            // An empty attempt (for example a harness fallback) must not export
+            // the previous answer as a new user trace or finalize its run ID.
+            discardActiveRequest?.(evt);
+            break;
+          }
           const replayEvt = withSnapshotRunId(evt, snapshot, replaySnapshotFreshness);
           if (!hasActiveTrace && replaySnapshotFreshness !== true) {
             break;

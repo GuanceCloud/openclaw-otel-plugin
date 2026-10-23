@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { zstdCompressSync } from "node:zlib";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -25,19 +27,26 @@ if (!workerScenario) {
     return JSON.parse(result.stdout);
   }
   for (const scenario of ["queued-duplicate", "processing-duplicate", "transcript-before-native",
-    "idle-before-native", "active-trajectory", "revised-terminal", "independent-turns"]) {
+    "idle-before-native", "active-trajectory", "revised-terminal", "independent-turns",
+    "sqlite-native", "sqlite-replay", "sqlite-empty-attempt"]) {
     test(`service replay ownership: ${scenario}`, { timeout: 15000 }, async () => {
       const result = await run(scenario);
       try {
         const expected = scenario === "independent-turns" ? 2 : 1;
         assert.equal(result.roots, expected, JSON.stringify(result));
         assert.equal(result.models, expected, JSON.stringify(result));
-        assert.equal(result.nativeModels, expected, JSON.stringify(result));
+        const replayOnly = scenario === "sqlite-replay";
+        assert.equal(result.nativeModels, replayOnly ? 0 : expected, JSON.stringify(result));
         assert.equal(result.operationCount, expected, JSON.stringify(result));
         assert.equal(result.outputTokens, expected * 5, JSON.stringify(result));
-        assert.equal(result.firstChunkCount, expected, JSON.stringify(result));
-        assert.equal(result.perTokenCount, expected, JSON.stringify(result));
+        assert.equal(result.firstChunkCount, replayOnly ? 0 : expected, JSON.stringify(result));
+        assert.equal(result.perTokenCount, replayOnly ? 0 : expected, JSON.stringify(result));
         assert.equal(result.zeroDurationRoots, 0, JSON.stringify(result));
+        if (scenario.startsWith("sqlite-")) {
+          assert.deepEqual(result.rootInputs, ["identical input"], JSON.stringify(result));
+          assert.equal(result.historicalModels, 0, JSON.stringify(result));
+          assert.equal(result.oneMsModels, 0, JSON.stringify(result));
+        }
         if (scenario === "revised-terminal") {
           const restarted = await run("restart-revised", result.stateDir);
           assert.equal(restarted.roots, 0, JSON.stringify(restarted));
@@ -81,6 +90,34 @@ if (!workerScenario) {
       content: [{ type: "text", text: "late revised answer" }], usage: { input: 20, output: 5 },
     } }));
   }
+  const sqliteMode = workerScenario.startsWith("sqlite-");
+  let database, sequence = 0;
+  const writeMessage = (value) => {
+    fs.appendFileSync(file, line(value));
+    if (database) {
+      const raw = JSON.stringify(value), compressed = value.message?.role === "user";
+      database.prepare("INSERT INTO transcript_events VALUES(?,?,?,?)").run(sessionId, sequence,
+        compressed ? null : raw, compressed ? zstdCompressSync(Buffer.from(raw)) : null);
+      database.prepare("INSERT INTO session_transcript_active_events VALUES(?,?,?)").run(sessionId, sequence, sequence);
+      sequence++;
+    }
+  };
+  if (sqliteMode) {
+    const dbDir = path.join(stateDir, "agents/main/agent"); fs.mkdirSync(dbDir, { recursive: true });
+    database = new DatabaseSync(path.join(dbDir, "openclaw-agent.sqlite"));
+    database.exec(`CREATE TABLE session_nodes(session_key TEXT,current_session_id TEXT,entry_json TEXT,updated_at INTEGER);
+      CREATE TABLE transcript_events(session_id TEXT,seq INTEGER,event_json TEXT,event_zstd BLOB);
+      CREATE TABLE session_transcript_active_events(session_id TEXT,active_position INTEGER,event_seq INTEGER);`);
+    database.prepare("INSERT INTO session_nodes VALUES(?,?,?,?)").run(sessionKey, sessionId, "{}", start);
+    writeMessage({ type: "message", timestamp: start - 3600000,
+      message: { role: "user", content: "historical question", idempotencyKey: "historical:user" } });
+    for (let i = 0; i < 3; i++) writeMessage({ type: "message", timestamp: start - 3500000 + i * 100,
+      message: { role: "assistant", content: [{ type: "text", text: "historical answer" }],
+        provider: "p", model: "m", stopReason: "stop", usage: { input: 100, output: 50 } } });
+    const replayDir = path.join(stateDir, "plugins/openclaw-otel-plugin"); fs.mkdirSync(replayDir, { recursive: true });
+    fs.writeFileSync(path.join(replayDir, "replay-finalization-state.json"), JSON.stringify({ version: 1,
+      sessions: { [sessionKey]: { finalizedRunIds: ["historical"], updatedAt: start } } }));
+  }
   const batches = { traces: [], metrics: [] }, logs = [];
   const server = http.createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -108,20 +145,24 @@ if (!workerScenario) {
       for (let index = 0; index < (workerScenario === "independent-turns" ? 2 : 1); index++) {
         const runId = `run-${index}`, ts = start + index * 300;
         fs.appendFileSync(trajectory, line({ type: "session.started", runId, sourceSeq: index * 10 + 1, ts }));
-        fs.appendFileSync(file, line({ type: "message", timestamp: ts, message: {
+        writeMessage({ type: "message", timestamp: ts, message: {
           role: "user", content: "identical input", idempotencyKey: runId + ":user",
-        } }));
+        } });
         const queued = { type: "message.queued", ts, messageId: `message-${index}`, channel: "test" };
         const processing = { type: "session.state", ts: ts + 1, state: "processing", prevState: "idle", reason: "run_started" };
         if (workerScenario !== "processing-duplicate") await event(queued);
         await event(processing);
-        await event({ type: "model.call.started", runId, callId: "call", ts: ts + 10, provider: "p", model: "m" });
+        if (workerScenario === "sqlite-empty-attempt") {
+          await event({ type: "session.state", ts: ts + 2, state: "idle", prevState: "processing", reason: "run_completed" });
+          await event({ ...processing, ts: ts + 4 });
+        }
+        if (workerScenario !== "sqlite-replay") await event({ type: "model.call.started", runId, callId: "call", ts: ts + 10, provider: "p", model: "m" });
         await event({ type: "run.progress", runId, reason: "model_call:stream_progress", ts: ts + 20 });
         const answer = (delta = 0, text = "answer") => {
-          fs.appendFileSync(file, line({ type: "message", timestamp: ts + 100 + delta, message: {
+          writeMessage({ type: "message", timestamp: ts + 100 + delta, message: {
             role: "assistant", provider: "p", model: "m", content: [{ type: "text", text }],
             stopReason: "stop", usage: { input: 20, output: 5 },
-          } })); transcriptUpdated({ sessionFile: file });
+          } }); transcriptUpdated({ sessionFile: file });
         };
         const idle = { type: "session.state", ts: ts + 120, state: "idle", prevState: "processing", reason: "run_completed" };
         const earlyTranscript = ["transcript-before-native", "idle-before-native", "active-trajectory"].includes(workerScenario);
@@ -133,7 +174,7 @@ if (!workerScenario) {
             + line({ type: "trace.artifacts", runId, sourceSeq: 3, ts: ts + 120, data: { finalStatus: "success" } }));
           await new Promise((resolve) => setTimeout(resolve, 1100));
         }
-        await event({ type: "model.call.completed", runId, callId: "call", provider: "p", model: "m",
+        if (workerScenario !== "sqlite-replay") await event({ type: "model.call.completed", runId, callId: "call", provider: "p", model: "m",
           ts: ts + 100, durationMs: 90, timeToFirstByteMs: 10, usage: { input: 20, output: 5 } });
         if (!earlyTranscript) answer();
         if (workerScenario !== "idle-before-native") await event(idle);
@@ -143,7 +184,7 @@ if (!workerScenario) {
       }
     }
   } finally {
-    await service.stop(); await new Promise((resolve) => server.close(resolve));
+    await service.stop(); database?.close(); await new Promise((resolve) => server.close(resolve));
   }
   const spans = batches.traces.flatMap((b) => b.resourceSpans.flatMap((r) => r.scopeSpans.flatMap((s) => s.spans)));
   const latest = new Map();
@@ -156,6 +197,9 @@ if (!workerScenario) {
     .filter((p) => attrs(p)["gen_ai.token.type"] === "output").reduce((n, p) => n + p.sum, 0);
   process.stdout.write(JSON.stringify({ stateDir, scenario: workerScenario,
     roots: spans.filter((s) => s.name === "invoke_agent").length,
+    rootInputs: spans.filter((s) => s.name === "invoke_agent").map((s) => attrs(s).input_preview),
+    historicalModels: spans.filter((s) => s.name === "llm" && attrs(s).output_preview === "historical answer").length,
+    oneMsModels: spans.filter((s) => s.name === "llm" && s.endTimeUnixNano - s.startTimeUnixNano <= 1000000).length,
     models: spans.filter((s) => s.name === "llm").length,
     nativeModels: logs.filter((l) => l.includes('"source":"native_model_span"')).length,
     operationCount, outputTokens,

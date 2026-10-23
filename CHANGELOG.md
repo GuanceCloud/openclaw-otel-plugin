@@ -2,6 +2,17 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-10-23 (release candidate 3)
+
+Release: `v0.8.1-rc.3` (pre-release).
+
+### SQLite Request Boundaries And Token Accounting
+
+- Decode Zstd-compressed SQLite transcript events as well as plain JSON, and use the active transcript branch when present. Do not skip unreadable boundaries or reuse a stale cached SQLite snapshot.
+- Reset previous assistant output, usage and completion when a new user message begins, and bind cached live output to its request. Discard empty terminal attempts with no current model, tool or output evidence instead of exporting a previous answer as a new root.
+- Recognize modern per-call `usage.contextUsage.promptTokens` and retain each call's cache usage without cumulative subtraction; preserve compatibility for legacy cumulative transcripts.
+- Add mixed compressed/plain, active-branch, invalid-frame, pending-turn and modern-cache fixtures, plus full-service native/replay/empty-attempt coverage with historical messages. The SQLite boundary bug caused unrelated old calls to be attached to a new request and clamped into misleading 1 ms spans.
+
 ## 2026-10-23 (release candidate 2)
 
 Release: `v0.8.1-rc.2` (pre-release).

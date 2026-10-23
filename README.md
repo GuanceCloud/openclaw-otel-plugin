@@ -68,7 +68,7 @@ GitHub `latest` selects the stable release. To install this candidate through ob
 
 ```bash
 obs-agent-connector install openclaw \
-  --static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1-rc.2
+  --static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1-rc.3
 ```
 
 Published RC installers resolve an incoming `latest` argument to their own candidate version, including when called by the connector.

@@ -68,7 +68,7 @@ GitHub 的 `latest` 指向正式版。通过 obs-agent-connector 安装本次候
 
 ```bash
 obs-agent-connector install openclaw \
-  --static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1-rc.2
+  --static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1-rc.3
 ```
 
 已发布的 RC 安装器会把传入的 `latest` 解析为安装器自身所属的候选版本，因此兼容连接器的现有调用方式。
