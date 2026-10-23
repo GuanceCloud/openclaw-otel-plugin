@@ -85,6 +85,8 @@ npm run pack:release
 - `VERSION`
 - `RELEASE.json`
 
+发布入口 `dist/index.cjs` 已内置 OTEL 运行依赖，因此包内 `package.json` 不再声明源码构建所用的 dependencies/devDependencies；宿主 SDK 仍由安装器链接。源码仓库的依赖声明保持完整。
+
 ## 建议发布流程
 
 1. 更新代码和文档。

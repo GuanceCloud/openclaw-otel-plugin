@@ -2,13 +2,16 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
-## 2026-10-23 (unreleased)
+## 2026-10-23 (release candidate)
+
+Release: `v0.8.1-rc.1` (pre-release).
 
 ### Trace Replay Deduplication
 
 - Ignore repeated message IDs and late processing notifications from closed requests, including while their root awaits asynchronous preview enrichment.
 - Let observed native calls finish before transcript/trajectory fallback or request finalization, preserving native model spans and their metrics when persistence or idle notifications arrive first.
 - Persist the latest 128 finalized run IDs per session to prevent snapshot revisions and delayed sidecars from replaying an already represented run after restart. Distinct runs with identical prompts remain independent requests.
+- Omit bundled source-build dependencies from the prebuilt package manifest so newer OpenClaw hosts can load the standalone bundle without requiring separate OTel packages. Source dependency declarations are unchanged.
 
 ## 2026-10-23
 

@@ -110,6 +110,13 @@ async function main() {
     await copyRecursive(sourcePath, targetPath);
   }
 
+  // dist/index.cjs bundles the OTel runtime. Declaring those source-build
+  // dependencies makes newer hosts reject an otherwise standalone archive.
+  const runtimePackageJson = { ...packageJson };
+  delete runtimePackageJson.dependencies;
+  delete runtimePackageJson.devDependencies;
+  await fs.writeFile(path.join(stagingDir, "package.json"), `${JSON.stringify(runtimePackageJson, null, 2)}\n`);
+
   await fs.writeFile(path.join(stagingDir, "VERSION"), `${version}\n`, "utf8");
   await fs.writeFile(
     path.join(stagingDir, "RELEASE.json"),
