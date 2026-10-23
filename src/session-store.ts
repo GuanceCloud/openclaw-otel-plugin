@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
+import * as zlib from "node:zlib";
 import type {
   CompletedTrajectoryRun,
   RuntimeMetadata,
@@ -104,23 +105,75 @@ function getAgentNameFromSqlitePath(sqlitePath: string): string | undefined {
 function readSqliteTranscriptEvents(dbPath: string, sessionId: string): Array<Record<string, unknown>> {
   const database = new DatabaseSync(dbPath, { readOnly: true });
   try {
-    const rows = database
-      .prepare("SELECT event_json FROM transcript_events WHERE session_id = ? ORDER BY seq ASC")
-      .all(sessionId) as Array<{ event_json?: unknown }>;
-    return rows.flatMap((row) => {
-      if (typeof row.event_json !== "string") {
-        return [];
-      }
-      try {
-        const event = JSON.parse(row.event_json);
-        return event && typeof event === "object" ? [event as Record<string, unknown>] : [];
-      } catch {
-        return [];
-      }
+    const columns = database.prepare("PRAGMA table_info(transcript_events)").all() as Array<{ name: string }>;
+    const hasCompressedEvents = columns.some((column) => column.name === "event_zstd");
+    const hasActiveEvents = Boolean(database.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_transcript_active_events'",
+    ).get());
+    // The active branch is authoritative after rewrites/forks. Never fall back
+    // to historical rows just because the current branch is empty.
+    const rows = database.prepare(hasActiveEvents
+      ? `SELECT e.event_json${hasCompressedEvents ? ", e.event_zstd" : ""}
+         FROM session_transcript_active_events a LEFT JOIN transcript_events e
+         ON e.session_id = a.session_id AND e.seq = a.event_seq
+         WHERE a.session_id = ? ORDER BY a.active_position ASC`
+      : `SELECT event_json${hasCompressedEvents ? ", event_zstd" : ""}
+         FROM transcript_events WHERE session_id = ? ORDER BY seq ASC`)
+      .all(sessionId) as Array<{ event_json?: unknown; event_zstd?: Uint8Array }>;
+    return rows.map((row) => {
+      const raw = typeof row.event_json === "string"
+        ? row.event_json
+        : row.event_zstd && typeof zlib.zstdDecompressSync === "function"
+          ? zlib.zstdDecompressSync(row.event_zstd).toString("utf8")
+          : undefined;
+      // Skipping an unreadable user row would erase a request boundary and
+      // attach all following calls to the previous request. Fail this snapshot.
+      if (!raw) throw new Error("Unreadable SQLite transcript event");
+      const event = JSON.parse(raw);
+      if (!event || typeof event !== "object") throw new Error("Invalid SQLite transcript event");
+      return event as Record<string, unknown>;
     });
   } finally {
     database.close();
   }
+}
+
+function readSqliteRunState(dbPath: string, sessionId: string, targetRunId?: string): SessionRunState {
+  const database = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trajectory_runtime_events'").get()) return {};
+    const rows = database.prepare(targetRunId
+      ? "SELECT event_json FROM trajectory_runtime_events WHERE session_id=? AND run_id=? ORDER BY seq"
+      : "SELECT event_json FROM trajectory_runtime_events WHERE session_id=? ORDER BY seq")
+      .all(...(targetRunId ? [sessionId, targetRunId] : [sessionId])) as Array<{ event_json: string }>;
+    let state: SessionRunState = {};
+    for (const row of rows) {
+      const event = JSON.parse(row.event_json);
+      if (!event.runId) continue;
+      if (state.runId !== event.runId) state = { runId: event.runId };
+      // A harness attempt's session.ended error can precede a fallback using
+      // the SAME run ID. Artifacts can also describe a failed attempt, so live
+      // closure must additionally wait for host termination; session.started
+      // resets this candidate state when fallback begins. A successful external
+      // harness may finish without an artifact.
+      const terminal = event.type === "trace.artifacts"
+        || (event.type === "session.ended" && event.data?.status === "success");
+      if (event.type === "session.started") {
+        state.runCompleted = false;
+        state.runTerminalPending = true;
+        state.runCompletedAt = undefined;
+      }
+      if (terminal) {
+        state.runCompleted = true;
+        state.runTerminalPending = false;
+        state.runTerminalType = event.type;
+        state.runFinalStatus = event.data?.finalStatus ?? event.data?.status;
+        state.runCompletedAt = parseMessageTimestamp(event.ts);
+        state.terminalSourceSeq = event.sourceSeq;
+      }
+    }
+    return state;
+  } finally { database.close(); }
 }
 
 function parseMessageTimestamp(value: unknown): number | undefined {
@@ -608,7 +661,7 @@ function readTrajectoryMtimeMs(sessionFile: string): number | undefined {
 
 export function createSessionSnapshotStore(stateDir: string): SessionSnapshotStore {
   const transcriptSnapshotBySession = new Map<string, SessionSnapshot>();
-  const latestAssistantTextBySession = new Map<string, string>();
+  const latestAssistantTextBySession = new Map<string, { text: string; userTs?: number }>();
   const sessionFileBySessionKey = new Map<string, string>();
   const sessionSqliteBySessionKey = new Map<string, SqliteSessionRecord>();
   const sessionKeyBySessionId = new Map<string, string>();
@@ -856,8 +909,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         && cached.trajectoryMtimeMs === trajectoryMtimeMs
       ) {
         const liveAssistantText = latestAssistantTextBySession.get(sessionKey);
-        if (liveAssistantText && liveAssistantText !== cached.lastAssistantText) {
-          cached.lastAssistantText = liveAssistantText;
+        if (liveAssistantText && liveAssistantText.userTs === cached.lastUserTs) {
+          cached.lastAssistantText = liveAssistantText.text;
         }
         return cached;
       }
@@ -908,6 +961,11 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
           const userText = extractContentText(message.content, "text");
           lastUserText = userText ?? lastUserText;
           lastUserTs = resolveEnvelopeTimestamp(line.timestamp, message.timestamp) ?? lastUserTs;
+          // Output belongs to the current request, never to the preceding user.
+          lastAssistantText = undefined;
+          lastAssistantTs = undefined;
+          lastAssistantThinking = undefined;
+          lastAssistantUsage = undefined;
           traceCount += 1;
           currentRunMessageRunId = resolveMessageRunId(message);
           currentRunInvokedSkillNames.clear();
@@ -1016,13 +1074,26 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
               const output = typeof rawUsage.output === "number" ? rawUsage.output : undefined;
               const rawCacheRead = typeof rawUsage.cacheRead === "number" ? rawUsage.cacheRead : undefined;
               const rawCacheWrite = typeof rawUsage.cacheWrite === "number" ? rawUsage.cacheWrite : undefined;
+              const contextUsage = rawUsage.contextUsage && typeof rawUsage.contextUsage === "object"
+                ? rawUsage.contextUsage as Record<string, unknown>
+                : undefined;
+              const contextPromptTokens = contextUsage?.state === "available"
+                && typeof contextUsage.promptTokens === "number"
+                && Number.isFinite(contextUsage.promptTokens) && contextUsage.promptTokens >= 0
+                  ? contextUsage.promptTokens : undefined;
+              const promptTokens = typeof rawUsage.promptTokens === "number"
+                && Number.isFinite(rawUsage.promptTokens) && rawUsage.promptTokens >= 0
+                  ? rawUsage.promptTokens : contextPromptTokens;
+              // Modern contextUsage describes this call, including cache hits.
+              // Legacy transcripts without it retain their cumulative-counter path.
+              const perCallUsage = contextPromptTokens !== undefined;
               const cacheRead = typeof rawCacheRead === "number"
-                ? typeof currentRunCacheReadRaw === "number" && rawCacheRead >= currentRunCacheReadRaw
+                ? !perCallUsage && typeof currentRunCacheReadRaw === "number" && rawCacheRead >= currentRunCacheReadRaw
                   ? rawCacheRead - currentRunCacheReadRaw
                   : rawCacheRead
                 : undefined;
               const cacheWrite = typeof rawCacheWrite === "number"
-                ? typeof currentRunCacheWriteRaw === "number" && rawCacheWrite >= currentRunCacheWriteRaw
+                ? !perCallUsage && typeof currentRunCacheWriteRaw === "number" && rawCacheWrite >= currentRunCacheWriteRaw
                   ? rawCacheWrite - currentRunCacheWriteRaw
                   : rawCacheWrite
                 : undefined;
@@ -1033,8 +1104,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
                 output,
                 cacheRead,
                 cacheWrite,
-                ...(typeof rawUsage.promptTokens === "number"
-                  ? { promptTokens: rawUsage.promptTokens }
+                ...(promptTokens !== undefined
+                  ? { promptTokens }
                   : {}),
                 totalTokens: typeof rawUsage.totalTokens === "number"
                   ? rawUsage.totalTokens
@@ -1139,7 +1210,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         }
       }
 
-      const liveAssistantText = latestAssistantTextBySession.get(sessionKey);
+      const liveOutput = latestAssistantTextBySession.get(sessionKey);
+      const liveAssistantText = liveOutput?.userTs === lastUserTs ? liveOutput?.text : undefined;
       const mentionedSkillNames = new Set<string>();
       for (const skillName of extractMentionedSkillNames(
         lastUserText,
@@ -1154,7 +1226,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         mentionedSkillNames.add(skillName);
       }
       const latestRunState = sqliteSession
-        ? {}
+        ? readSqliteRunState(sqliteSession.dbPath, sqliteSession.sessionId, currentRunMessageRunId)
         : readSessionLatestRunState(sessionFile);
       const resolvedRunId = currentRunMessageRunId
         ?? latestRunState.runId
@@ -1163,10 +1235,11 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         resolvedRunId
         && resolvedRunId !== latestRunState.runId
       )
-        ? sqliteSession ? {} : readSessionRunState(sessionFile, resolvedRunId)
+        ? sqliteSession ? readSqliteRunState(sqliteSession.dbPath, sqliteSession.sessionId, resolvedRunId) : readSessionRunState(sessionFile, resolvedRunId)
         : latestRunState;
       const inferredRunCompleted = (
         resolvedRunState.runCompleted !== true
+        && resolvedRunState.runTerminalPending !== true
         && currentRunAssistantTurns.length > 0
         && currentRunLastAssistantStopReason === "stop"
       );
@@ -1182,6 +1255,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         agentName: sessionMetaBySessionKey.get(sessionKey)?.agentName,
         runId: resolvedRunId,
         runCompleted: resolvedRunState.runCompleted === true || inferredRunCompleted,
+        runTerminalPending: resolvedRunState.runTerminalPending,
+        runCompletedAt: resolvedRunState.runCompletedAt,
         runTerminalType: inferredRunTerminalType,
         runFinalStatus: inferredRunFinalStatus,
         createdAt: sqliteSession?.createdAt ?? readSessionCreatedAt(sessionFile),
@@ -1200,7 +1275,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         lastRunAssistantTurns: currentRunAssistantTurns,
         lastUserText,
         lastUserTs,
-        lastAssistantText: liveAssistantText ?? lastAssistantText,
+        lastAssistantText: lastAssistantText ?? liveAssistantText,
         lastAssistantTs,
         lastAssistantThinking,
         lastProvider: lastProvider ?? sessionModelBySessionKey.get(sessionKey)?.provider,
@@ -1214,7 +1289,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       transcriptSnapshotBySession.set(sessionKey, snapshot);
       return snapshot;
     } catch {
-      return transcriptSnapshotBySession.get(sessionKey);
+      // A stale cached SQLite snapshot can hide a new (unreadable) request.
+      return sqliteSession ? undefined : transcriptSnapshotBySession.get(sessionKey);
     }
   };
 
@@ -1248,7 +1324,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       return undefined;
     },
     setLatestAssistantText(sessionKey: string, text: string) {
-      latestAssistantTextBySession.set(sessionKey, text);
+      const current = loadSessionSnapshot(sessionKey);
+      latestAssistantTextBySession.set(sessionKey, { text, userTs: current?.lastUserTs });
       const cached = transcriptSnapshotBySession.get(sessionKey);
       if (cached) {
         cached.lastAssistantText = text;
@@ -1273,7 +1350,10 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       if (!sessionFile) {
         return {};
       }
-      return readSessionRunState(sessionFile, runId);
+      const sqliteSession = sessionSqliteBySessionKey.get(sessionKey);
+      return sqliteSession
+        ? readSqliteRunState(sqliteSession.dbPath, sqliteSession.sessionId, runId)
+        : readSessionRunState(sessionFile, runId);
     },
     listRecentSessionKeys(sinceUpdatedAt?: number) {
       if (typeof sinceUpdatedAt !== "number" || !Number.isFinite(sinceUpdatedAt)) {

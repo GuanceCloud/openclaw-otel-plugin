@@ -538,12 +538,14 @@ export function readReplayFinalizationState(filePath: string): Map<string, {
   watermark?: string;
   trajectorySourceSeq?: number;
   pendingRunIds?: string[];
+  finalizedRunIds?: string[];
   updatedAt?: number;
 }> {
   const entries = new Map<string, {
     watermark?: string;
     trajectorySourceSeq?: number;
     pendingRunIds?: string[];
+    finalizedRunIds?: string[];
     updatedAt?: number;
   }>();
   try {
@@ -556,6 +558,7 @@ export function readReplayFinalizationState(filePath: string): Map<string, {
         watermark?: unknown;
         trajectorySourceSeq?: unknown;
         pendingRunIds?: unknown;
+        finalizedRunIds?: unknown;
         updatedAt?: unknown;
       }>;
     };
@@ -575,10 +578,14 @@ export function readReplayFinalizationState(filePath: string): Map<string, {
       const updatedAt = typeof value?.updatedAt === "number" && Number.isFinite(value.updatedAt)
         ? value.updatedAt
         : undefined;
-      if (!watermark && trajectorySourceSeq === undefined && !pendingRunIds?.length) {
+      const finalizedRunIds = Array.isArray(value?.finalizedRunIds)
+        ? [...new Set(value.finalizedRunIds.filter((item): item is string =>
+          typeof item === "string" && item.trim().length > 0))].slice(-128)
+        : undefined;
+      if (!watermark && trajectorySourceSeq === undefined && !pendingRunIds?.length && !finalizedRunIds?.length) {
         continue;
       }
-      entries.set(sessionKey, { watermark, trajectorySourceSeq, pendingRunIds, updatedAt });
+      entries.set(sessionKey, { watermark, trajectorySourceSeq, pendingRunIds, finalizedRunIds, updatedAt });
     }
   } catch {
     return new Map();
@@ -592,6 +599,7 @@ export function writeReplayFinalizationState(
     watermark?: string;
     trajectorySourceSeq?: number;
     pendingRunIds?: string[];
+    finalizedRunIds?: string[];
     updatedAt?: number;
   }>,
 ): void {
@@ -599,7 +607,8 @@ export function writeReplayFinalizationState(
     .filter(([, value]) => Boolean(
       value?.watermark
       || value?.trajectorySourceSeq !== undefined
-      || value?.pendingRunIds?.length,
+      || value?.pendingRunIds?.length
+      || value?.finalizedRunIds?.length,
     ))
     .sort((left, right) => (right[1].updatedAt ?? 0) - (left[1].updatedAt ?? 0))
     .slice(0, REPLAY_FINALIZATION_STATE_MAX_SESSIONS);
@@ -616,6 +625,9 @@ export function writeReplayFinalizationState(
             : {}),
           ...(value.pendingRunIds?.length
             ? { pendingRunIds: value.pendingRunIds.slice(0, 16) }
+            : {}),
+          ...(value.finalizedRunIds?.length
+            ? { finalizedRunIds: value.finalizedRunIds.slice(-128) }
             : {}),
           ...(typeof value.updatedAt === "number" ? { updatedAt: value.updatedAt } : {}),
         },

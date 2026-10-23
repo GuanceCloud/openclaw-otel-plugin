@@ -51,7 +51,7 @@ async function writeSha256(filePath) {
   return checksumPath;
 }
 
-async function copyReleaseSidecar(sourceRelativePath, targetFileName, mode) {
+async function copyReleaseSidecar(sourceRelativePath, targetFileName, mode, version) {
   const sourcePath = path.join(repoRoot, sourceRelativePath);
   const targetPath = path.join(outputDir, targetFileName);
 
@@ -60,6 +60,12 @@ async function copyReleaseSidecar(sourceRelativePath, targetFileName, mode) {
   }
 
   await fs.copyFile(sourcePath, targetPath);
+  if (version) {
+    const content = await fs.readFile(targetPath, "utf8");
+    await fs.writeFile(targetPath, content
+      .replace('INSTALLER_RELEASE_VERSION=""', `INSTALLER_RELEASE_VERSION=${JSON.stringify(version)}`)
+      .replace('$InstallerReleaseVersion = ""', `$InstallerReleaseVersion = ${JSON.stringify(version)}`));
+  }
   if (mode !== undefined) {
     await fs.chmod(targetPath, mode);
   }
@@ -90,6 +96,7 @@ async function main() {
   await fs.rm(latestArchivePath, { force: true });
   await fs.rm(`${latestArchivePath}.sha256`, { force: true });
   await fs.rm(path.join(outputDir, "install.sh"), { force: true });
+  await fs.rm(path.join(outputDir, "install-release.sh"), { force: true });
   await fs.rm(path.join(outputDir, "install.ps1"), { force: true });
   await fs.rm(path.join(outputDir, "install-release.ps1"), { force: true });
   await fs.rm(path.join(outputDir, "update.sh"), { force: true });
@@ -110,6 +117,13 @@ async function main() {
     await copyRecursive(sourcePath, targetPath);
   }
 
+  // dist/index.cjs bundles the OTel runtime. Declaring those source-build
+  // dependencies makes newer hosts reject an otherwise standalone archive.
+  const runtimePackageJson = { ...packageJson };
+  delete runtimePackageJson.dependencies;
+  delete runtimePackageJson.devDependencies;
+  await fs.writeFile(path.join(stagingDir, "package.json"), `${JSON.stringify(runtimePackageJson, null, 2)}\n`);
+
   await fs.writeFile(path.join(stagingDir, "VERSION"), `${version}\n`, "utf8");
   await fs.writeFile(
     path.join(stagingDir, "RELEASE.json"),
@@ -122,15 +136,17 @@ async function main() {
   const checksumPath = await writeSha256(archivePath);
   await fs.copyFile(archivePath, latestArchivePath);
   const latestChecksumPath = await writeSha256(latestArchivePath);
-  const installScriptPath = await copyReleaseSidecar("scripts/install.sh", "install.sh", 0o755);
-  const windowsInstallScriptPath = await copyReleaseSidecar("scripts/install.ps1", "install.ps1");
-  const windowsReleaseInstallScriptPath = await copyReleaseSidecar("scripts/install.ps1", "install-release.ps1");
+  const installScriptPath = await copyReleaseSidecar("scripts/install.sh", "install.sh", 0o755, version);
+  const releaseInstallScriptPath = await copyReleaseSidecar("scripts/install.sh", "install-release.sh", 0o755, version);
+  const windowsInstallScriptPath = await copyReleaseSidecar("scripts/install.ps1", "install.ps1", undefined, version);
+  const windowsReleaseInstallScriptPath = await copyReleaseSidecar("scripts/install.ps1", "install-release.ps1", undefined, version);
 
   log(`artifact: ${path.relative(repoRoot, archivePath)}`);
   log(`checksum: ${path.relative(repoRoot, checksumPath)}`);
   log(`latest artifact: ${path.relative(repoRoot, latestArchivePath)}`);
   log(`latest checksum: ${path.relative(repoRoot, latestChecksumPath)}`);
   log(`installer: ${path.relative(repoRoot, installScriptPath)}`);
+  log(`release installer: ${path.relative(repoRoot, releaseInstallScriptPath)}`);
   log(`windows installer: ${path.relative(repoRoot, windowsInstallScriptPath)}`);
   log(`windows release installer: ${path.relative(repoRoot, windowsReleaseInstallScriptPath)}`);
 }

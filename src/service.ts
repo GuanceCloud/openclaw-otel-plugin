@@ -157,6 +157,19 @@ export function createOtelPluginService(
       }
       recentSessionSweepAt = Date.now() - config.flushIntervalMs;
 
+      const hasFinalizedRun = (sessionKey: string | undefined, runId: string | undefined) =>
+        Boolean(sessionKey && runId
+          && persistedReplayFinalizationBySession.get(sessionKey)?.finalizedRunIds?.includes(runId));
+
+      const rememberFinalizedRun = (sessionKey: string | undefined, runId: string | undefined) => {
+        if (!sessionKey || !runId || hasFinalizedRun(sessionKey, runId)) return;
+        const record = persistedReplayFinalizationBySession.get(sessionKey) ?? {};
+        record.finalizedRunIds = [...(record.finalizedRunIds ?? []), runId].slice(-128);
+        record.updatedAt = Date.now();
+        persistedReplayFinalizationBySession.set(sessionKey, record);
+        writeReplayFinalizationState(replayFinalizationStateFile, persistedReplayFinalizationBySession);
+      };
+
       const loadSessionSnapshot = (sessionKey: string | undefined) =>
         sessionStore?.loadSessionSnapshot(sessionKey);
 
@@ -184,6 +197,7 @@ export function createOtelPluginService(
         if (!sessionKey) {
           return false;
         }
+        if (hasFinalizedRun(sessionKey, snapshot?.runId)) return true;
         const watermark = buildReplayWatermark(snapshot);
         if (!watermark) {
           return false;
@@ -562,6 +576,7 @@ export function createOtelPluginService(
         if (!sessionKey) {
           return undefined;
         }
+        if (createIfMissing && hasFinalizedRun(sessionKey, resolvedRunId)) return undefined;
         const hasLiveRequest = (requestKey: string) =>
           activeRuns.has(requestKey) || activeRoots.has(requestKey);
         const findMatchingRequestKey = () => {
@@ -670,6 +685,22 @@ export function createOtelPluginService(
         activeRequestKeyBySession.set(sessionKey, nextRequestKey);
         rememberRequestRecord(sessionKey, nextRequestKey, evt);
         return nextRequestKey;
+      };
+
+      const isDuplicateRequestStart = (
+        evt: { sessionKey?: string; sessionId?: string; messageId?: string | number; ts?: number },
+        source: "message" | "processing",
+      ) => {
+        const sessionKey = resolveSessionKey(evt);
+        if (!sessionKey) return false;
+        const records = requestHistoryBySession.get(sessionKey) ?? [];
+        const messageId = resolveEventMessageId(evt);
+        if (messageId) return records.some((record) => record.messageId === messageId);
+        // A late processing notification inside a closed request's window is
+        // not a new RPC turn. Content equality is never used for deduplication.
+        return source === "processing" && typeof evt.ts === "number"
+          && records.some((record) => record.closedAt !== undefined
+            && evt.ts! >= record.startedAt && evt.ts! <= record.closedAt);
       };
 
       const releaseRequestKey = (
@@ -917,7 +948,8 @@ export function createOtelPluginService(
         const transcriptEvt = buildTranscriptReplayEvent(sessionKey, snapshot);
         const activeRun = getRun(transcriptEvt, false);
         const activeRoot = getRoot(transcriptEvt, false);
-        if (activeRun?.modelSpanEmitted || activeRoot?.modelSpanEmitted) {
+        if (activeRun?.modelSpanEmitted || activeRoot?.modelSpanEmitted
+          || activeRun?.pendingNativeModelCalls?.size) {
           return;
         }
         const hasActiveTrace = Boolean(activeRun || activeRoot);
@@ -1048,6 +1080,10 @@ export function createOtelPluginService(
         for (const trajectoryRun of completedRuns) {
           const pendingRunIds = pendingTrajectoryReplayRunIdsBySession.get(sessionKey);
           const latestSnapshot = loadSessionSnapshot(sessionKey);
+          // A terminal sidecar can be written before trusted model events are
+          // delivered. The live request owns that run until it is finalized.
+          if (getRun({ sessionKey, runId: trajectoryRun.runId }, false)
+            || getRoot({ sessionKey, runId: trajectoryRun.runId }, false)) continue;
           const alreadyRepresentedByTranscript = Boolean(
             trajectoryRun.runId
             && latestSnapshot?.runId === trajectoryRun.runId
@@ -1055,6 +1091,7 @@ export function createOtelPluginService(
           );
           if (
             (trajectoryRun.runId && pendingRunIds?.has(trajectoryRun.runId))
+            || hasFinalizedRun(sessionKey, trajectoryRun.runId)
             || alreadyRepresentedByTranscript
           ) {
             markTrajectoryReplaySourceSeq(sessionKey, trajectoryRun.sourceSeq);
@@ -1228,6 +1265,7 @@ export function createOtelPluginService(
 
           runSpan.setStatus({ code: SpanStatusCode.OK });
           endSpanSafely(runSpan, new Date(egressEndTs));
+          rememberFinalizedRun(sessionKey, trajectoryRun.runId);
 
           const latestCompletedSnapshot = loadSessionSnapshot(sessionKey);
           if (
@@ -1260,6 +1298,17 @@ export function createOtelPluginService(
             ...recentSessionKeys,
           ]);
           for (const sessionKey of activeSessionKeys) {
+            const completedSnapshot = loadSessionSnapshot(sessionKey);
+            const liveRun = getRun({ sessionKey }, false);
+            const matchingRun = completedSnapshot?.runId && (liveRun?.runId === completedSnapshot.runId
+              || liveRun?.runIds?.has(completedSnapshot.runId));
+            if (completedSnapshot?.runCompleted && completedSnapshot.runTerminalPending === false
+              && matchingRun && liveRun?.awaitingRunTerminal && !liveRun.pendingNativeModelCalls?.size) {
+              handleDiagnosticEvent({ type: "session.state", sessionKey,
+                sessionId: completedSnapshot.sessionId, state: "idle", prevState: "processing", reason: "run_completed",
+                ts: Math.max(completedSnapshot.runCompletedAt ?? completedSnapshot.lastAssistantTs ?? Date.now(),
+                  liveRun.modelEndTs ?? 0) });
+            }
             replayCompletedTrajectoryRuns(sessionKey);
             replayTranscriptSnapshot(sessionKey, { source: "sweep" });
             const snapshot = loadSessionSnapshot(sessionKey);
@@ -1487,6 +1536,17 @@ export function createOtelPluginService(
         if (!current) {
           return;
         }
+        // Close the request identity before asynchronous preview enrichment;
+        // late duplicate starts must not reopen it while the root is buffered.
+        markRequestRecordClosed(sessionKey, requestKey, eventTimestamp(evt).getTime());
+        const closingRun = activeRuns.get(requestKey);
+        if (attrs?.["openclaw.status"] !== "interrupted"
+          && (closingRun?.modelSpanEmitted || current.modelSpanEmitted)) {
+          for (const runId of new Set([current.runId, closingRun?.runId,
+            ...Array.from(current.runIds ?? []), ...Array.from(closingRun?.runIds ?? [])])) {
+            rememberFinalizedRun(sessionKey, runId);
+          }
+        }
         if (pendingPreviewFinalizersByRoot.get(current.span)?.size) {
           pendingRootFinalizations.set(
             current.span,
@@ -1543,9 +1603,9 @@ export function createOtelPluginService(
           ].filter((value): value is string => Boolean(value)));
           for (const runId of finalizedRunIds) {
             rememberPendingTrajectoryReplayRunId(sessionKey, runId);
+            rememberFinalizedRun(sessionKey, runId);
           }
         }
-        markRequestRecordClosed(sessionKey, requestKey, eventTimestamp(evt).getTime());
         const metricState = sessionMetricTokenState.get(sessionKey);
         if (metricState) {
           metricState.active = false;
@@ -1746,9 +1806,11 @@ export function createOtelPluginService(
       ) => {
         const run = "sessionKey" in evt || "sessionId" in evt ? getRun(evt) : undefined;
         const root = run ?? ("sessionKey" in evt || "sessionId" in evt ? getRoot(evt) : undefined);
+        const nativeModelCall = name === "llm" && (evt.type === "model.call.completed" || evt.type === "model.call.error");
+        const minimumDurationMs = nativeModelCall ? 1 : name.includes("/") ? MIN_VISIBLE_MODEL_MS : MIN_VISIBLE_CHILD_MS;
         const effectiveDurationMs =
           typeof durationMs === "number"
-            ? Math.max(durationMs, name.includes("/") ? MIN_VISIBLE_MODEL_MS : MIN_VISIBLE_CHILD_MS)
+            ? Math.max(durationMs, minimumDurationMs)
             : MIN_VISIBLE_CHILD_MS;
         const { startTime, endTime } = resolveSpanWindow(
           evt.ts,
@@ -1885,7 +1947,9 @@ export function createOtelPluginService(
         _evt: { sessionKey?: string; sessionId?: string; ts?: number; channel?: string },
       ) => {};
 
-      unsubscribeAgent = runtime?.events?.onAgentEvent?.(handleAgentEvent) ?? null;
+      unsubscribeAgent = runtime?.events?.onAgentEvent?.((evt) => {
+        if (evt && typeof evt === "object" && !hasFinalizedRun(resolveSessionKey(evt), evt.runId)) handleAgentEvent(evt);
+      }) ?? null;
 
       unsubscribeTranscript = runtime?.events?.onSessionTranscriptUpdate?.((update) => {
         const sessionKey = sessionStore?.resolveSessionKeyByFile(update.sessionFile);
@@ -1901,6 +1965,8 @@ export function createOtelPluginService(
         SpanStatusCode,
         cleanupExpiredRoots,
         beginRequestTrace,
+        isDuplicateRequestStart,
+        isFinalizedRun: (evt) => hasFinalizedRun(resolveSessionKey(evt), evt.runId),
         getRoot,
         getRun,
         ensureUserSpan,
@@ -1925,6 +1991,9 @@ export function createOtelPluginService(
           runId,
           turnIndex,
           minUserTs,
+          provider,
+          model,
+          endTime,
           finalize,
         }) {
           // Transcript writes can follow model completion. Delay export only; the
@@ -1967,7 +2036,9 @@ export function createOtelPluginService(
               ? snapshot?.lastRunAssistantTurns?.[turnIndex]
               : snapshot?.lastRunAssistantTurns?.at(-1);
             const toolCall = turn?.toolCalls?.length === 1 ? turn.toolCalls[0] : undefined;
-            if (sameRun && freshUser && turn) {
+            const sameCall = turn && (!provider || turn.provider === provider) && (!model || turn.model === model)
+              && (typeof turn.endedAt !== "number" || turn.endedAt <= endTime.getTime());
+            if (sameRun && freshUser && turn && sameCall) {
               span.setAttributes(traceAttrs(enrichWithTranscript(sessionKey, {
                 __min_snapshot_user_ts: minUserTs,
                 "openclaw.sessionId": sessionId,

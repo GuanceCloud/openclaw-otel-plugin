@@ -30,6 +30,8 @@
 
 OpenClaw 的标准 usage 把普通 `input`、`cacheRead`、`cacheWrite` 分列，并可提供已包含缓存的 `promptTokens`。插件优先使用有效（有限、非负）的 `promptTokens` 作为符合 OpenTelemetry GenAI 语义的完整 input；缺失或无效时计算 `input + cacheRead + cacheWrite`。`total` / `totalTokens` 不用于推断缓存是否已经包含在 input 中。缓存明细作为 input 的子集保留在 trace 属性中，不另报 `gen_ai.token.type`。
 
+新格式 transcript 提供 `usage.contextUsage.state=available` 时，优先读取其中有效的 `promptTokens`（顶层有效 `promptTokens` 优先级更高），且 `cacheRead` / `cacheWrite` 按本次调用保留，不再做跨调用差值。缺少该新格式标记的旧 transcript 保留累计缓存计数的兼容处理。
+
 ## 首块响应延迟
 
 `gen_ai.client.operation.time_to_first_chunk` 为 Histogram，单位 `s`。按每次模型调用采集，tags 使用 `agent_runtime`、`operation_name=chat`、`provider_name`、`request_model`、`status`，不携带 session/run/call ID，也不新增 tag alias 双写。

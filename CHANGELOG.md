@@ -2,6 +2,50 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-10-23 (release candidate 4)
+
+Release: `v0.8.1-rc.4` (pre-release).
+
+### Provider Fallback Within A Logical Run
+
+- Read SQLite run trajectory state so an external harness attempt's `session.ended` error does not finalize a logical run before a fallback provider continues with the same run ID. Require both host request termination and a matching final run artifact (or external harness success), including when that terminal record arrives after idle. An error artifact alone cannot end a still-processing request during provider switching.
+- Keep all fallback model and tool events attached to the live request, instead of marking the run completed after its first failed attempt and dropping subsequent telemetry.
+- Prefer persisted current-run output over cached streaming text. Native model preview enrichment now requires the matching provider/model and a transcript result within that call's end boundary; a failed attempt cannot acquire a fallback or previous answer.
+- Preserve measured native model-call durations instead of extending short calls to the generic child-span display minimum, which could place a fast failed call before its root request.
+- Add cross-provider fallback tests with compressed SQLite input, an attempt-error idle gap, an error-artifact processing gap, four fallback calls, four tool calls and late terminal artifacts. These tests cover the lifecycle/correlation defect tracked in #15.
+
+## 2026-10-23 (release candidate 3)
+
+Release: `v0.8.1-rc.3` (pre-release).
+
+### SQLite Request Boundaries And Token Accounting
+
+- Decode Zstd-compressed SQLite transcript events as well as plain JSON, and use the active transcript branch when present. Do not skip unreadable boundaries or reuse a stale cached SQLite snapshot.
+- Reset previous assistant output, usage and completion when a new user message begins, and bind cached live output to its request. Discard empty terminal attempts with no current model, tool or output evidence instead of exporting a previous answer as a new root.
+- Recognize modern per-call `usage.contextUsage.promptTokens` and retain each call's cache usage without cumulative subtraction; preserve compatibility for legacy cumulative transcripts.
+- Add mixed compressed/plain, active-branch, invalid-frame, pending-turn and modern-cache fixtures, plus full-service native/replay/empty-attempt coverage with historical messages. The SQLite boundary bug caused unrelated old calls to be attached to a new request and clamped into misleading 1 ms spans.
+
+## 2026-10-23 (release candidate 2)
+
+Release: `v0.8.1-rc.2` (pre-release).
+
+### GitHub Installer Compatibility
+
+- Default the Linux/macOS installer to GitHub Releases when `OSS_ENDPOINT` is absent, matching the connector's GitHub installation flow. Retain explicit OSS, archive URL, and local archive support.
+- Generate `install-release.sh` during packaging and embed the release version in both shell and PowerShell installers. A candidate installer invoked with `latest` installs its own RC archive, allowing the connector to select the candidate through `--static-base`.
+- Document stable versus candidate selection and verify download routing, GTrace configuration, unrelated configuration preservation, and checksum failure protection.
+
+## 2026-10-23 (release candidate)
+
+Release: `v0.8.1-rc.1` (pre-release).
+
+### Trace Replay Deduplication
+
+- Ignore repeated message IDs and late processing notifications from closed requests, including while their root awaits asynchronous preview enrichment.
+- Let observed native calls finish before transcript/trajectory fallback or request finalization, preserving native model spans and their metrics when persistence or idle notifications arrive first.
+- Persist the latest 128 finalized run IDs per session to prevent snapshot revisions and delayed sidecars from replaying an already represented run after restart. Distinct runs with identical prompts remain independent requests.
+- Omit bundled source-build dependencies from the prebuilt package manifest so newer OpenClaw hosts can load the standalone bundle without requiring separate OTel packages. Source dependency declarations are unchanged.
+
 ## 2026-10-23
 
 Release: `v0.8.0` (stable).

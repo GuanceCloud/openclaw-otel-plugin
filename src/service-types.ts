@@ -103,12 +103,14 @@ export type ActiveRunSpan = {
     endTs: number;
   };
   modelSpanEmitted: boolean;
+  pendingNativeModelCalls?: Set<string>;
   assistantSpanEmitted?: boolean;
   thinkingSpanEmitted?: boolean;
   transcriptAssistantTurnsEmitted?: number;
   transcriptToolCallIds?: Set<string>;
   observedToolCallIds?: Set<string>;
   pendingFinalOutcome?: string;
+  awaitingRunTerminal?: boolean;
   finalAttrsApplied?: boolean;
   usedSkillNames: Set<string>;
   usedToolNames: Set<string>;
@@ -206,6 +208,8 @@ export type SessionSnapshot = {
   agentName?: string;
   runId?: string;
   runCompleted?: boolean;
+  runTerminalPending?: boolean;
+  runCompletedAt?: number;
   runTerminalType?: string;
   runFinalStatus?: string;
   createdAt?: number;
@@ -246,6 +250,8 @@ export type SessionSnapshot = {
 export type SessionRunState = {
   runId?: string;
   runCompleted?: boolean;
+  runTerminalPending?: boolean;
+  runCompletedAt?: number;
   runTerminalType?: string;
   runFinalStatus?: string;
   terminalSourceSeq?: number;

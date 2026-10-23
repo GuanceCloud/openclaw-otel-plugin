@@ -3,6 +3,8 @@ set -euo pipefail
 
 PLUGIN_NAME="${OPENCLAW_PLUGIN_NAME:-openclaw-otel-plugin}"
 OSS_ENDPOINT="${OSS_ENDPOINT:-}"
+GITHUB_REPOSITORY="${OPENCLAW_PLUGIN_GITHUB_REPOSITORY:-GuanceCloud/openclaw-otel-plugin}"
+INSTALLER_RELEASE_VERSION=""
 DOWNLOAD_BASE_URL=""
 PLUGIN_DIR="${OPENCLAW_PLUGIN_DIR:-$HOME/.openclaw/extensions/openclaw-otel-plugin}"
 CONFIG_FILE="${OPENCLAW_CONFIG_FILE:-$HOME/.openclaw/openclaw.json}"
@@ -36,11 +38,14 @@ trap cleanup EXIT
 usage() {
   cat <<'EOF'
 Usage:
-  OSS_ENDPOINT=https://example.com scripts/install.sh [latest|vX.Y.Z|X.Y.Z|/path/to/archive.tar.gz|https://...tar.gz] [--type gtrace|otlp] [--endpoint URL] [--x-token TOKEN] [--tag KEY=VALUE] [--no-config] [--no-restart]
+  scripts/install.sh [latest|vX.Y.Z|X.Y.Z|/path/to/archive.tar.gz|https://...tar.gz] [--type gtrace|otlp] [--endpoint URL] [--x-token TOKEN] [--tag KEY=VALUE] [--no-config] [--no-restart]
 
 Environment variables:
   OSS_ENDPOINT              OSS root endpoint. Required for OSS-backed install/upgrade.
                             The script appends /openclaw-otel-plugin when needed.
+                            When omitted, download from GitHub Releases.
+  OPENCLAW_PLUGIN_GITHUB_REPOSITORY
+                            GitHub repository. Default: GuanceCloud/openclaw-otel-plugin
   OPENCLAW_PLUGIN_DIR        Install directory. Default: ~/.openclaw/extensions/openclaw-otel-plugin
   OPENCLAW_CONFIG_FILE       OpenClaw config file. Default: ~/.openclaw/openclaw.json
   OPENCLAW_PLUGIN_NAME       Plugin package name prefix. Default: openclaw-otel-plugin
@@ -133,6 +138,9 @@ done
 if [ -z "$VERSION_INPUT" ]; then
   VERSION_INPUT="latest"
 fi
+if [ "$VERSION_INPUT" = "latest" ] && [[ "$INSTALLER_RELEASE_VERSION" == *-* ]]; then
+  VERSION_INPUT="$INSTALLER_RELEASE_VERSION"
+fi
 
 if [ -n "$INSTALL_TYPE" ]; then
   INSTALL_TYPE_EXPLICIT=1
@@ -174,8 +182,8 @@ normalize_version() {
 
 resolve_download_base_url() {
   if [ -z "$OSS_ENDPOINT" ]; then
-    printf '[install] OSS_ENDPOINT is required. Example: OSS_ENDPOINT=https://example.com scripts/install.sh latest\n' >&2
-    exit 1
+    printf 'https://github.com/%s/releases' "$GITHUB_REPOSITORY"
+    return
   fi
 
   local root="${OSS_ENDPOINT%/}"
@@ -334,14 +342,22 @@ EOF
 download_latest_archive() {
   local target="$1"
   local base_url="${DOWNLOAD_BASE_URL%/}"
-  download_archive "${base_url}/${PLUGIN_NAME}.tar.gz" "$target"
+  if [ -n "$OSS_ENDPOINT" ]; then
+    download_archive "${base_url}/${PLUGIN_NAME}.tar.gz" "$target"
+  else
+    download_archive "${base_url}/latest/download/${PLUGIN_NAME}.tar.gz" "$target"
+  fi
 }
 
 download_version_archive() {
   local version="$1"
   local target="$2"
   local base_url="${DOWNLOAD_BASE_URL%/}"
-  download_archive "${base_url}/${PLUGIN_NAME}-v${version}.tar.gz" "$target"
+  if [ -n "$OSS_ENDPOINT" ]; then
+    download_archive "${base_url}/${PLUGIN_NAME}-v${version}.tar.gz" "$target"
+  else
+    download_archive "${base_url}/download/v${version}/${PLUGIN_NAME}-v${version}.tar.gz" "$target"
+  fi
 }
 
 extract_archive() {
