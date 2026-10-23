@@ -176,6 +176,8 @@ Get-Content "$HOME\.openclaw\logs\gateway.log" -Tail 50
 
 ## 文档
 
+新采集指标的结果维度 `status` 使用 `ok/error`，历史数据可能仍有旧值。首块延迟 Histogram 可通过 `sum / count` 展示平均值。新增 `gen_ai.client.operation.time_per_output_token` Histogram，仅对能唯一确认流式进度的成功原生模型调用，估算非首 Token 平均耗时；缺少流式证据时没有采样。验证及看板聚合口径见 [指标说明](./docs/gen-ai-metrics.md)。
+
 - 构建与发布：[BUILDING.md](./BUILDING.md)
 - 指标清单：[docs/gen-ai-metrics.md](./docs/gen-ai-metrics.md)
 - Trace 字段：[docs/gen-ai-trace-tags.md](./docs/gen-ai-trace-tags.md)

@@ -2,6 +2,20 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-10-23
+
+Release: `v0.8.0` (stable).
+
+### Metric Outcomes And Token Latency
+
+- Normalize metric result `status` to `ok/error` across native model calls, tools, skills, and workflows. Preserve original trace terminal fields; token usage metrics keep their existing tags. Historical `completed/cancelled` metric values remain historical data.
+- Distinguish native retry attempts by their observed call windows even when OpenClaw reuses a call ID, while still suppressing duplicate terminal events.
+- Start independent request scopes for unqueued Gateway RPC turns and prevent transcript replay from duplicating native calls while their root awaits finalization.
+- Stop defaulting unknown model outcomes to success. Preserve usage from outcome-free aggregates, but omit operation count/duration without a known outcome. Read per-turn transcript stop reasons for replay/synthetic model results and retain known model errors during finalization.
+- Add the project-extension Histogram `gen_ai.client.operation.time_per_output_token` in seconds, derived once per successful native model call with valid usage and uniquely correlated observed stream progress. Skip missing, ambiguous, non-streaming, turn-level, and invalid observations without substituting zero.
+- Document first-chunk mean aggregation using histogram sum/count, client-estimate limitations, and the distinction between per-call estimate distributions and individual token intervals. Verify histogram units, sums, counts, and buckets through a local OTLP/protobuf receiver.
+- Known limitation: request-level terminal outcome handling from #9 remains incomplete; failed request roots can retain technical OK. This release does not resolve that request-level gap.
+
 ## 2026-10-19
 
 ### Model Call Metrics

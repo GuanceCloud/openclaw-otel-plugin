@@ -176,6 +176,8 @@ If logs are enabled, you should also see:
 
 ## Documents
 
+For newly collected metrics, result `status` is `ok` or `error`; historical data can retain older values. The first-chunk latency Histogram supports a mean through `sum / count`. The new `gen_ai.client.operation.time_per_output_token` Histogram estimates time per output token after the first, only for successful native calls with unambiguous observed streaming progress. Missing stream evidence produces no estimate. See the [metric definitions and sampling requirements](./docs/gen-ai-metrics.md) for verification and dashboard aggregation.
+
 - Build and release: [BUILDING.md](./BUILDING.md)
 - Metrics catalog: [docs/gen-ai-metrics.md](./docs/gen-ai-metrics.md)
 - Trace tags: [docs/gen-ai-trace-tags.md](./docs/gen-ai-trace-tags.md)

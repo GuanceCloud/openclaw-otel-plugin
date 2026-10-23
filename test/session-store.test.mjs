@@ -60,6 +60,7 @@ test("session store reads OpenClaw SQLite transcript messages", () => {
   assert.equal(snapshot.runId, "run-sqlite");
   assert.equal(snapshot.lastUserText, "SQLite input");
   assert.equal(snapshot.lastAssistantText, "SQLite output");
+  assert.equal(snapshot.lastRunAssistantTurns[0].stopReason, "stop");
   assert.equal(snapshot.createdAt, 1_000);
 });
 

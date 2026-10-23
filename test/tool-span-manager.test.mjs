@@ -919,7 +919,7 @@ test("tool completion records tool and skill client operation durations", () => 
       gen_ai_skill_name: undefined,
       skill_name: undefined,
       model_name: undefined,
-      status: "completed",
+      status: "ok",
     },
     {
       value: 0.499,
@@ -928,7 +928,7 @@ test("tool completion records tool and skill client operation durations", () => 
       gen_ai_skill_name: "dashboard",
       skill_name: undefined,
       model_name: undefined,
-      status: "completed",
+      status: "ok",
     },
   ]);
   assert.deepEqual(agentDurationRecords.map(({ value }) => value), [499, 499]);
@@ -948,7 +948,7 @@ test("tool completion records tool and skill client operation durations", () => 
       skill_name: undefined,
       session_id: "sid-1",
       compatibility_skill_name: undefined,
-      status: "completed",
+      status: "ok",
     },
     {
       value: 1,
@@ -957,7 +957,7 @@ test("tool completion records tool and skill client operation durations", () => 
       skill_name: "dashboard",
       session_id: "sid-1",
       compatibility_skill_name: undefined,
-      status: "completed",
+      status: "ok",
     },
   ]);
 });
@@ -1233,136 +1233,142 @@ test("transcript replay skips tool calls that were already observed from runtime
   assert.equal(run.observedToolCallIds?.has("call-1"), true);
 });
 
-test("synthetic model span creates a run when transcript metadata exists", () => {
-  const spans = [];
-  const durationRecords = [];
-  const tokenRecords = [];
-  const tracer = createFakeTracer(spans);
-  const trace = {
-    setSpan(ctx, span) {
-      return { ctx, span };
-    },
-  };
-  const rootSpan = createFakeSpan("root");
-  let run;
-  const getRunCalls = [];
+for (const [stopReason, expectedStatus] of [["stop", "ok"], ["error", "error"], ["aborted", "error"], [undefined, undefined]]) {
+  test(`synthetic model metrics respect transcript outcome ${stopReason}`, () => {
+    const spans = [];
+    const durationRecords = [];
+    const tokenRecords = [];
+    const tracer = createFakeTracer(spans);
+    const trace = {
+      setSpan(ctx, span) {
+        return { ctx, span };
+      },
+    };
+    const rootSpan = createFakeSpan("root");
+    let run;
+    const getRunCalls = [];
 
-  const manager = createToolSpanManager({
-    tracer,
-    trace,
-    SpanKind: { INTERNAL: "internal", CLIENT: "client" },
-    SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
-    instruments: {
-      skillActivationCounter: { add() {} },
-      toolCallCounter: { add() {} },
-      toolErrorCounter: { add() {} },
-      toolDuration: { record() {} },
-      genAiClientTokenUsage: {
-        record(value, attrs) {
-          tokenRecords.push({ value, attrs });
+    const manager = createToolSpanManager({
+      tracer,
+      trace,
+      SpanKind: { INTERNAL: "internal", CLIENT: "client" },
+      SpanStatusCode: { OK: "OK", ERROR: "ERROR" },
+      instruments: {
+        skillActivationCounter: { add() {} },
+        toolCallCounter: { add() {} },
+        toolErrorCounter: { add() {} },
+        toolDuration: { record() {} },
+        genAiClientTokenUsage: {
+          record(value, attrs) {
+            tokenRecords.push({ value, attrs });
+          },
+        },
+        genAiClientOperationDuration: {
+          record(value, attrs) {
+            durationRecords.push({ value, attrs });
+          },
         },
       },
-      genAiClientOperationDuration: {
-        record(value, attrs) {
-          durationRecords.push({ value, attrs });
-        },
+      getRun(evt, createIfMissing = false) {
+        getRunCalls.push(createIfMissing);
+        if (!run && createIfMissing) {
+          run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
+          run.runId = "run-synthetic";
+          run.runIds = new Set(["run-synthetic"]);
+          run.span = createFakeSpan("invoke_agent");
+          run.ctx = { ctx: "run" };
+        }
+        return run;
       },
-    },
-    getRun(evt, createIfMissing = false) {
-      getRunCalls.push(createIfMissing);
-      if (!run && createIfMissing) {
-        run = createRunState({ ctx: "root" }, evt.ts ?? 1000, evt.ts ?? 1000);
-        run.runId = "run-synthetic";
-        run.runIds = new Set(["run-synthetic"]);
-        run.span = createFakeSpan("invoke_agent");
-        run.ctx = { ctx: "run" };
-      }
-      return run;
-    },
-    getRoot() {
-      return { span: rootSpan, ctx: { ctx: "root" } };
-    },
-    ensureUserSpan() {
-      throw new Error("not expected");
-    },
-    loadSessionSnapshot() {
-      return {
-        sessionFile: "session.jsonl",
-        mtimeMs: 1,
-        lastUserTs: 1000,
-        lastAssistantTs: 4000,
-        sessionId: "sid-1",
-        lastProvider: "openai",
-        lastModel: "gpt-5",
-        lastAssistantUsage: {
-          input: 12,
-          output: 34,
-          cacheRead: 5,
-          cacheWrite: 7,
-          totalTokens: 4600,
-        },
-      };
-    },
-    enrichWithTranscript(_sessionKey, attrs) {
-      return attrs;
-    },
-    createChildSpan() {
-      throw new Error("not expected");
-    },
-    eventTimestamp(evt) {
-      return new Date(evt.ts ?? 1000);
-    },
-    setLatestAssistantText() {},
-    emitRuntimeOrchestrationSpan() {},
-    ensureRuntimeLifecycleSpans() {},
-    emitModelTurnDebugLog() {},
-  });
+      getRoot() {
+        return { span: rootSpan, ctx: { ctx: "root" } };
+      },
+      ensureUserSpan() {
+        throw new Error("not expected");
+      },
+      loadSessionSnapshot() {
+        return {
+          sessionFile: "session.jsonl",
+          mtimeMs: 1,
+          lastUserTs: 1000,
+          lastRunAssistantTurns: [{ stopReason }],
+          lastAssistantTs: 4000,
+          sessionId: "sid-1",
+          lastProvider: "openai",
+          lastModel: "gpt-5",
+          lastAssistantUsage: {
+            input: 12,
+            output: 34,
+            cacheRead: 5,
+            cacheWrite: 7,
+            totalTokens: 4600,
+          },
+        };
+      },
+      enrichWithTranscript(_sessionKey, attrs) {
+        return attrs;
+      },
+      createChildSpan() {
+        throw new Error("not expected");
+      },
+      eventTimestamp(evt) {
+        return new Date(evt.ts ?? 1000);
+      },
+      setLatestAssistantText() {},
+      emitRuntimeOrchestrationSpan() {},
+      ensureRuntimeLifecycleSpans() {},
+      emitModelTurnDebugLog() {},
+    });
 
-  manager.emitSyntheticModelSpan({
-    sessionKey: "s1",
-    ts: 5000,
-    durationMs: 900,
-  });
+    manager.emitSyntheticModelSpan({
+      sessionKey: "s1",
+      ts: 5000,
+      durationMs: 900,
+    });
 
-  const modelSpan = spans.find((span) => span.name === "llm");
-  assert.ok(modelSpan);
-  assert.deepEqual(getRunCalls, [true, false, false]);
-  assert.equal(modelSpan.options.kind, "client");
-  assert.equal(modelSpan.options.attributes["span.kind"], "model");
-  assert.equal(modelSpan.options.attributes.usage_input_tokens, 24);
-  assert.equal(modelSpan.options.attributes.usage_output_tokens, 34);
-  assert.equal(modelSpan.options.attributes.usage_total_tokens, 58);
-  assert.equal(modelSpan.options.attributes.usage_cache_read_input_tokens, 5);
-  assert.equal(modelSpan.options.attributes.usage_cache_write_input_tokens, 7);
-  assert.equal(modelSpan.options.attributes.usage_cache_total_tokens, 12);
-  assert.equal(modelSpan.options.attributes.run_id, "run-synthetic");
-  assert.equal(modelSpan.options.attributes["llm.input_tokens"], undefined);
-  assert.equal(modelSpan.parentCtx.ctx, "run");
-  assert.equal(modelSpan.status.code, "OK");
-  assert.equal(run.modelSpanEmitted, true);
-  assert.equal(run.modelSpan, modelSpan);
-  assert.equal(run.mainStartTs, 1000);
-  assert.equal(run.modelStartTs, 1240);
-  assert.equal(run.modelEndTs, 4000);
-  assert.equal(durationRecords.length, 1);
-  assert.equal(durationRecords[0].value, 2.76);
-  assert.equal(durationRecords[0].attrs["gen_ai.operation.name"], "chat");
-  assert.equal(durationRecords[0].attrs["gen_ai.provider.name"], "openai");
-  assert.equal(durationRecords[0].attrs["gen_ai.request.model"], "gpt-5");
-  assert.equal(durationRecords[0].attrs.session_id, "sid-1");
-  assert.deepEqual(
-    tokenRecords.map(({ value, attrs }) => ({
-      value,
-      token_type: attrs["gen_ai.token.type"],
-      request_model: attrs["gen_ai.request.model"],
-      session_id: attrs.session_id,
-    })),
-    [
-      { value: 24, token_type: "input", request_model: "gpt-5", session_id: "sid-1" },
-      { value: 34, token_type: "output", request_model: "gpt-5", session_id: "sid-1" },
-    ],
-  );
-});
+    const modelSpan = spans.find((span) => span.name === "llm");
+    assert.ok(modelSpan);
+    assert.deepEqual(getRunCalls, [true, false, false]);
+    assert.equal(modelSpan.options.kind, "client");
+    assert.equal(modelSpan.options.attributes["span.kind"], "model");
+    assert.equal(modelSpan.options.attributes.usage_input_tokens, 24);
+    assert.equal(modelSpan.options.attributes.usage_output_tokens, 34);
+    assert.equal(modelSpan.options.attributes.usage_total_tokens, 58);
+    assert.equal(modelSpan.options.attributes.usage_cache_read_input_tokens, 5);
+    assert.equal(modelSpan.options.attributes.usage_cache_write_input_tokens, 7);
+    assert.equal(modelSpan.options.attributes.usage_cache_total_tokens, 12);
+    assert.equal(modelSpan.options.attributes.run_id, "run-synthetic");
+    assert.equal(modelSpan.options.attributes["llm.input_tokens"], undefined);
+    assert.equal(modelSpan.parentCtx.ctx, "run");
+    assert.equal(modelSpan.status.code, expectedStatus === "error" ? "ERROR" : "OK");
+    assert.equal(run.modelSpanEmitted, true);
+    assert.equal(run.modelSpan, modelSpan);
+    assert.equal(run.mainStartTs, 1000);
+    assert.equal(run.modelStartTs, 1240);
+    assert.equal(run.modelEndTs, 4000);
+    assert.equal(durationRecords.length, expectedStatus ? 1 : 0);
+    if (expectedStatus) {
+      assert.equal(durationRecords[0].value, 2.76);
+      assert.equal(durationRecords[0].attrs.status, expectedStatus);
+      assert.equal(durationRecords[0].attrs["gen_ai.operation.name"], "chat");
+      assert.equal(durationRecords[0].attrs["gen_ai.provider.name"], "openai");
+      assert.equal(durationRecords[0].attrs["gen_ai.request.model"], "gpt-5");
+      assert.equal(durationRecords[0].attrs.session_id, "sid-1");
+    }
+    assert.deepEqual(
+      tokenRecords.map(({ value, attrs }) => ({
+        value,
+        token_type: attrs["gen_ai.token.type"],
+        request_model: attrs["gen_ai.request.model"],
+        session_id: attrs.session_id,
+      })),
+      [
+        { value: 24, token_type: "input", request_model: "gpt-5", session_id: "sid-1" },
+        { value: 34, token_type: "output", request_model: "gpt-5", session_id: "sid-1" },
+      ],
+    );
+  });
+}
 
 test("transcript replay backfills run start from transcript timestamps", () => {
   const spans = [];
@@ -1505,6 +1511,7 @@ test("transcript model spans are replayed per assistant turn", () => {
         lastModel: "gpt-5",
         lastRunAssistantTurns: [
           {
+            stopReason: "error",
             startedAt: 1000,
             endedAt: 2000,
             provider: "openai",
@@ -1521,6 +1528,7 @@ test("transcript model spans are replayed per assistant turn", () => {
             outputKind: "text",
           },
           {
+            stopReason: "stop",
             startedAt: 2300,
             endedAt: 2600,
             provider: "openai",
@@ -1560,6 +1568,8 @@ test("transcript model spans are replayed per assistant turn", () => {
   assert.equal(run.mainStartTs, 1000);
   const modelSpans = spans.filter((span) => span.name === "llm");
   assert.equal(modelSpans.length, 2);
+  assert.deepEqual(modelSpans.map((span) => span.status.code), ["ERROR", "OK"]);
+  assert.deepEqual(durationRecords.map(({ attrs }) => attrs.status), ["error", "ok"]);
   assert.equal(spans.some((span) => span.name === "thinking"), false);
   assert.equal(modelSpans[0].options.startTime.getTime(), 1000);
   assert.equal(modelSpans[0].endTime.getTime(), 2000);
@@ -1701,6 +1711,7 @@ test("transcript model replay skips turns already covered by runtime model usage
         lastModel: "gpt-5",
         lastRunAssistantTurns: [
           {
+            stopReason: "stop",
             startedAt: 1000,
             endedAt: 2000,
             provider: "openai",
@@ -1717,6 +1728,7 @@ test("transcript model replay skips turns already covered by runtime model usage
             outputKind: "text",
           },
           {
+            stopReason: "stop",
             startedAt: 2300,
             endedAt: 2600,
             provider: "openai",

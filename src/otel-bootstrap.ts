@@ -457,6 +457,13 @@ export async function startOtelBootstrap(
         explicitBucketBoundaries: [0, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120],
       },
     }),
+    genAiClientTimePerOutputToken: meter.createHistogram("gen_ai.client.operation.time_per_output_token", {
+      description: "Client-side estimate of mean time per output token after the first token for successful observed streams",
+      unit: "s",
+      advice: {
+        explicitBucketBoundaries: [0, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+      },
+    }),
     genAiClientTokenUsage: meter.createHistogram("gen_ai.client.token.usage", {
       description: "GenAI client input and output token usage",
       unit: "{token}",
