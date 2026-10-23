@@ -109,6 +109,20 @@ test("failed attempts do not pass stream evidence to retries, while all attempts
   assert.equal(records.usage.length, 6);
 });
 
+test("reused call IDs retain every retry and duplicate old terminals cannot consume the next stream", () => {
+  const { records, start, progress, end } = harness();
+  start(); progress(); end({ type: "model.call.error" });
+  start({ ts: 2100 });
+  end({ type: "model.call.error" }); // Duplicate of the previous attempt.
+  progress({ ts: 2400 });
+  end({ ts: 3100, timeToFirstByteMs: 300 });
+  end({ ts: 3100, timeToFirstByteMs: 300 });
+  assert.deepEqual(records.count.map(([, attrs]) => attrs.status), ["error", "ok"]);
+  assert.deepEqual(records.first.map(([value]) => value), [0.2, 0.3]);
+  assert.deepEqual(records.token.map(([value]) => value), [0.007]);
+  assert.equal(records.usage.length, 4);
+});
+
 test("missing first chunk skips only timing metrics; duplicates do not restore a second sample", () => {
   const { records, start, progress, end } = harness();
   start(); progress(); end({ timeToFirstByteMs: undefined }); end({ timeToFirstByteMs: undefined });

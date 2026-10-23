@@ -916,10 +916,11 @@ export function createOtelPluginService(
         }
         const transcriptEvt = buildTranscriptReplayEvent(sessionKey, snapshot);
         const activeRun = getRun(transcriptEvt, false);
-        if (activeRun?.modelSpanEmitted) {
+        const activeRoot = getRoot(transcriptEvt, false);
+        if (activeRun?.modelSpanEmitted || activeRoot?.modelSpanEmitted) {
           return;
         }
-        const hasActiveTrace = Boolean(activeRun || getRoot(transcriptEvt, false));
+        const hasActiveTrace = Boolean(activeRun || activeRoot);
         const replayAlreadyFinalized = hasReplayWatermark(sessionKey, snapshot);
         const replaySnapshotFreshness = resolveTranscriptReplayFreshness({
           snapshot,

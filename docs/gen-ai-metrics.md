@@ -34,7 +34,7 @@ OpenClaw 的标准 usage 把普通 `input`、`cacheRead`、`cacheWrite` 分列�
 
 `gen_ai.client.operation.time_to_first_chunk` 为 Histogram，单位 `s`。按每次模型调用采集，tags 使用 `agent_runtime`、`operation_name=chat`、`provider_name`、`request_model`、`status`，不携带 session/run/call ID，也不新增 tag alias 双写。
 
-数据来自 OpenClaw `model.call.completed` / `model.call.error` 的 `timeToFirstByteMs`，按调用 ID 去重。只有有限、非负且不超过调用耗时的值才上报；首块后失败的调用仍计入，`status=error`。没有该字段的旧版或运行路径不产生采样点，不补零，也不从 transcript 推算。
+数据来自 OpenClaw `model.call.completed` / `model.call.error` 的 `timeToFirstByteMs`，按会话、run、调用 ID 和调用时间窗口去重；宿主重试复用调用 ID 时仍分别采样。只有有限、非负且不超过调用耗时的值才上报；首块后失败的调用仍计入，`status=error`。没有该字段的旧版或运行路径不产生采样点，不补零，也不从 transcript 推算。
 
 看板名称建议使用“首块响应延迟”。平均值使用同一统计范围内 Histogram 的 `sum / count`；跨实例、跨时间桶时先合并 sum/count 再相除，不平均各实例的平均值，也不新增 `.avg` 指标。分析成功调用时筛选 `status=ok`，首块后失败的调用通过 `status=error` 单独分析。没有采样时显示无数据，不显示零。
 

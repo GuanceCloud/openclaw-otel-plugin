@@ -29,8 +29,7 @@ test("first-chunk timing records per-call seconds without root events or cross-r
   assert.equal(records[1][1].status, "error");
   assert.equal(events.length, 0);
   assert.equal(run.modelCallTimings.size, 2);
-  assert.equal(run.modelCallTimings.get("call-1").firstChunkSeconds, 0.25);
-  assert.equal(run.modelCallTimings.get("retry").firstChunkSeconds, 0);
+  assert.deepEqual([...run.modelCallTimings.values()].map((call) => call.firstChunkSeconds), [0.25, 0]);
 });
 
 test("first-chunk timing ignores absent or invalid observations and start events", () => {
@@ -68,7 +67,7 @@ test("first-chunk timing accepts a secondary run ID owned by the active trace", 
   handler({ type: "model.call.completed", runId: "native", callId: "call", provider: "openai", model: "m",
     ts: 2000, durationMs: 1000, timeToFirstByteMs: 200 });
   assert.equal(records.length, 1);
-  assert.equal(run.modelCallTimings.get("call").firstChunkSeconds, 0.2);
+  assert.equal([...run.modelCallTimings.values()][0].firstChunkSeconds, 0.2);
 });
 
 function createFakeSpan(name) {
@@ -239,7 +238,7 @@ for (const { type, status, spanStatus } of [
       assert.deepEqual(children[0].span.status, { code: spanStatus });
       assert.equal(children[0].attrs["gen_ai.response.time_to_first_chunk"], expectedFirstChunk);
       assert.equal(children[0].span.ended, true);
-      assert.equal(run.modelCallTimings.get("call-1").firstChunkSeconds, expectedFirstChunk);
+      assert.equal([...run.modelCallTimings.values()][0].firstChunkSeconds, expectedFirstChunk);
       assert.deepEqual(firstChunks, expectedFirstChunk === undefined ? [] : [[expectedFirstChunk, status]]);
 
       handler(call);
@@ -1407,6 +1406,41 @@ test("session.state processing requests lifecycle shell spans", () => {
   assert.equal(lifecycleCalls[0].type, "lifecycle");
   assert.equal(lifecycleCalls[0].evt.ts, 1000);
   assert.equal(lifecycleCalls[0].options.processingStartTs, 1000);
+});
+
+test("unqueued RPC starts open a fresh request and never inherit the previous turn's snapshot", () => {
+  const boundaries = [];
+  const roots = [];
+  const lifecycle = [];
+  let run;
+  const handler = createDiagnosticEventHandler({
+    instruments: {}, SeverityNumber: { INFO: 9 }, cleanupExpiredRoots() {},
+    beginRequestTrace: (evt) => boundaries.push(evt),
+    getRun: () => run,
+    ensureUserSpan(evt) {
+      run ??= { mainStartTs: evt.ts };
+      return run;
+    },
+    getRoot(evt) {
+      roots.push(evt);
+      return { span: createFakeSpan("root") };
+    },
+    loadSessionSnapshot: () => ({ runId: "old-run", lastUserTs: 1000,
+      lastAssistantTs: 2000, lastRunAssistantTurns: [{ startedAt: 1200, endedAt: 2000 }] }),
+    emitDiagnosticLog() {},
+    ensureRuntimeLifecycleSpans: (evt, options) => lifecycle.push({ evt, options }),
+  });
+  handler({ type: "session.state", sessionKey: "rpc", ts: 10000,
+    state: "processing", prevState: "idle", reason: "run_started" });
+  assert.equal(boundaries.length, 1);
+  assert.equal(boundaries[0].ts, 10000);
+  assert.equal(roots[0].ts, 10000);
+  assert.equal(roots[0].runId, undefined);
+  assert.equal(lifecycle[0].options.snapshot, undefined);
+  // Replacements/retries within that request must retain the same boundary.
+  handler({ type: "session.state", sessionKey: "rpc", ts: 11000,
+    state: "processing", prevState: "processing", reason: "run_replaced" });
+  assert.equal(boundaries.length, 1);
 });
 
 test("session.state processing backfills trace start from transcript snapshot", () => {
