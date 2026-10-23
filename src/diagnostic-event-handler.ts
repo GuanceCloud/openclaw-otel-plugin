@@ -465,6 +465,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     switch (evt.type) {
       case "model.call.completed":
       case "model.call.error": {
+        const status = evt.type === "model.call.error" ? "error" : "completed";
         const latencyMs = evt.timeToFirstByteMs;
         const validLatency = typeof latencyMs === "number" && Number.isFinite(latencyMs)
           && latencyMs >= 0 && Number.isFinite(evt.durationMs) && evt.durationMs >= latencyMs;
@@ -526,7 +527,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                 evt.durationMs,
                 run.ctx,
               );
-              if (evt.type === "model.call.error") {
+              if (status === "error") {
                 span.setStatus({ code: SpanStatusCode.ERROR });
               } else {
                 span.setStatus({ code: SpanStatusCode.OK });
@@ -576,34 +577,13 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             }
           }
         }
-        if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs) || latencyMs < 0
-          || !Number.isFinite(evt.durationMs) || evt.durationMs < latencyMs
-          || !evt.runId || !evt.callId) {
-          break;
-        }
-        const now = Date.now();
-        for (const [key, recordedAt] of recordedFirstChunks) {
-          if (now - recordedAt < 60 * 60 * 1000) break;
-          recordedFirstChunks.delete(key);
-        }
-        const key = JSON.stringify([evt.sessionId, evt.sessionKey, evt.runId, evt.callId]);
-        if (recordedFirstChunks.has(key)) break;
-        const status = evt.type === "model.call.error" ? "error" : "completed";
-        const attrs = {
-          agent_runtime: "openclaw",
-          operation_name: "chat",
-          provider_name: evt.provider,
-          request_model: evt.model,
-          status,
-        };
-        instruments.genAiClientTimeToFirstChunk?.record(latencyMs / 1000, attrs);
-        recordedFirstChunks.set(key, now);
-        if (recordedFirstChunks.size > 10000) {
-          recordedFirstChunks.delete(recordedFirstChunks.keys().next().value!);
-        }
+        // Usage and operation metrics do not depend on first-chunk timing.
+        // A native span also suppresses the later model.usage aggregate, so
+        // record its metrics before any optional timing validation can exit.
         if (emittedNativeModelSpan) {
           const metricAttrs = buildGenAiClientModelMetricAttrs(evt.provider, evt.model, {
             session_id: evt.sessionId,
+            status,
           });
           recordGenAiAgentOperationMetrics(instruments, evt.durationMs, metricAttrs);
           for (const [tokenType, tokenValue] of [
@@ -620,6 +600,30 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               );
             }
           }
+        }
+        if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs) || latencyMs < 0
+          || !Number.isFinite(evt.durationMs) || evt.durationMs < latencyMs
+          || !evt.runId || !evt.callId) {
+          break;
+        }
+        const now = Date.now();
+        for (const [key, recordedAt] of recordedFirstChunks) {
+          if (now - recordedAt < 60 * 60 * 1000) break;
+          recordedFirstChunks.delete(key);
+        }
+        const key = JSON.stringify([evt.sessionId, evt.sessionKey, evt.runId, evt.callId]);
+        if (recordedFirstChunks.has(key)) break;
+        const attrs = {
+          agent_runtime: "openclaw",
+          operation_name: "chat",
+          provider_name: evt.provider,
+          request_model: evt.model,
+          status,
+        };
+        instruments.genAiClientTimeToFirstChunk?.record(latencyMs / 1000, attrs);
+        recordedFirstChunks.set(key, now);
+        if (recordedFirstChunks.size > 10000) {
+          recordedFirstChunks.delete(recordedFirstChunks.keys().next().value!);
         }
         break;
       }

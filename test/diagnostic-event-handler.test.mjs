@@ -182,6 +182,97 @@ test("native model calls stay under the live request and suppress the later aggr
   ]);
 });
 
+for (const { type, status, spanStatus } of [
+  { type: "model.call.completed", status: "completed", spanStatus: 1 },
+  { type: "model.call.error", status: "error", spanStatus: 2 },
+]) {
+  for (const timeToFirstByteMs of [undefined, null, -1, NaN, Infinity, 1001, "200", 0, 250, 1000]) {
+    test(`${type} preserves usage and operation metrics with first-chunk timing ${String(timeToFirstByteMs)}`, () => {
+      const children = [];
+      const aggregateEvents = [];
+      const tokenRecords = [];
+      const clientDurations = [];
+      const agentDurations = [];
+      const operationCounts = [];
+      const firstChunks = [];
+      const expectedFirstChunk = [0, 250, 1000].includes(timeToFirstByteMs)
+        ? timeToFirstByteMs / 1000
+        : undefined;
+      const run = { runId: "run-1", ctx: "invoke-agent", mainStartTs: 1000 };
+      const handler = createDiagnosticEventHandler({
+        instruments: {
+          genAiClientTokenUsage: { record(value, attrs) {
+            assert.equal(attrs.status, undefined);
+            tokenRecords.push([attrs["gen_ai.token.type"], value]);
+          } },
+          genAiClientOperationDuration: { record: (value, attrs) => clientDurations.push([value, attrs.status]) },
+          genAiAgentOperationDuration: { record: (value, attrs) => agentDurations.push([value, attrs.status]) },
+          genAiAgentOperationCount: { add: (value, attrs) => operationCounts.push([value, attrs.status]) },
+          genAiClientTimeToFirstChunk: { record: (value, attrs) => firstChunks.push([value, attrs.status]) },
+        },
+        SpanStatusCode: { OK: 1, ERROR: 2 }, SeverityNumber: { INFO: 9 },
+        trace: { setSpan: (_ctx, span) => span },
+        cleanupExpiredRoots() {}, getRun: () => run, getRoot: () => ({ span: createFakeSpan("root") }),
+        loadSessionSnapshot: () => undefined, enrichWithTranscript: (_key, attrs) => attrs,
+        updateAggregateTokens: (evt) => aggregateEvents.push(evt),
+        ensureRuntimeLifecycleSpans() { throw new Error("aggregate model.usage must not create a lifecycle span"); },
+        createChildSpan(name, evt, attrs, durationMs, parentCtx) {
+          const span = createFakeSpan(name);
+          children.push({ name, attrs, durationMs, parentCtx, span });
+          return { span, effectiveDurationMs: durationMs, startTime: new Date(evt.ts - durationMs), endTime: new Date(evt.ts) };
+        },
+        emitDiagnosticLog() {}, emitModelTurnDebugLog() {}, emitRuntimeOrchestrationSpan() {},
+      });
+      const call = {
+        type, sessionKey: "session-key", sessionId: "session-id", runId: "run-1", callId: "call-1",
+        provider: "openai", model: "model-a", ts: 2000, durationMs: 1000, timeToFirstByteMs,
+        usage: { input: 10, output: 2, cacheRead: 50, cacheWrite: 5, promptTokens: 65 },
+      };
+      const aggregateUsage = { ...call, type: "model.usage" };
+
+      handler(call);
+      assert.deepEqual(tokenRecords, [["input", 65], ["output", 2]]);
+      assert.deepEqual(clientDurations, [[1, status]]);
+      assert.deepEqual(agentDurations, [[1000, status]]);
+      assert.deepEqual(operationCounts, [[1, status]]);
+      assert.equal(children.length, 1);
+      assert.deepEqual(children[0].span.status, { code: spanStatus });
+      assert.equal(children[0].attrs["gen_ai.response.time_to_first_chunk"], expectedFirstChunk);
+      assert.equal(children[0].span.ended, true);
+      assert.equal(run.modelCallTimings.get("call-1").firstChunkSeconds, expectedFirstChunk);
+      assert.deepEqual(firstChunks, expectedFirstChunk === undefined ? [] : [[expectedFirstChunk, status]]);
+
+      handler(call);
+      handler(aggregateUsage);
+      assert.deepEqual(tokenRecords, [["input", 65], ["output", 2]]);
+      assert.deepEqual(clientDurations, [[1, status]]);
+      assert.deepEqual(agentDurations, [[1000, status]]);
+      assert.deepEqual(operationCounts, [[1, status]]);
+      assert.equal(children.length, 1);
+      assert.equal(aggregateEvents.length, 1);
+      assert.deepEqual(firstChunks, expectedFirstChunk === undefined ? [] : [[expectedFirstChunk, status]]);
+
+      const retry = { ...call, callId: "retry", ts: 3000 };
+      handler(retry);
+      handler(retry);
+      handler({ ...aggregateUsage, ts: 3000, durationMs: 2000 });
+      assert.deepEqual(tokenRecords, [["input", 65], ["output", 2], ["input", 65], ["output", 2]]);
+      assert.deepEqual(clientDurations, [[1, status], [1, status]]);
+      assert.deepEqual(agentDurations, [[1000, status], [1000, status]]);
+      assert.deepEqual(operationCounts, [[1, status], [1, status]]);
+      assert.equal(children.length, 2);
+      for (const { span } of children) {
+        assert.deepEqual(span.status, { code: spanStatus });
+        assert.equal(span.ended, true);
+      }
+      assert.equal(aggregateEvents.length, 2);
+      assert.deepEqual(firstChunks, expectedFirstChunk === undefined ? [] : [
+        [expectedFirstChunk, status], [expectedFirstChunk, status],
+      ]);
+    });
+  }
+}
+
 test("late model usage after transcript replay does not duplicate trace or metrics", () => {
   const lifecycleCalls = [];
   const aggregateEvents = [];
