@@ -166,6 +166,23 @@ type DiagnosticEventHandlerDeps = {
 export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
   // Bound deduplication state for a long-lived gateway; retries have distinct call IDs.
   const recordedFirstChunks = new Map<string, number>();
+  const recordedNativeCalls = new Map<string, number>();
+  // Stream-progress events have a run ID but no call ID. Attribute them only to
+  // a uniquely active call, never to a subsequent call or an overlapping one.
+  const streamCalls = new Map<string, {
+    scope: string;
+    startedAt: number;
+    receivedAt: number;
+    progressTs?: number;
+    ambiguous: boolean;
+  }>();
+  const modelCallStateTtlMs = 60 * 60 * 1000;
+  let streamTrackingPausedUntil = 0;
+  const streamScope = (evt: SessionEvent) => JSON.stringify([
+    evt.sessionKey || evt.sessionId || "", evt.runId,
+  ]);
+  const streamCallKey = (evt: SessionEvent & { callId?: string }) =>
+    JSON.stringify([streamScope(evt), evt.callId]);
   // model.usage is a run-level aggregate emitted after the individual provider
   // calls. Remember native calls briefly so it cannot create a duplicate root LLM.
   const recentNativeModelCalls = new Map<string, Array<{
@@ -463,9 +480,48 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     cleanupExpiredRoots();
 
     switch (evt.type) {
+      case "model.call.started": {
+        if (!evt.runId || !evt.callId || !Number.isFinite(evt.ts)) break;
+        const now = Date.now();
+        for (const [key, call] of streamCalls) {
+          if (now - call.receivedAt >= modelCallStateTtlMs) streamCalls.delete(key);
+        }
+        if (now < streamTrackingPausedUntil) break;
+        const key = streamCallKey(evt);
+        if (streamCalls.has(key)) break;
+        if (streamCalls.size >= 1000) {
+          // Lost active calls would make later progress attribution ambiguous.
+          // Pause rather than attributing it to an incomplete set of calls.
+          streamCalls.clear();
+          streamTrackingPausedUntil = now + modelCallStateTtlMs;
+          break;
+        }
+        const scope = streamScope(evt);
+        let ambiguous = false;
+        for (const call of streamCalls.values()) {
+          if (call.scope === scope) {
+            call.ambiguous = true;
+            ambiguous = true;
+          }
+        }
+        streamCalls.set(key, { scope, startedAt: evt.ts, receivedAt: now, ambiguous });
+        break;
+      }
+      case "run.progress": {
+        if (evt.reason !== "model_call:stream_progress" || !evt.runId || !Number.isFinite(evt.ts)) break;
+        const scope = streamScope(evt);
+        const active = Array.from(streamCalls.values()).filter((call) => call.scope === scope);
+        if (active.length === 1 && !active[0].ambiguous && evt.ts >= active[0].startedAt
+          && Date.now() - active[0].receivedAt < modelCallStateTtlMs) {
+          active[0].progressTs ??= evt.ts;
+        }
+        break;
+      }
       case "model.call.completed":
       case "model.call.error": {
-        const status = evt.type === "model.call.error" ? "error" : "completed";
+        const streamCall = streamCalls.get(streamCallKey(evt));
+        streamCalls.delete(streamCallKey(evt));
+        const status = evt.type === "model.call.error" ? "error" : "ok";
         const latencyMs = evt.timeToFirstByteMs;
         const validLatency = typeof latencyMs === "number" && Number.isFinite(latencyMs)
           && latencyMs >= 0 && Number.isFinite(evt.durationMs) && evt.durationMs >= latencyMs;
@@ -473,7 +529,13 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const resolvedSessionKey = resolveSessionKey?.(evt) ?? evt.sessionKey;
         const usageTotals = resolveUsageTokenTotals(evt.usage);
         let emittedNativeModelSpan = false;
-        if (runHasId(run, evt.runId) && evt.callId && Number.isFinite(evt.ts)
+        const nativeKey = streamCallKey(evt);
+        const recordedAt = Date.now();
+        for (const [key, time] of recordedNativeCalls) {
+          if (recordedAt - time < modelCallStateTtlMs) break;
+          recordedNativeCalls.delete(key);
+        }
+        if (!recordedNativeCalls.has(nativeKey) && runHasId(run, evt.runId) && evt.callId && Number.isFinite(evt.ts)
           && Number.isFinite(evt.durationMs) && evt.durationMs >= 0) {
           const timings = run.modelCallTimings ??= new Map();
           if (!timings.has(evt.callId)) {
@@ -559,6 +621,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
               updateAggregateTokens(evt);
               rememberNativeModelCall(resolvedSessionKey, evt.provider, evt.model, evt.ts);
               emittedNativeModelSpan = true;
+              recordedNativeCalls.set(nativeKey, recordedAt);
+              if (recordedNativeCalls.size > 10000) {
+                recordedNativeCalls.delete(recordedNativeCalls.keys().next().value!);
+              }
               emitModelTurnDebugLog({
                 source: "native_model_span",
                 trace_id: typeof span.spanContext === "function" ? span.spanContext().traceId : undefined,
@@ -621,6 +687,17 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
           status,
         };
         instruments.genAiClientTimeToFirstChunk?.record(latencyMs / 1000, attrs);
+        const outputTokens = usageTotals.outputTokens;
+        if (emittedNativeModelSpan && status === "ok" && evt.observationUnit !== "turn"
+          && streamCall && !streamCall.ambiguous && streamCall.progressTs !== undefined
+          && recordedAt - streamCall.receivedAt < modelCallStateTtlMs
+          && streamCall.progressTs >= evt.ts - evt.durationMs && streamCall.progressTs <= evt.ts
+          && Number.isSafeInteger(outputTokens) && outputTokens > 1) {
+          instruments.genAiClientTimePerOutputToken?.record(
+            (evt.durationMs - latencyMs) / (outputTokens - 1) / 1000,
+            attrs,
+          );
+        }
         recordedFirstChunks.set(key, now);
         if (recordedFirstChunks.size > 10000) {
           recordedFirstChunks.delete(recordedFirstChunks.keys().next().value!);

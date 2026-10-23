@@ -1017,6 +1017,7 @@ export function createOtelPluginService(
             trajectoryRun.model,
             {
               session_id: trajectoryRun.sessionId,
+              status: trajectoryRun.finalStatus,
             },
           );
           const durationMs = Math.max(
@@ -1217,10 +1218,12 @@ export function createOtelPluginService(
             requestMetricSnapshot as any,
             requestSummaryAttrs,
           );
-          instruments.genAiWorkflowDuration?.record(
-            durationMsToSeconds(Math.max(egressEndTs - requestStartTs, 1)),
-            requestMetricAttrs,
-          );
+          if (requestMetricAttrs.status) {
+            instruments.genAiWorkflowDuration?.record(
+              durationMsToSeconds(Math.max(egressEndTs - requestStartTs, 1)),
+              requestMetricAttrs,
+            );
+          }
 
           runSpan.setStatus({ code: SpanStatusCode.OK });
           endSpanSafely(runSpan, new Date(egressEndTs));
@@ -1294,7 +1297,9 @@ export function createOtelPluginService(
 
       const finalizeRunSpans = (current: ActiveRunSpan, endTime?: Date) => {
         if (current.modelSpan) {
-          current.modelSpan.setStatus({ code: SpanStatusCode.OK });
+          if (current.modelSpan.status?.code !== SpanStatusCode.ERROR) {
+            current.modelSpan.setStatus({ code: SpanStatusCode.OK });
+          }
           endSpanSafely(current.modelSpan, endTime);
           current.modelSpan = undefined;
           current.modelCtx = undefined;
@@ -1629,10 +1634,12 @@ export function createOtelPluginService(
           current.span && addEvent(current.span, "run.finish");
         }
         const genAiRequestMetricAttrs = buildGenAiWorkflowMetricAttrs(snapshot, summaryAttrs);
-        instruments.genAiWorkflowDuration?.record(
-          durationMsToSeconds(Math.max(0, eventTimestamp(evt).getTime() - current.startedAt)),
-          genAiRequestMetricAttrs,
-        );
+        if (genAiRequestMetricAttrs.status) {
+          instruments.genAiWorkflowDuration?.record(
+            durationMsToSeconds(Math.max(0, eventTimestamp(evt).getTime() - current.startedAt)),
+            genAiRequestMetricAttrs,
+          );
+        }
         finalizeRunSpans(current, eventTimestamp(evt));
       };
 

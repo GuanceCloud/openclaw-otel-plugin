@@ -285,6 +285,20 @@ export function normalizeOutcome(rawStatus: string | undefined): string | undefi
   return raw;
 }
 
+// Metrics use a binary outcome without changing the richer trace terminal state.
+export function normalizeMetricStatus(rawStatus: string | undefined): "ok" | "error" | undefined {
+  const outcome = normalizeOutcome(rawStatus);
+  if (outcome === "completed" || outcome === "ok") return "ok";
+  if (outcome === "error" || outcome === "cancelled" || outcome === "aborted") return "error";
+  return undefined;
+}
+
+export function modelStopReasonStatus(stopReason: string | undefined): "ok" | "error" | undefined {
+  const reason = stopReason?.trim().toLowerCase();
+  if (reason === "stop" || reason === "length" || reason === "tooluse" || reason === "tool_call") return "ok";
+  return normalizeMetricStatus(reason);
+}
+
 export function resolveRequestClassification(input: {
   lastUserText?: string;
   lastAssistantText?: string;
@@ -1921,7 +1935,7 @@ export function buildGenAiAgentOperationCountMetricAttrs(
   const operationName = typeof attrs["gen_ai.operation.name"] === "string"
     ? attrs["gen_ai.operation.name"]
     : undefined;
-  const status = normalizeOutcome(
+  const status = normalizeMetricStatus(
     stringValue(attrs.status ?? attrs.outcome ?? attrs.final_status ?? attrs.tool_result_status),
   );
   const baseAttrs: Record<string, string | number | boolean | undefined> = {
@@ -1971,7 +1985,7 @@ export function buildGenAiAgentOperationDurationMetricAttrs(
   const operationName = typeof attrs["gen_ai.operation.name"] === "string"
     ? attrs["gen_ai.operation.name"]
     : undefined;
-  const status = normalizeOutcome(
+  const status = normalizeMetricStatus(
     stringValue(attrs.status ?? attrs.outcome ?? attrs.final_status ?? attrs.tool_result_status),
   );
   const baseAttrs: Record<string, string | number | boolean | undefined> = {
@@ -2023,6 +2037,7 @@ export function recordGenAiAgentOperationMetrics(
 ) {
   const safeDurationMs = Math.max(0, durationMs);
   const metricDurationAttrs = buildGenAiAgentOperationDurationMetricAttrs(attrs);
+  if (!metricDurationAttrs.status || !Number.isFinite(durationMs) || durationMs < 0) return;
   instruments.genAiClientOperationDuration?.record(durationMsToSeconds(safeDurationMs), metricDurationAttrs);
   instruments.genAiAgentOperationDuration?.record(safeDurationMs, metricDurationAttrs);
   instruments.genAiAgentOperationCount?.add(1, buildGenAiAgentOperationCountMetricAttrs(attrs));
@@ -2046,7 +2061,7 @@ export function buildGenAiWorkflowMetricAttrs(
     session_id: sessionId,
     "gen_ai.conversation.id": sessionId,
     final_status: normalizeFinalStatus(rawStatus),
-    status: normalizeOutcome(rawStatus),
+    status: normalizeMetricStatus(rawStatus),
   });
 }
 
@@ -2076,7 +2091,7 @@ export function buildGenAiClientToolMetricAttrs(
     "gen_ai.conversation.id": sessionId,
     "gen_ai.operation.name": "execute_tool",
     "gen_ai.tool.name": tool.name,
-    status: normalizeOutcome(resultStatus),
+    status: normalizeMetricStatus(resultStatus),
   });
 }
 
@@ -2091,7 +2106,7 @@ export function buildGenAiClientSkillMetricAttrs(
     "gen_ai.conversation.id": sessionId,
     "gen_ai.operation.name": "skill",
     "gen_ai.skill.name": skillName,
-    status: normalizeOutcome(outcome),
+    status: normalizeMetricStatus(outcome),
   });
 }
 
@@ -2115,8 +2130,8 @@ export function buildGenAiClientModelMetricAttrs(
   extra?: Record<string, string | number | boolean | undefined>,
 ) {
   const sessionId = typeof extra?.session_id === "string" ? extra.session_id : undefined;
-  const status = normalizeOutcome(
-    stringValue(extra?.status ?? extra?.outcome ?? extra?.final_status ?? "completed"),
+  const status = normalizeMetricStatus(
+    stringValue(extra?.status ?? extra?.outcome ?? extra?.final_status),
   );
   const { status: _status, outcome: _outcome, ...rest } = extra ?? {};
   return stringAttrs({
@@ -2125,8 +2140,8 @@ export function buildGenAiClientModelMetricAttrs(
     "gen_ai.request.model": model,
     "gen_ai.response.model": model,
     "gen_ai.conversation.id": sessionId,
-    status,
     ...rest,
+    status,
   });
 }
 

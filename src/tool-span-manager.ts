@@ -8,6 +8,7 @@ import type {
   SkillCatalogEntry,
 } from "./service-types.js";
 import {
+  modelStopReasonStatus,
   addEvent,
   buildGenAiClientTokenMetricAttrs,
   buildRunScopeAttrs,
@@ -923,7 +924,8 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         },
         run.ctx,
       );
-      span.setStatus({ code: SpanStatusCode.OK });
+      const modelStatus = modelStopReasonStatus(turn.stopReason);
+      span.setStatus({ code: modelStatus === "error" ? SpanStatusCode.ERROR : SpanStatusCode.OK });
       endSpanSafely(span, new Date(endTs));
       const durationMs = Math.max(endTs - startTs, 1);
       const modelMetricAttrs = buildGenAiClientModelMetricAttrs(
@@ -931,6 +933,7 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
         turn.model ?? snapshot?.lastModel,
         {
           session_id: snapshot?.sessionId ?? evt.sessionId,
+          status: modelStatus,
         },
       );
       recordGenAiAgentOperation(durationMs, modelMetricAttrs);
@@ -1095,10 +1098,12 @@ export function createToolSpanManager(deps: ToolSpanManagerDeps) {
       },
       run.ctx,
     );
-    span.setStatus({ code: SpanStatusCode.OK });
+    const modelStatus = modelStopReasonStatus(lastTurn?.stopReason);
+    span.setStatus({ code: modelStatus === "error" ? SpanStatusCode.ERROR : SpanStatusCode.OK });
     const durationMs = Math.max(modelEndTs - startTs, 1);
     const modelMetricAttrs = buildGenAiClientModelMetricAttrs(snapshot.lastProvider, snapshot.lastModel, {
       session_id: snapshot.sessionId ?? evt.sessionId,
+      status: modelStatus,
     });
     recordGenAiAgentOperation(durationMs, modelMetricAttrs);
     recordGenAiAgentTokenUsage(

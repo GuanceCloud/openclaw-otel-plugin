@@ -175,14 +175,16 @@ invoke_agent
   - 当前只保留 turn 终态语义，用于判断一次 agent 请求最终是正常完成还是被中断/取消
 
 - `status`
-  - 表示统一结果维度
-  - 用于和 metrics 侧对齐 `completed` / `cancelled` / `error`
+  - Trace 上保留业务结果维度 `completed` / `cancelled` / `error`
+  - metrics 独立归一化为 `ok` / `error`，不直接复制 Trace 原始终态
 
 使用建议：
 
 - 看链路技术错误：优先看 span status / `error.type`
 - 看一次 agent 请求最终结局：优先看 `final_status`
-- 需要和指标统一统计结果维度：看 `status`
+- 查询指标结果维度：使用指标 `status=ok/error`；不要将 Trace 业务状态值直接作为指标筛选条件
+
+`gen_ai.client.operation.time_per_output_token` 是成功原生流式模型调用的客户端派生指标，不新增 Trace tag，也不改变 `llm` 的 span duration。采样条件和估算边界见 [指标说明](./gen-ai-metrics.md#非首-token-平均耗时估算)。
 
 ### `final_status` 结果语义
 

@@ -157,6 +157,7 @@ export type MetricInstruments = {
   genAiWorkflowDuration: any;
   genAiClientOperationDuration: any;
   genAiClientTimeToFirstChunk: any;
+  genAiClientTimePerOutputToken: any;
   genAiClientTokenUsage: any;
   genAiAgentOperationCount: any;
   genAiAgentOperationDuration: any;
@@ -174,6 +175,7 @@ export type TranscriptToolCall = {
 };
 
 export type TranscriptAssistantTurn = {
+  stopReason?: string;
   startedAt?: number;
   endedAt?: number;
   provider?: string;

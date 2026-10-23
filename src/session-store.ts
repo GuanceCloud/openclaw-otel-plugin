@@ -1043,6 +1043,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
             })()
             : undefined;
           currentRunAssistantTurns.push({
+            ...(typeof message.stopReason === "string" ? { stopReason: message.stopReason } : {}),
             startedAt: currentRunCursorTs ?? startedAt,
             endedAt: startedAt,
             provider: typeof message.provider === "string" ? message.provider : undefined,
