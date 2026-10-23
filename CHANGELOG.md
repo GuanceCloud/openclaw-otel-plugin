@@ -2,6 +2,16 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-10-23 (release candidate 2)
+
+Release: `v0.8.1-rc.2` (pre-release).
+
+### GitHub Installer Compatibility
+
+- Default the Linux/macOS installer to GitHub Releases when `OSS_ENDPOINT` is absent, matching the connector's GitHub installation flow. Retain explicit OSS, archive URL, and local archive support.
+- Generate `install-release.sh` during packaging and embed the release version in both shell and PowerShell installers. A candidate installer invoked with `latest` installs its own RC archive, allowing the connector to select the candidate through `--static-base`.
+- Document stable versus candidate selection and verify download routing, GTrace configuration, unrelated configuration preservation, and checksum failure protection.
+
 ## 2026-10-23 (release candidate)
 
 Release: `v0.8.1-rc.1` (pre-release).

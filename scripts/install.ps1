@@ -17,6 +17,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$InstallerReleaseVersion = ""
+if ($Version -eq "latest" -and $InstallerReleaseVersion.Contains("-")) {
+  $Version = $InstallerReleaseVersion
+}
 
 function Write-InstallLog([string]$Message) {
   Write-Host "[install] $Message"

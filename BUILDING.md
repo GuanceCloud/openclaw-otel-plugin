@@ -68,11 +68,14 @@ npm run pack:release
 - `output/openclaw-otel-plugin.tar.gz`
 - `output/openclaw-otel-plugin.tar.gz.sha256`
 - `output/install.sh`
+- `output/install-release.sh`
 - `output/install.ps1`
 - `output/install-release.ps1`
 
 其中带版本包是不可变发布包，`openclaw-otel-plugin.tar.gz` 是 latest 包，每次发布可以覆盖。
-`install.sh`（Linux/macOS）和 `install.ps1` / `install-release.ps1`（Windows）同时作为安装和升级执行层；PowerShell 安装器未传 `-OssEndpoint` 时从 GitHub Release 下载，传入时从 OSS 下载。
+`install.sh` / `install-release.sh`（Linux/macOS）和 `install.ps1` / `install-release.ps1`（Windows）同时作为安装和升级执行层；未设置 `OSS_ENDPOINT` / `-OssEndpoint` 时从 GitHub Releases 下载，设置后从 OSS 下载。
+
+打包时自动向安装器嵌入发布版本。RC 安装器收到 `latest` 时固定下载自身所属 RC；正式版安装器与源码安装器的 `latest` 仍选择正式版最新包。显式传入版本、URL 或本地包时按传入值处理。
 
 打包内容包括：
 
@@ -93,4 +96,6 @@ npm run pack:release
 2. 运行 `npm test`。
 3. 运行 `npm run pack:release`。
 4. 提交版本变更并打 tag，例如 `v0.6.7`。
-5. 将 `output/` 下的带版本包、latest 包、对应 `.sha256`、`install.sh`、`install.ps1` 和 `install-release.ps1` 上传到对应发布渠道。
+5. 将 `output/` 下的带版本包、latest 包、对应 `.sha256`、`install.sh`、`install-release.sh`、`install.ps1` 和 `install-release.ps1` 上传到对应发布渠道。
+
+RC 仅上传带版本包、其 `.sha256`、四个安装器和覆盖这些资产的 `SHA256SUMS`；Release 标记为 pre-release 且不更新 latest。发布后重新下载校验，并使用连接器指定该 RC 的 `--static-base` 在临时插件和配置目录执行安装。
