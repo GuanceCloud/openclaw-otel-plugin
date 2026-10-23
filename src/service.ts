@@ -1298,6 +1298,17 @@ export function createOtelPluginService(
             ...recentSessionKeys,
           ]);
           for (const sessionKey of activeSessionKeys) {
+            const completedSnapshot = loadSessionSnapshot(sessionKey);
+            const liveRun = getRun({ sessionKey }, false);
+            const matchingRun = completedSnapshot?.runId && (liveRun?.runId === completedSnapshot.runId
+              || liveRun?.runIds?.has(completedSnapshot.runId));
+            if (completedSnapshot?.runCompleted && completedSnapshot.runTerminalPending === false
+              && matchingRun && liveRun?.awaitingRunTerminal && !liveRun.pendingNativeModelCalls?.size) {
+              handleDiagnosticEvent({ type: "session.state", sessionKey,
+                sessionId: completedSnapshot.sessionId, state: "idle", prevState: "processing", reason: "run_completed",
+                ts: Math.max(completedSnapshot.runCompletedAt ?? completedSnapshot.lastAssistantTs ?? Date.now(),
+                  liveRun.modelEndTs ?? 0) });
+            }
             replayCompletedTrajectoryRuns(sessionKey);
             replayTranscriptSnapshot(sessionKey, { source: "sweep" });
             const snapshot = loadSessionSnapshot(sessionKey);
@@ -1795,9 +1806,11 @@ export function createOtelPluginService(
       ) => {
         const run = "sessionKey" in evt || "sessionId" in evt ? getRun(evt) : undefined;
         const root = run ?? ("sessionKey" in evt || "sessionId" in evt ? getRoot(evt) : undefined);
+        const nativeModelCall = name === "llm" && (evt.type === "model.call.completed" || evt.type === "model.call.error");
+        const minimumDurationMs = nativeModelCall ? 1 : name.includes("/") ? MIN_VISIBLE_MODEL_MS : MIN_VISIBLE_CHILD_MS;
         const effectiveDurationMs =
           typeof durationMs === "number"
-            ? Math.max(durationMs, name.includes("/") ? MIN_VISIBLE_MODEL_MS : MIN_VISIBLE_CHILD_MS)
+            ? Math.max(durationMs, minimumDurationMs)
             : MIN_VISIBLE_CHILD_MS;
         const { startTime, endTime } = resolveSpanWindow(
           evt.ts,
@@ -1978,6 +1991,9 @@ export function createOtelPluginService(
           runId,
           turnIndex,
           minUserTs,
+          provider,
+          model,
+          endTime,
           finalize,
         }) {
           // Transcript writes can follow model completion. Delay export only; the
@@ -2020,7 +2036,9 @@ export function createOtelPluginService(
               ? snapshot?.lastRunAssistantTurns?.[turnIndex]
               : snapshot?.lastRunAssistantTurns?.at(-1);
             const toolCall = turn?.toolCalls?.length === 1 ? turn.toolCalls[0] : undefined;
-            if (sameRun && freshUser && turn) {
+            const sameCall = turn && (!provider || turn.provider === provider) && (!model || turn.model === model)
+              && (typeof turn.endedAt !== "number" || turn.endedAt <= endTime.getTime());
+            if (sameRun && freshUser && turn && sameCall) {
               span.setAttributes(traceAttrs(enrichWithTranscript(sessionKey, {
                 __min_snapshot_user_ts: minUserTs,
                 "openclaw.sessionId": sessionId,

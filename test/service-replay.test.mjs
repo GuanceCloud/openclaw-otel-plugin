@@ -28,20 +28,32 @@ if (!workerScenario) {
   }
   for (const scenario of ["queued-duplicate", "processing-duplicate", "transcript-before-native",
     "idle-before-native", "active-trajectory", "revised-terminal", "independent-turns",
-    "sqlite-native", "sqlite-replay", "sqlite-empty-attempt"]) {
+    "sqlite-native", "sqlite-replay", "sqlite-empty-attempt", "sqlite-provider-fallback", "sqlite-provider-fallback-sweep", "sqlite-provider-fallback-artifact"]) {
     test(`service replay ownership: ${scenario}`, { timeout: 15000 }, async () => {
       const result = await run(scenario);
       try {
         const expected = scenario === "independent-turns" ? 2 : 1;
+        const failover = scenario.startsWith("sqlite-provider-fallback");
+        const models = failover ? 5 : expected;
         assert.equal(result.roots, expected, JSON.stringify(result));
-        assert.equal(result.models, expected, JSON.stringify(result));
+        assert.equal(result.models, models, JSON.stringify(result));
         const replayOnly = scenario === "sqlite-replay";
-        assert.equal(result.nativeModels, replayOnly ? 0 : expected, JSON.stringify(result));
-        assert.equal(result.operationCount, expected, JSON.stringify(result));
-        assert.equal(result.outputTokens, expected * 5, JSON.stringify(result));
-        assert.equal(result.firstChunkCount, replayOnly ? 0 : expected, JSON.stringify(result));
-        assert.equal(result.perTokenCount, replayOnly ? 0 : expected, JSON.stringify(result));
+        assert.equal(result.nativeModels, replayOnly ? 0 : models, JSON.stringify(result));
+        assert.equal(result.operationCount, failover ? 9 : expected, JSON.stringify(result));
+        assert.equal(result.outputTokens, failover ? 20 : expected * 5, JSON.stringify(result));
+        assert.equal(result.firstChunkCount, replayOnly ? 0 : models, JSON.stringify(result));
+        assert.equal(result.perTokenCount, replayOnly ? 0 : failover ? 4 : expected, JSON.stringify(result));
         assert.equal(result.zeroDurationRoots, 0, JSON.stringify(result));
+        if (failover) {
+          assert.equal(result.rootOutputs[0], "answer-3", JSON.stringify(result));
+          assert.equal(result.primaryErrorOutput, undefined, JSON.stringify(result));
+          assert.equal(result.inputTokens, 80, JSON.stringify(result));
+          assert.equal(result.tools, 4, JSON.stringify(result));
+          assert.deepEqual(result.operationStatuses, { error: 1, ok: 8 }, JSON.stringify(result));
+          assert.equal(result.invalidModelOrToolParents, 0, JSON.stringify(result));
+          assert.equal(result.invalidModelOrToolTimes, 0, JSON.stringify(result));
+          assert.deepEqual(result.modelDurationsMs, [40, 40, 40, 40, 40], JSON.stringify(result));
+        }
         if (scenario.startsWith("sqlite-")) {
           assert.deepEqual(result.rootInputs, ["identical input"], JSON.stringify(result));
           assert.equal(result.historicalModels, 0, JSON.stringify(result));
@@ -130,11 +142,11 @@ if (!workerScenario) {
     res.writeHead(200, { "content-type": "application/x-protobuf" }); res.end();
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  let transcriptUpdated;
+  let transcriptUpdated, agentEvent;
   const service = createOtelPluginService(resolveOtelPluginConfig({
     endpoint: `http://127.0.0.1:${server.address().port}`, flushIntervalMs: 1000,
     tracePayloadDebugEnabled: true,
-  }), { events: { onSessionTranscriptUpdate(listener) { transcriptUpdated = listener; return () => {}; } } });
+  }), { events: { onAgentEvent(listener) { agentEvent = listener; return () => {}; }, onSessionTranscriptUpdate(listener) { transcriptUpdated = listener; return () => {}; } } });
   const event = async (value) => {
     globalThis.__replayTestDiagnostic({ sessionKey, sessionId, ...value });
     await new Promise((resolve) => setImmediate(resolve));
@@ -152,6 +164,45 @@ if (!workerScenario) {
         const processing = { type: "session.state", ts: ts + 1, state: "processing", prevState: "idle", reason: "run_started" };
         if (workerScenario !== "processing-duplicate") await event(queued);
         await event(processing);
+        if (workerScenario.startsWith("sqlite-provider-fallback")) {
+          database.exec("CREATE TABLE trajectory_runtime_events(session_id TEXT,seq INTEGER,run_id TEXT,event_json TEXT)");
+          let trajectorySeq = 0;
+          const state = (type, time, data = {}) => database.prepare("INSERT INTO trajectory_runtime_events VALUES(?,?,?,?)")
+            .run(sessionId, trajectorySeq++, runId, JSON.stringify({ type, runId, ts: time, sourceSeq: trajectorySeq, data }));
+          state("session.started", ts + 1);
+          await event({ type: "model.call.started", ts: ts + 10, runId, callId: "primary", provider: "primary", model: "unsupported" });
+          state("session.ended", ts + 51, { status: "error" });
+          if (workerScenario.endsWith("-artifact")) state("trace.artifacts", ts + 51, { finalStatus: "error" });
+          await event({ type: "model.call.error", ts: ts + 50, runId, callId: "primary", provider: "primary", model: "unsupported",
+            durationMs: 40, timeToFirstByteMs: 10, observationUnit: "turn", usage: { input: 0, output: 0 } });
+          agentEvent({ sessionKey, sessionId, runId, stream: "assistant", ts: ts + 51, data: { text: "historical answer" } });
+          if (!workerScenario.endsWith("-artifact")) await event({ type: "session.state", ts: ts + 52, state: "idle", prevState: "processing", reason: "run_completed" });
+          await new Promise((resolve) => setTimeout(resolve, 1100));
+          state("session.started", ts + 80);
+          await event({ ...processing, ts: ts + 80 });
+          let toolIndex = 0;
+          for (let call = 0; call < 4; call++) {
+            const callStart = ts + 100 + call * 100, callId = `${runId}:model:${call + 1}`;
+            await event({ type: "model.call.started", ts: callStart, runId, callId, provider: "backup", model: "model" });
+            await event({ type: "run.progress", ts: callStart + 10, runId, reason: "model_call:stream_progress" });
+            writeMessage({ type: "message", timestamp: callStart + 39, message: { role: "assistant", provider: "backup", model: "model",
+              content: [{ type: "text", text: `answer-${call}` }], stopReason: call === 3 ? "stop" : "toolUse", usage: { input: 20, output: 5 } } });
+            await event({ type: "model.call.completed", ts: callStart + 40, runId, callId, provider: "backup", model: "model",
+              durationMs: 40, timeToFirstByteMs: 10, usage: { input: 20, output: 5 } });
+            for (let tool = 0; tool < (call === 0 ? 2 : call < 3 ? 1 : 0); tool++) {
+              const toolCallId = `tool-${toolIndex++}`;
+              for (const [phase, delta] of [["start", 45], ["result", 55]]) agentEvent({ sessionKey, sessionId, runId, ts: callStart + delta,
+                stream: "tool", data: { name: "exec", toolCallId, phase, args: { command: "fixture" }, result: phase === "result" ? "done" : undefined } });
+            }
+          }
+          if (workerScenario.endsWith("-sweep")) {
+            await event({ type: "session.state", ts: ts + 450, state: "idle", prevState: "processing", reason: "run_completed" });
+          }
+          state("trace.artifacts", ts + 460, { finalStatus: "success" });
+          if (workerScenario.endsWith("-sweep")) await new Promise((resolve) => setTimeout(resolve, 1100));
+          else await event({ type: "session.state", ts: ts + 460, state: "idle", prevState: "processing", reason: "run_completed" });
+          continue;
+        }
         if (workerScenario === "sqlite-empty-attempt") {
           await event({ type: "session.state", ts: ts + 2, state: "idle", prevState: "processing", reason: "run_completed" });
           await event({ ...processing, ts: ts + 4 });
@@ -195,8 +246,32 @@ if (!workerScenario) {
     .reduce((n, p) => n + (p.asDouble ?? p.asInt ?? 0), 0);
   const outputTokens = (latest.get("gen_ai.client.token.usage")?.histogram.dataPoints ?? [])
     .filter((p) => attrs(p)["gen_ai.token.type"] === "output").reduce((n, p) => n + p.sum, 0);
+  const inputTokens = (latest.get("gen_ai.client.token.usage")?.histogram.dataPoints ?? [])
+    .filter((p) => attrs(p)["gen_ai.token.type"] === "input").reduce((n, p) => n + p.sum, 0);
+  const operationStatuses = {};
+  for (const point of latest.get("gen_ai.agent.operation.count")?.sum.dataPoints ?? []) {
+    const status = attrs(point).status;
+    operationStatuses[status] = (operationStatuses[status] ?? 0) + (point.asDouble ?? point.asInt ?? 0);
+  }
+  const roots = spans.filter((s) => s.name === "invoke_agent");
+  const operations = spans.filter((s) => s.name === "llm" || s.name.startsWith("tool:"));
+  const id = (value) => Buffer.from(value ?? []).toString("hex");
+  const parent = (span) => roots.find((root) => id(root.spanId) === id(span.parentSpanId) && id(root.traceId) === id(span.traceId));
+  const invalidTimes = operations.filter((span) => {
+    const root = parent(span);
+    return root && (span.startTimeUnixNano < root.startTimeUnixNano || span.endTimeUnixNano > root.endTimeUnixNano
+      || span.endTimeUnixNano <= span.startTimeUnixNano);
+  }).map((span) => ({ name: span.name, start: span.startTimeUnixNano, end: span.endTimeUnixNano,
+    rootStart: parent(span).startTimeUnixNano, rootEnd: parent(span).endTimeUnixNano }));
   process.stdout.write(JSON.stringify({ stateDir, scenario: workerScenario,
+    inputTokens, operationStatuses,
+    tools: spans.filter((s) => s.name.startsWith("tool:")).length,
+    modelDurationsMs: spans.filter((s) => s.name === "llm").map((s) => Math.round((s.endTimeUnixNano - s.startTimeUnixNano) / 1000000)).sort((a, b) => a - b),
+    invalidModelOrToolParents: operations.filter((span) => !parent(span)).length,
+    invalidModelOrToolTimes: invalidTimes.length, invalidTimes,
     roots: spans.filter((s) => s.name === "invoke_agent").length,
+    rootOutputs: spans.filter((s) => s.name === "invoke_agent").map((s) => attrs(s).output_preview),
+    primaryErrorOutput: spans.filter((s) => s.name === "llm" && attrs(s).provider_name === "primary").map((s) => attrs(s).output_preview)[0],
     rootInputs: spans.filter((s) => s.name === "invoke_agent").map((s) => attrs(s).input_preview),
     historicalModels: spans.filter((s) => s.name === "llm" && attrs(s).output_preview === "historical answer").length,
     oneMsModels: spans.filter((s) => s.name === "llm" && s.endTimeUnixNano - s.startTimeUnixNano <= 1000000).length,

@@ -2,6 +2,18 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-10-23 (release candidate 4)
+
+Release: `v0.8.1-rc.4` (pre-release).
+
+### Provider Fallback Within A Logical Run
+
+- Read SQLite run trajectory state so an external harness attempt's `session.ended` error does not finalize a logical run before a fallback provider continues with the same run ID. Require both host request termination and a matching final run artifact (or external harness success), including when that terminal record arrives after idle. An error artifact alone cannot end a still-processing request during provider switching.
+- Keep all fallback model and tool events attached to the live request, instead of marking the run completed after its first failed attempt and dropping subsequent telemetry.
+- Prefer persisted current-run output over cached streaming text. Native model preview enrichment now requires the matching provider/model and a transcript result within that call's end boundary; a failed attempt cannot acquire a fallback or previous answer.
+- Preserve measured native model-call durations instead of extending short calls to the generic child-span display minimum, which could place a fast failed call before its root request.
+- Add cross-provider fallback tests with compressed SQLite input, an attempt-error idle gap, an error-artifact processing gap, four fallback calls, four tool calls and late terminal artifacts. These tests cover the lifecycle/correlation defect tracked in #15.
+
 ## 2026-10-23 (release candidate 3)
 
 Release: `v0.8.1-rc.3` (pre-release).

@@ -39,6 +39,10 @@ SQLite transcript 同时支持未压缩 `event_json` 和 Zstd 压缩 `event_zstd
 
 实时事件、transcript 更新和 trajectory 扫描共享同一轮请求的采集结果。已观察到原生模型调用开始时，回放和请求终态会等待该调用的终态；较早到达的落盘或 idle 通知不会抢先生成另一条模型 Span 或关闭请求。已结束请求的重复消息 ID、落在其时间窗口内的迟到 processing 通知不再创建新根 Span。
 
+SQLite trajectory 中，同一 `run_id` 的外部 harness 尝试失败可能紧接备用 provider 执行，不能据此结束用户请求或写入已完成去重状态。插件同时等待宿主请求结束通知，以及该 run 的最终 `trace.artifacts` 或外部 harness 成功终态，再关闭活跃根 Trace；processing 期间出现的失败归档不能单独触发关闭。终态晚于 idle 落盘时由周期扫描补齐；备用执行重新进入 processing 或开始模型调用后，会清除前一次结束通知。原生模型输出只关联 provider/model 相符、结果时间不晚于该调用结束的 transcript 记录。
+
+原生 `model.call.completed/error` 生成的 `llm` Span 保留该次调用的实际耗时，不应用通用子 Span 的最小展示时长；零毫秒记录仅保留 1 ms 的正时间窗口。
+
 每个 session 在插件本地状态中保留最近 128 个已结束的 run ID。相同 run 的 transcript 内容补写或迟到 trajectory 终态，即使改变了快照时间、长度或版本，也不会重新生成完整 Trace；该状态在重启后继续生效。缺少 run ID 时保留既有快照 watermark 机制。不同 run 即使输入、输出相同，也分别保留，不按文本内容去重。
 
 ## 首块响应时间

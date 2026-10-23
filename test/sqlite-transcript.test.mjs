@@ -101,3 +101,35 @@ test("modern contextUsage counts each call's complete input and cache without cu
     assert.equal(s.sessionUsageTotals.output, 8);
   } finally { f.close(); }
 });
+
+test("a failed external harness attempt leaves its logical run pending until fallback artifacts arrive", () => {
+  const f = fixture(); try {
+    f.db.exec("CREATE TABLE trajectory_runtime_events(session_id TEXT,seq INTEGER,run_id TEXT,event_json TEXT)");
+    const event = (seq, type, data) => f.db.prepare("INSERT INTO trajectory_runtime_events VALUES(?,?,?,?)")
+      .run("session", seq, "run", JSON.stringify({ runId: "run", type, ts: 1000 + seq * 100, sourceSeq: seq, data }));
+    f.user("question", 1000, "run", { compressed: true });
+    event(0, "session.started", {});event(1, "session.ended", { status: "error" });
+    assert.equal(f.snapshot().runTerminalPending, true);assert.equal(f.snapshot().runCompleted, false);
+    event(2, "session.started", {});f.assistant("fallback answer", 1500, {}, { input: 20, output: 5 });
+    assert.equal(f.snapshot().runCompleted, false, "assistant.stop cannot end a pending harness run");
+    event(6, "trace.artifacts", { finalStatus: "success" });
+    const s = f.snapshot();assert.equal(s.runCompleted, true);assert.equal(s.runTerminalPending, false);
+    assert.equal(s.runCompletedAt, 1600);assert.equal(s.runFinalStatus, "success");
+    assert.equal(f.store.loadSessionRunState("agent:main:test", "run").runCompleted, true);
+  } finally { f.close(); }
+});
+
+test("a standalone native error artifact and an external harness success are terminal", () => {
+  const f = fixture(); try {
+    f.db.exec("CREATE TABLE trajectory_runtime_events(session_id TEXT,seq INTEGER,run_id TEXT,event_json TEXT)");
+    f.user("question", 1000, "run");
+    const insert = f.db.prepare("INSERT INTO trajectory_runtime_events VALUES(?,?,?,?)");
+    insert.run("session", 0, "run", JSON.stringify({runId:"run",type:"session.started",ts:1000}));
+    insert.run("session", 1, "run", JSON.stringify({runId:"run",type:"trace.artifacts",ts:2000,data:{finalStatus:"error"}}));
+    assert.equal(f.snapshot().runCompleted, true);assert.equal(f.snapshot().runFinalStatus, "error");
+    insert.run("session", 2, "run", JSON.stringify({runId:"run",type:"session.started",ts:3000}));
+    assert.equal(f.snapshot().runTerminalPending, true);
+    insert.run("session", 3, "run", JSON.stringify({runId:"run",type:"session.ended",ts:4000,data:{status:"success"}}));
+    assert.equal(f.snapshot().runCompleted, true);assert.equal(f.snapshot().runCompletedAt, 4000);
+  } finally { f.close(); }
+});

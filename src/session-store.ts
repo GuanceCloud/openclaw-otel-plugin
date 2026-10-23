@@ -138,6 +138,44 @@ function readSqliteTranscriptEvents(dbPath: string, sessionId: string): Array<Re
   }
 }
 
+function readSqliteRunState(dbPath: string, sessionId: string, targetRunId?: string): SessionRunState {
+  const database = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trajectory_runtime_events'").get()) return {};
+    const rows = database.prepare(targetRunId
+      ? "SELECT event_json FROM trajectory_runtime_events WHERE session_id=? AND run_id=? ORDER BY seq"
+      : "SELECT event_json FROM trajectory_runtime_events WHERE session_id=? ORDER BY seq")
+      .all(...(targetRunId ? [sessionId, targetRunId] : [sessionId])) as Array<{ event_json: string }>;
+    let state: SessionRunState = {};
+    for (const row of rows) {
+      const event = JSON.parse(row.event_json);
+      if (!event.runId) continue;
+      if (state.runId !== event.runId) state = { runId: event.runId };
+      // A harness attempt's session.ended error can precede a fallback using
+      // the SAME run ID. Artifacts can also describe a failed attempt, so live
+      // closure must additionally wait for host termination; session.started
+      // resets this candidate state when fallback begins. A successful external
+      // harness may finish without an artifact.
+      const terminal = event.type === "trace.artifacts"
+        || (event.type === "session.ended" && event.data?.status === "success");
+      if (event.type === "session.started") {
+        state.runCompleted = false;
+        state.runTerminalPending = true;
+        state.runCompletedAt = undefined;
+      }
+      if (terminal) {
+        state.runCompleted = true;
+        state.runTerminalPending = false;
+        state.runTerminalType = event.type;
+        state.runFinalStatus = event.data?.finalStatus ?? event.data?.status;
+        state.runCompletedAt = parseMessageTimestamp(event.ts);
+        state.terminalSourceSeq = event.sourceSeq;
+      }
+    }
+    return state;
+  } finally { database.close(); }
+}
+
 function parseMessageTimestamp(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -1188,7 +1226,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         mentionedSkillNames.add(skillName);
       }
       const latestRunState = sqliteSession
-        ? {}
+        ? readSqliteRunState(sqliteSession.dbPath, sqliteSession.sessionId, currentRunMessageRunId)
         : readSessionLatestRunState(sessionFile);
       const resolvedRunId = currentRunMessageRunId
         ?? latestRunState.runId
@@ -1197,10 +1235,11 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         resolvedRunId
         && resolvedRunId !== latestRunState.runId
       )
-        ? sqliteSession ? {} : readSessionRunState(sessionFile, resolvedRunId)
+        ? sqliteSession ? readSqliteRunState(sqliteSession.dbPath, sqliteSession.sessionId, resolvedRunId) : readSessionRunState(sessionFile, resolvedRunId)
         : latestRunState;
       const inferredRunCompleted = (
         resolvedRunState.runCompleted !== true
+        && resolvedRunState.runTerminalPending !== true
         && currentRunAssistantTurns.length > 0
         && currentRunLastAssistantStopReason === "stop"
       );
@@ -1216,6 +1255,8 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         agentName: sessionMetaBySessionKey.get(sessionKey)?.agentName,
         runId: resolvedRunId,
         runCompleted: resolvedRunState.runCompleted === true || inferredRunCompleted,
+        runTerminalPending: resolvedRunState.runTerminalPending,
+        runCompletedAt: resolvedRunState.runCompletedAt,
         runTerminalType: inferredRunTerminalType,
         runFinalStatus: inferredRunFinalStatus,
         createdAt: sqliteSession?.createdAt ?? readSessionCreatedAt(sessionFile),
@@ -1234,7 +1275,7 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
         lastRunAssistantTurns: currentRunAssistantTurns,
         lastUserText,
         lastUserTs,
-        lastAssistantText: liveAssistantText ?? lastAssistantText,
+        lastAssistantText: lastAssistantText ?? liveAssistantText,
         lastAssistantTs,
         lastAssistantThinking,
         lastProvider: lastProvider ?? sessionModelBySessionKey.get(sessionKey)?.provider,
@@ -1309,7 +1350,10 @@ export function createSessionSnapshotStore(stateDir: string): SessionSnapshotSto
       if (!sessionFile) {
         return {};
       }
-      return readSessionRunState(sessionFile, runId);
+      const sqliteSession = sessionSqliteBySessionKey.get(sessionKey);
+      return sqliteSession
+        ? readSqliteRunState(sqliteSession.dbPath, sqliteSession.sessionId, runId)
+        : readSessionRunState(sessionFile, runId);
     },
     listRecentSessionKeys(sinceUpdatedAt?: number) {
       if (typeof sinceUpdatedAt !== "number" || !Number.isFinite(sinceUpdatedAt)) {

@@ -149,7 +149,10 @@ type DiagnosticEventHandlerDeps = {
     sessionKey?: string;
     sessionId?: string;
     runId?: string;
+    turnIndex?: number;
     minUserTs?: number;
+    provider?: string;
+    model?: string;
     endTime: Date;
     finalize(): void;
   }): void;
@@ -490,7 +493,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         if (!evt.runId || !evt.callId || !Number.isFinite(evt.ts)) break;
         if (isFinalizedRun(evt)) break;
         const run = getRun(evt, false);
-        if (runHasId(run, evt.runId)) (run!.pendingNativeModelCalls ??= new Set()).add(evt.callId);
+        if (runHasId(run, evt.runId)) {
+          run!.awaitingRunTerminal = false;
+          (run!.pendingNativeModelCalls ??= new Set()).add(evt.callId);
+        }
         const now = Date.now();
         for (const [key, call] of streamCalls) {
           if (now - call.receivedAt >= modelCallStateTtlMs) streamCalls.delete(key);
@@ -579,6 +585,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
 
             if (typeof createChildSpan === "function" && run.ctx) {
               const nativeModelAttrs = enrichWithTranscript(resolvedSessionKey, {
+                __suppress_session_output_preview: true,
+                __suppress_session_output_summary: true,
                 "openclaw.provider": evt.provider,
                 "openclaw.model": evt.model,
                 "openclaw.sessionKey": resolvedSessionKey,
@@ -601,7 +609,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                   ? { "gen_ai.response.time_to_first_chunk": latencyMs! / 1000 }
                   : {}),
               });
-            const turnIndex = resolveModelTurnIndex(evt.callId, timings.size - 1);
+              const turnIndex = resolveModelTurnIndex(evt.callId, timings.size - 1);
               const { span, effectiveDurationMs, startTime, endTime } = createChildSpan(
                 "llm",
                 evt,
@@ -625,6 +633,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                   runId: evt.runId,
                   turnIndex,
                   minUserTs: run.messageQueuedTs,
+                  provider: evt.provider,
+                  model: evt.model,
                   endTime: resolvedEndTime,
                   finalize: finalizeNativeModelSpan,
                 });
@@ -805,6 +815,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
             ts: lifecycleStartTs,
           }, true);
           if (run) {
+            run.awaitingRunTerminal = false;
             if (typeof lifecycleStartTs === "number") {
               run.mainStartTs = Math.min(run.mainStartTs, lifecycleStartTs);
             }
@@ -831,11 +842,13 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         }
         if (shouldCloseForSessionState(evt.state)) {
           const activeRun = getRun(evt, false);
+          if (activeRun) activeRun.awaitingRunTerminal = true;
           if (activeRun?.pendingNativeModelCalls?.size) {
             if (pendingTerminals.get(activeRun)?.type !== "message.processed") pendingTerminals.set(activeRun, evt);
             break;
           }
           const snapshot = resolveSnapshotForEvent(evt);
+          if (snapshot?.runTerminalPending && runHasId(activeRun, snapshot.runId)) break;
           const replaySessionKey = resolveReplaySessionKey(evt, snapshot);
           if (isHeartbeatSessionSnapshot(snapshot)) {
             break;
@@ -1202,11 +1215,13 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       }
       case "message.processed": {
         const activeRun = getRun(evt, false);
+        if (activeRun) activeRun.awaitingRunTerminal = true;
         if (activeRun?.pendingNativeModelCalls?.size) {
           pendingTerminals.set(activeRun, evt);
           break;
         }
         const snapshot = resolveSnapshotForEvent(evt);
+        if (snapshot?.runTerminalPending && runHasId(activeRun, snapshot.runId)) break;
         const replaySessionKey = resolveReplaySessionKey(evt, snapshot);
         if (isHeartbeatSessionSnapshot(snapshot)) {
           break;
