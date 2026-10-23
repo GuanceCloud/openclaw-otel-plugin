@@ -33,6 +33,12 @@ invoke_agent
 └── assistant
 ```
 
+## 实时采集与回放去重
+
+实时事件、transcript 更新和 trajectory 扫描共享同一轮请求的采集结果。已观察到原生模型调用开始时，回放和请求终态会等待该调用的终态；较早到达的落盘或 idle 通知不会抢先生成另一条模型 Span 或关闭请求。已结束请求的重复消息 ID、落在其时间窗口内的迟到 processing 通知不再创建新根 Span。
+
+每个 session 在插件本地状态中保留最近 128 个已结束的 run ID。相同 run 的 transcript 内容补写或迟到 trajectory 终态，即使改变了快照时间、长度或版本，也不会重新生成完整 Trace；该状态在重启后继续生效。缺少 run ID 时保留既有快照 watermark 机制。不同 run 即使输入、输出相同，也分别保留，不按文本内容去重。
+
 ## 首块响应时间
 
 首块响应时间使用 GenAI 标准属性，写在对应 `llm` span 的 tag 上，不放在 `invoke_agent`，不改变 span 结构或 duration。

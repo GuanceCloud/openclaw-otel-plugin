@@ -647,6 +647,24 @@ test("replay finalization state keeps sessions that only carry pending run dedup
   assert.deepEqual(restored.get("agent:main:pending")?.pendingRunIds, ["run-pending"]);
 });
 
+test("completed run identities survive snapshot revisions and are bounded on disk", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-replay-ids-"));
+  try {
+    const file = resolveReplayFinalizationStateFile(stateDir);
+    writeReplayFinalizationState(file, new Map([["session", {
+      finalizedRunIds: Array.from({ length: 130 }, (_, i) => `run-${i}`),
+    }]]));
+    const record = readReplayFinalizationState(file).get("session");
+    assert.equal(record.finalizedRunIds.length, 128);
+    assert.equal(record.finalizedRunIds[0], "run-2");
+    assert.equal(record.finalizedRunIds.at(-1), "run-129");
+    fs.writeFileSync(file, JSON.stringify({ sessions: { session: {
+      finalizedRunIds: ["run", "run", "", 123, null],
+    } } }));
+    assert.deepEqual(readReplayFinalizationState(file).get("session").finalizedRunIds, ["run"]);
+  } finally { fs.rmSync(stateDir, { recursive: true, force: true }); }
+});
+
 test("resolveIngressLifecycleWindows emits a queue window when processing starts much later", () => {
   const windows = resolveIngressLifecycleWindows(1000, 4000);
 

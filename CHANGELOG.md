@@ -2,6 +2,14 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-10-23 (unreleased)
+
+### Trace Replay Deduplication
+
+- Ignore repeated message IDs and late processing notifications from closed requests, including while their root awaits asynchronous preview enrichment.
+- Let observed native calls finish before transcript/trajectory fallback or request finalization, preserving native model spans and their metrics when persistence or idle notifications arrive first.
+- Persist the latest 128 finalized run IDs per session to prevent snapshot revisions and delayed sidecars from replaying an already represented run after restart. Distinct runs with identical prompts remain independent requests.
+
 ## 2026-10-23
 
 Release: `v0.8.0` (stable).

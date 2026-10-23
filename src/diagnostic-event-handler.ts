@@ -67,6 +67,8 @@ type DiagnosticEventHandlerDeps = {
   SeverityNumber: any;
   cleanupExpiredRoots(): void;
   beginRequestTrace(evt: UserSpanEvent & { messageId?: string | number }): void;
+  isDuplicateRequestStart?(evt: UserSpanEvent & { messageId?: string | number }, source: "message" | "processing"): boolean;
+  isFinalizedRun?(evt: SessionEvent): boolean;
   getRoot(evt: SessionEvent, createIfMissing?: boolean): ActiveRootSpan | undefined;
   getRun(evt: SessionEvent, createIfMissing?: boolean): ActiveRunSpan | undefined;
   ensureUserSpan(evt: UserSpanEvent): ActiveRunSpan | undefined;
@@ -168,6 +170,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
   // call ID on retries, so completed attempts also include their observed window.
   const recordedFirstChunks = new Map<string, number>();
   const recordedNativeCalls = new Map<string, number>();
+  const pendingTerminals = new WeakMap<ActiveRunSpan, DiagnosticEventPayload>();
   // Stream-progress events have a run ID but no call ID. Attribute them only to
   // a uniquely active call, never to a subsequent call or an overlapping one.
   const streamCalls = new Map<string, {
@@ -198,6 +201,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     SeverityNumber,
     cleanupExpiredRoots,
     beginRequestTrace,
+    isDuplicateRequestStart = () => false,
+    isFinalizedRun = () => false,
     getRoot,
     getRun,
     ensureUserSpan,
@@ -477,12 +482,15 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       && endTs! - call.endTs <= 5_000);
   };
 
-  return (evt: DiagnosticEventPayload) => {
+  return function handleDiagnosticEvent(evt: DiagnosticEventPayload) {
     cleanupExpiredRoots();
 
     switch (evt.type) {
       case "model.call.started": {
         if (!evt.runId || !evt.callId || !Number.isFinite(evt.ts)) break;
+        if (isFinalizedRun(evt)) break;
+        const run = getRun(evt, false);
+        if (runHasId(run, evt.runId)) (run!.pendingNativeModelCalls ??= new Set()).add(evt.callId);
         const now = Date.now();
         for (const [key, call] of streamCalls) {
           if (now - call.receivedAt >= modelCallStateTtlMs) streamCalls.delete(key);
@@ -520,6 +528,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       }
       case "model.call.completed":
       case "model.call.error": {
+        if (isFinalizedRun(evt)) break;
         const nativeKey = JSON.stringify([streamCallKey(evt), evt.ts, evt.durationMs]);
         const recordedAt = Date.now();
         for (const [key, time] of recordedNativeCalls) {
@@ -535,6 +544,14 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const validLatency = typeof latencyMs === "number" && Number.isFinite(latencyMs)
           && latencyMs >= 0 && Number.isFinite(evt.durationMs) && evt.durationMs >= latencyMs;
         const run = getRun(evt, false);
+        if (runHasId(run, evt.runId)) {
+          run!.pendingNativeModelCalls?.delete(evt.callId);
+          const terminal = pendingTerminals.get(run!);
+          if (terminal && !run!.pendingNativeModelCalls?.size) {
+            pendingTerminals.delete(run!);
+            queueMicrotask(() => handleDiagnosticEvent(terminal));
+          }
+        }
         const resolvedSessionKey = resolveSessionKey?.(evt) ?? evt.sessionKey;
         const usageTotals = resolveUsageTokenTotals(evt.usage);
         let emittedNativeModelSpan = false;
@@ -722,6 +739,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         const startsUnqueuedRequest = evt.state === "processing" && evt.prevState === "idle"
           && evt.reason === "run_started" && !existingRun;
         if (startsUnqueuedRequest) {
+          if (isDuplicateRequestStart(evt, "processing")) break;
           beginRequestTrace(evt);
           existingRun = ensureUserSpan(evt);
         }
@@ -813,6 +831,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         }
         if (shouldCloseForSessionState(evt.state)) {
           const activeRun = getRun(evt, false);
+          if (activeRun?.pendingNativeModelCalls?.size) {
+            if (pendingTerminals.get(activeRun)?.type !== "message.processed") pendingTerminals.set(activeRun, evt);
+            break;
+          }
           const snapshot = resolveSnapshotForEvent(evt);
           const replaySessionKey = resolveReplaySessionKey(evt, snapshot);
           if (isHeartbeatSessionSnapshot(snapshot)) {
@@ -912,6 +934,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         break;
       }
       case "message.queued": {
+        if (isDuplicateRequestStart(evt, "message")) break;
         const snapshot = resolveSnapshotForEvent(evt);
         const requestClassification = resolveRequestClassification({
           lastUserText: snapshot?.lastUserText,
@@ -1173,6 +1196,10 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       }
       case "message.processed": {
         const activeRun = getRun(evt, false);
+        if (activeRun?.pendingNativeModelCalls?.size) {
+          pendingTerminals.set(activeRun, evt);
+          break;
+        }
         const snapshot = resolveSnapshotForEvent(evt);
         const replaySessionKey = resolveReplaySessionKey(evt, snapshot);
         if (isHeartbeatSessionSnapshot(snapshot)) {

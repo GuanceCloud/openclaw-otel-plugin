@@ -103,6 +103,7 @@ export type ActiveRunSpan = {
     endTs: number;
   };
   modelSpanEmitted: boolean;
+  pendingNativeModelCalls?: Set<string>;
   assistantSpanEmitted?: boolean;
   thinkingSpanEmitted?: boolean;
   transcriptAssistantTurnsEmitted?: number;
