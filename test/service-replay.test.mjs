@@ -28,22 +28,39 @@ if (!workerScenario) {
   }
   for (const scenario of ["queued-duplicate", "processing-duplicate", "transcript-before-native",
     "idle-before-native", "active-trajectory", "revised-terminal", "independent-turns",
-    "sqlite-native", "sqlite-replay", "sqlite-empty-attempt", "sqlite-provider-fallback", "sqlite-provider-fallback-sweep", "sqlite-provider-fallback-artifact"]) {
+    "sqlite-native", "sqlite-replay", "sqlite-empty-attempt", "sqlite-provider-fallback", "sqlite-provider-fallback-sweep", "sqlite-provider-fallback-artifact",
+    "internal-review", "internal-review-id-only", "internal-effects"]) {
     test(`service replay ownership: ${scenario}`, { timeout: 15000 }, async () => {
       const result = await run(scenario);
       try {
         const expected = scenario === "independent-turns" ? 2 : 1;
         const failover = scenario.startsWith("sqlite-provider-fallback");
-        const models = failover ? 5 : expected;
+        const hiddenReview = scenario.startsWith("internal-review");
+        const models = failover ? 5 : hiddenReview ? 4 : expected;
         assert.equal(result.roots, expected, JSON.stringify(result));
         assert.equal(result.models, models, JSON.stringify(result));
         const replayOnly = scenario === "sqlite-replay";
         assert.equal(result.nativeModels, replayOnly ? 0 : models, JSON.stringify(result));
-        assert.equal(result.operationCount, failover ? 9 : expected, JSON.stringify(result));
-        assert.equal(result.outputTokens, failover ? 20 : expected * 5, JSON.stringify(result));
+        assert.equal(result.operationCount, failover ? 9 : models, JSON.stringify(result));
+        assert.equal(result.outputTokens, failover ? 20 : models * 5, JSON.stringify(result));
         assert.equal(result.firstChunkCount, replayOnly ? 0 : models, JSON.stringify(result));
-        assert.equal(result.perTokenCount, replayOnly ? 0 : failover ? 4 : expected, JSON.stringify(result));
+        assert.equal(result.perTokenCount, replayOnly ? 0 : failover ? 4 : models, JSON.stringify(result));
         assert.equal(result.zeroDurationRoots, 0, JSON.stringify(result));
+        if (scenario.startsWith("internal-")) {
+          const classification = { requestType: "internal_request", category: hiddenReview ? "skill_workshop_review" : "session_effects", internal: true };
+          assert(result.classifications.every((value) => JSON.stringify(value) === JSON.stringify(classification)), JSON.stringify(result));
+          assert.equal(result.assistants, hiddenReview ? 0 : 1, JSON.stringify(result));
+          if (hiddenReview) {
+            assert.equal(result.inputTokens, 80, JSON.stringify(result));
+            assert.equal(result.hasCapturedContent, false, JSON.stringify(result));
+            assert.deepEqual(result.modelDurationsMs, [3974, 4395, 5143, 38381], JSON.stringify(result));
+            assert.equal(result.invalidModelOrToolParents, 0, JSON.stringify(result));
+            assert.equal(result.invalidModelOrToolTimes, 0, JSON.stringify(result));
+          } else {
+            assert.deepEqual(result.rootInputs, ["identical input"], JSON.stringify(result));
+            assert.deepEqual(result.rootOutputs, ["answer"], JSON.stringify(result));
+          }
+        }
         if (failover) {
           assert.equal(result.rootOutputs[0], "answer-3", JSON.stringify(result));
           assert.equal(result.primaryErrorOutput, undefined, JSON.stringify(result));
@@ -84,11 +101,14 @@ if (!workerScenario) {
   const dir = path.join(stateDir, "agents/main/sessions");
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "test.jsonl"), trajectory = path.join(dir, "test.trajectory.jsonl");
-  const sessionKey = "agent:main:replay-test", sessionId = "replay-session";
-  const start = Date.now() - 500;
+  const hiddenReview = workerScenario.startsWith("internal-review"), internalEffects = workerScenario === "internal-effects";
+  const sessionKey = hiddenReview ? "agent:main:internal-session-effects:skill-workshop-review_fixture-hash"
+    : internalEffects ? "agent:main:internal-session-effects:fixture" : "agent:main:replay-test";
+  const sessionId = hiddenReview ? "internal-session-effects-skill-workshop-review_fixture-hash" : "replay-session";
+  const start = Date.now() - (hiddenReview ? 60000 : 500);
   const line = (value) => JSON.stringify(value) + "\n";
   if (workerScenario !== "restart-revised") {
-    fs.writeFileSync(path.join(dir, "sessions.json"), JSON.stringify({
+    fs.writeFileSync(path.join(dir, "sessions.json"), JSON.stringify(hiddenReview ? {} : {
       [sessionKey]: { sessionFile: file, sessionId, updatedAt: Date.now() },
     }));
     fs.writeFileSync(file, ""); fs.writeFileSync(trajectory, "");
@@ -148,12 +168,26 @@ if (!workerScenario) {
     tracePayloadDebugEnabled: true,
   }), { events: { onAgentEvent(listener) { agentEvent = listener; return () => {}; }, onSessionTranscriptUpdate(listener) { transcriptUpdated = listener; return () => {}; } } });
   const event = async (value) => {
-    globalThis.__replayTestDiagnostic({ sessionKey, sessionId, ...value });
+    globalThis.__replayTestDiagnostic({ ...(workerScenario === "internal-review-id-only" ? {} : { sessionKey }), sessionId, ...value });
     await new Promise((resolve) => setImmediate(resolve));
   };
   await service.start({ stateDir, logger: { info: (value) => logs.push(value), error: (value) => logs.push(value) } });
   try {
-    if (workerScenario !== "restart-revised") {
+    if (hiddenReview) {
+      const runId = "skill-workshop-review:fixture";
+      await event({ type: "session.state", runId, ts: start, state: "processing", prevState: "idle", reason: "run_started" });
+      let ts = start + 220;
+      for (const [i, durationMs] of [5143, 3974, 38381, 4395].entries()) {
+        const callId = `${runId}:model:${i + 1}`;
+        await event({ type: "model.call.started", runId, callId, ts, provider: "p", model: "m" });
+        await event({ type: "run.progress", runId, ts: ts + 100, reason: "model_call:stream_progress" });
+        ts += durationMs;
+        await event({ type: "model.call.completed", runId, callId, ts, provider: "p", model: "m",
+          durationMs, timeToFirstByteMs: 100, usage: { input: 20, output: 5 } });
+        ts += 500;
+      }
+      await event({ type: "session.state", runId, ts, state: "idle", prevState: "processing", reason: "run_completed" });
+    } else if (workerScenario !== "restart-revised") {
       for (let index = 0; index < (workerScenario === "independent-turns" ? 2 : 1); index++) {
         const runId = `run-${index}`, ts = start + index * 300;
         fs.appendFileSync(trajectory, line({ type: "session.started", runId, sourceSeq: index * 10 + 1, ts }));
@@ -241,7 +275,7 @@ if (!workerScenario) {
   const latest = new Map();
   for (const b of batches.metrics) for (const r of b.resourceMetrics) for (const s of r.scopeMetrics)
     for (const m of s.metrics) latest.set(m.name, m);
-  const attrs = (p) => Object.fromEntries((p.attributes ?? []).map((a) => [a.key, a.value.stringValue]));
+  const attrs = (p) => Object.fromEntries((p.attributes ?? []).map((a) => [a.key, Object.values(a.value)[0]]));
   const operationCount = (latest.get("gen_ai.agent.operation.count")?.sum.dataPoints ?? [])
     .reduce((n, p) => n + (p.asDouble ?? p.asInt ?? 0), 0);
   const outputTokens = (latest.get("gen_ai.client.token.usage")?.histogram.dataPoints ?? [])
@@ -264,6 +298,9 @@ if (!workerScenario) {
   }).map((span) => ({ name: span.name, start: span.startTimeUnixNano, end: span.endTimeUnixNano,
     rootStart: parent(span).startTimeUnixNano, rootEnd: parent(span).endTimeUnixNano }));
   process.stdout.write(JSON.stringify({ stateDir, scenario: workerScenario,
+    classifications: spans.map((s) => ({ requestType: attrs(s).request_type, category: attrs(s).request_category, internal: attrs(s).is_internal_request })),
+    assistants: spans.filter((s) => s.name === "assistant").length,
+    hasCapturedContent: spans.some((s) => ["input_preview", "output_preview", "gen_ai.input.messages", "gen_ai.output.messages"].some((k) => attrs(s)[k] !== undefined)),
     inputTokens, operationStatuses,
     tools: spans.filter((s) => s.name.startsWith("tool:")).length,
     modelDurationsMs: spans.filter((s) => s.name === "llm").map((s) => Math.round((s.endTimeUnixNano - s.startTimeUnixNano) / 1000000)).sort((a, b) => a - b),

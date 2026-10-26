@@ -344,6 +344,13 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
     }
     const outputPreview = options?.outputPreview ?? clipPreview(snapshot?.lastAssistantText);
     const outputLength = options?.outputLength ?? snapshot?.lastAssistantText?.length;
+    const request = resolveRequestClassification({
+      sessionKey: resolveSessionKey?.(evt) ?? evt.sessionKey,
+      sessionId: evt.sessionId ?? snapshot?.sessionId,
+      runId: evt.runId,
+    });
+    if ((request.requestCategory === "session_effects" || request.requestCategory === "skill_workshop_review")
+      && !outputPreview && !(typeof outputLength === "number" && outputLength > 0)) return;
     const endTs = typeof options?.ts === "number"
       ? options.ts
       : typeof evt.ts === "number"
@@ -363,6 +370,11 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
       {
         session_id: evt.sessionId ?? snapshot?.sessionId,
         channel: snapshot?.lastChannel,
+        ...(request.isInternalRequest ? {
+          request_type: request.requestType,
+          request_category: request.requestCategory,
+          is_internal_request: true,
+        } : {}),
         "span.kind": "output",
         "openclaw.output.preview": outputPreview,
         "openclaw.output.length": outputLength,
@@ -956,6 +968,9 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         if (isDuplicateRequestStart(evt, "message")) break;
         const snapshot = resolveSnapshotForEvent(evt);
         const requestClassification = resolveRequestClassification({
+          sessionKey: resolveSessionKey?.(evt) ?? evt.sessionKey,
+          sessionId: evt.sessionId ?? snapshot?.sessionId,
+          runId: evt.runId,
           lastUserText: snapshot?.lastUserText,
           lastAssistantText: snapshot?.lastAssistantText,
           inputPreview: snapshot?.lastRunAssistantTurns?.at(-1)?.inputPreview,
