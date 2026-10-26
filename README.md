@@ -64,14 +64,13 @@ For a pinned version, use `releases/download/vX.Y.Z/install-release.ps1` with `-
 
 Without `OSS_ENDPOINT`, the shell installer downloads from GitHub Releases. To use OSS, download its `openclaw-otel-plugin/install.sh` and set `OSS_ENDPOINT=https://<your-oss-root>` when running it. For a fixed GitHub version, download `releases/download/vX.Y.Z/install-release.sh` and pass `vX.Y.Z` as the first argument.
 
-GitHub `latest` selects the stable release. To install this candidate through obs-agent-connector:
+GitHub `latest` selects the stable release. Install or upgrade through obs-agent-connector:
 
 ```bash
-obs-agent-connector install openclaw \
-  --static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1-rc.4
+obs-agent-connector install openclaw
 ```
 
-Published RC installers resolve an incoming `latest` argument to their own candidate version, including when called by the connector.
+To pin this release, add `--static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1`. For a candidate, use its RC tag in that URL. Published RC installers resolve an incoming `latest` argument to their own candidate version, including when called by the connector.
 
 ### Source Install
 

@@ -64,14 +64,13 @@ chmod +x /tmp/openclaw-otel-plugin-install.sh
 
 未设置 `OSS_ENDPOINT` 时，shell 安装器从 GitHub Releases 下载。使用 OSS 时，下载其 `openclaw-otel-plugin/install.sh`，并在执行时设置 `OSS_ENDPOINT=https://<你的-oss-root>`。安装固定 GitHub 版本时，下载 `releases/download/vX.Y.Z/install-release.sh`，并将第一个参数设为 `vX.Y.Z`。
 
-GitHub 的 `latest` 指向正式版。通过 obs-agent-connector 安装本次候选版：
+GitHub 的 `latest` 指向正式版。通过 obs-agent-connector 安装或升级：
 
 ```bash
-obs-agent-connector install openclaw \
-  --static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1-rc.4
+obs-agent-connector install openclaw
 ```
 
-已发布的 RC 安装器会把传入的 `latest` 解析为安装器自身所属的候选版本，因此兼容连接器的现有调用方式。
+固定本次正式版时，添加 `--static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1`。安装候选版时，将该 URL 中的版本换成对应 RC tag。已发布的 RC 安装器会把传入的 `latest` 解析为安装器自身所属的候选版本，因此兼容连接器的现有调用方式。
 
 ### 源码安装
 

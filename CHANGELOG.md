@@ -2,6 +2,16 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-10-26
+
+Release: `v0.8.1` (stable).
+
+- Promote the fixes validated in rc.1 through rc.4: deduplicate live/replayed requests and late lifecycle events, preserve compressed SQLite user boundaries and per-call token accounting, and keep provider fallback within one logical request (#15).
+- Retain native model/tool events across failed primary attempts, isolate persisted/current-call output, and preserve measured native model durations.
+- Support GitHub installation without `OSS_ENDPOINT`, standalone bundled dependencies, release-sidecar installers, and candidate version pinning through the connector.
+- Make the stable release available through GitHub `latest` and update installation guidance. Telemetry implementation is unchanged from rc.4; legacy-format compatibility is retained. Real-host validation covers OpenClaw 2026.10.6, not every older supported version.
+- Known limitations remain: request-root terminal outcome handling discussed in #9 can retain technical OK for failed requests, and CLI completion using only `session.state` does not emit workflow-duration metrics. Windows execution remains unverified.
+
 ## 2026-10-23 (release candidate 4)
 
 Release: `v0.8.1-rc.4` (pre-release).
