@@ -18,10 +18,9 @@ Linux/macOS 使用 `install.sh`，Windows 使用 `install.ps1`；二者都支持
 ### GTrace
 
 ```bash
-curl -fsSL https://<你的-oss-root>/openclaw-otel-plugin/install.sh -o /tmp/openclaw-otel-plugin-install.sh
+curl -fsSL https://github.com/GuanceCloud/openclaw-otel-plugin/releases/latest/download/install-release.sh -o /tmp/openclaw-otel-plugin-install.sh
 chmod +x /tmp/openclaw-otel-plugin-install.sh
 
-OSS_ENDPOINT=https://<你的-oss-root> \
 /tmp/openclaw-otel-plugin-install.sh latest \
   --type gtrace \
   --endpoint http://<dataway-host> \
@@ -33,10 +32,9 @@ OSS_ENDPOINT=https://<你的-oss-root> \
 ### 标准 OTLP
 
 ```bash
-curl -fsSL https://<你的-oss-root>/openclaw-otel-plugin/install.sh -o /tmp/openclaw-otel-plugin-install.sh
+curl -fsSL https://github.com/GuanceCloud/openclaw-otel-plugin/releases/latest/download/install-release.sh -o /tmp/openclaw-otel-plugin-install.sh
 chmod +x /tmp/openclaw-otel-plugin-install.sh
 
-OSS_ENDPOINT=https://<你的-oss-root> \
 /tmp/openclaw-otel-plugin-install.sh latest \
   --type otlp \
   --endpoint http://127.0.0.1:4318/otel \
@@ -61,6 +59,18 @@ OSS_ENDPOINT=https://<你的-oss-root> \
 ```
 
 安装特定版本时，将 URL 改为 `releases/download/vX.Y.Z/install-release.ps1`，并传入 `-Version vX.Y.Z`。使用 OSS 时额外传入 `-OssEndpoint "https://<你的-oss-root>"`。不要把真实 token、`agent_id` 或 `agent_name` 写入文档、脚本仓库或问题记录。
+
+### 选择发布版本
+
+未设置 `OSS_ENDPOINT` 时，shell 安装器从 GitHub Releases 下载。使用 OSS 时，下载其 `openclaw-otel-plugin/install.sh`，并在执行时设置 `OSS_ENDPOINT=https://<你的-oss-root>`。安装固定 GitHub 版本时，下载 `releases/download/vX.Y.Z/install-release.sh`，并将第一个参数设为 `vX.Y.Z`。
+
+GitHub 的 `latest` 指向正式版。通过 obs-agent-connector 安装或升级：
+
+```bash
+obs-agent-connector install openclaw
+```
+
+固定本次正式版时，添加 `--static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1`。安装候选版时，将该 URL 中的版本换成对应 RC tag。已发布的 RC 安装器会把传入的 `latest` 解析为安装器自身所属的候选版本，因此兼容连接器的现有调用方式。
 
 ### 源码安装
 

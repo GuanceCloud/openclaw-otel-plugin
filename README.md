@@ -18,10 +18,9 @@ Use `install.sh` on Linux/macOS and `install.ps1` on Windows. Both support first
 ### GTrace
 
 ```bash
-curl -fsSL https://<your-oss-root>/openclaw-otel-plugin/install.sh -o /tmp/openclaw-otel-plugin-install.sh
+curl -fsSL https://github.com/GuanceCloud/openclaw-otel-plugin/releases/latest/download/install-release.sh -o /tmp/openclaw-otel-plugin-install.sh
 chmod +x /tmp/openclaw-otel-plugin-install.sh
 
-OSS_ENDPOINT=https://<your-oss-root> \
 /tmp/openclaw-otel-plugin-install.sh latest \
   --type gtrace \
   --endpoint http://<dataway-host> \
@@ -33,10 +32,9 @@ OSS_ENDPOINT=https://<your-oss-root> \
 ### Standard OTLP
 
 ```bash
-curl -fsSL https://<your-oss-root>/openclaw-otel-plugin/install.sh -o /tmp/openclaw-otel-plugin-install.sh
+curl -fsSL https://github.com/GuanceCloud/openclaw-otel-plugin/releases/latest/download/install-release.sh -o /tmp/openclaw-otel-plugin-install.sh
 chmod +x /tmp/openclaw-otel-plugin-install.sh
 
-OSS_ENDPOINT=https://<your-oss-root> \
 /tmp/openclaw-otel-plugin-install.sh latest \
   --type otlp \
   --endpoint http://127.0.0.1:4318/otel \
@@ -61,6 +59,18 @@ The command matches the Qoder plugin flow and executes the GitHub Release instal
 ```
 
 For a pinned version, use `releases/download/vX.Y.Z/install-release.ps1` with `-Version vX.Y.Z`. For OSS delivery, additionally pass `-OssEndpoint "https://<your-oss-root>"`. Never place real tokens, `agent_id`, or `agent_name` values in documentation, source-controlled scripts, or issue reports.
+
+### Release selection
+
+Without `OSS_ENDPOINT`, the shell installer downloads from GitHub Releases. To use OSS, download its `openclaw-otel-plugin/install.sh` and set `OSS_ENDPOINT=https://<your-oss-root>` when running it. For a fixed GitHub version, download `releases/download/vX.Y.Z/install-release.sh` and pass `vX.Y.Z` as the first argument.
+
+GitHub `latest` selects the stable release. Install or upgrade through obs-agent-connector:
+
+```bash
+obs-agent-connector install openclaw
+```
+
+To pin this release, add `--static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1`. For a candidate, use its RC tag in that URL. Published RC installers resolve an incoming `latest` argument to their own candidate version, including when called by the connector.
 
 ### Source Install
 
