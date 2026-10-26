@@ -184,7 +184,7 @@ If logs are enabled, you should also see:
 [otel-plugin] metric export succeeded -> ...
 ```
 
-Some OpenClaw background jobs, including autonomous Skill Workshop reviews, use hidden sessions whose input/output text may be unavailable. Their model duration and token usage are still recorded. They are marked `request_type=internal_request`; reviews use `request_category=skill_workshop_review`. Select `request_type=user_request` for user-conversation views. See [Trace fields](./docs/gen-ai-trace-tags.md) for classification details.
+Some OpenClaw background jobs, including autonomous Skill Workshop reviews, use hidden sessions whose input/output text may be unavailable. Their model duration and token usage are still recorded. They are marked `request_type=internal_request`; reviews use `request_category=skill_workshop_review`. Select `request_type=user_request` for user-conversation views. Total usage and cost must include both user and internal model calls; count each model call once and do not add root summaries again. See [Trace fields](./docs/gen-ai-trace-tags.md) for classification details.
 
 ## Documents
 

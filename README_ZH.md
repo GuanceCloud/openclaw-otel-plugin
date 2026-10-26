@@ -184,7 +184,7 @@ Get-Content "$HOME\.openclaw\logs\gateway.log" -Tail 50
 [otel-plugin] metric export succeeded -> ...
 ```
 
-OpenClaw 的部分后台任务（例如 Skill Workshop 自动复盘）使用隐藏会话，输入/输出正文可能不可用，但仍记录真实模型耗时和 Token 用量。这类链路标记为 `request_type=internal_request`，复盘任务使用 `request_category=skill_workshop_review`。用户对话列表可选择 `request_type=user_request`。分类详情见 [Trace 字段](./docs/gen-ai-trace-tags.md)。
+OpenClaw 的部分后台任务（例如 Skill Workshop 自动复盘）使用隐藏会话，输入/输出正文可能不可用，但仍记录真实模型耗时和 Token 用量。这类链路标记为 `request_type=internal_request`，复盘任务使用 `request_category=skill_workshop_review`。用户对话列表可选择 `request_type=user_request`；总用量和总成本必须同时包含前台与后台模型调用，逐次调用计入一次，根 Span 的汇总用量不再重复累计。分类详情见 [Trace 字段](./docs/gen-ai-trace-tags.md)。
 
 ## 文档
 

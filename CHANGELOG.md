@@ -6,6 +6,7 @@ Current work is recorded by calendar day. Historical entries before the current 
 
 - Classify reserved hidden `internal-session-effects` identities as internal requests, with a specific `skill_workshop_review` category for autonomous Skill Workshop reviews, even when their transcript is unavailable. Keep their real model-call durations and token usage without presenting them as user conversations.
 - Omit empty assistant spans for these hidden internal sessions when no output was captured. Do not infer content from the originating foreground session; ordinary user requests and legacy identity handling remain unchanged.
+- Clarify that total usage/cost includes both foreground and internal model calls. Request classification and missing content do not remove real usage; root summaries must not be counted again alongside their model spans.
 
 ## 2026-10-26
 

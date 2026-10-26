@@ -69,6 +69,10 @@ Histogram 的 `sum / count` 是各次调用估算值的等权平均，分位数�
 
 ## 指标结果状态
 
+成本汇总需要包含用户请求和内部后台任务的所有实际 `llm` 调用。`request_type` / `is_internal_request` 是来源分类，不是计费资格；缺少输入输出正文也不代表没有模型用量。用户对话列表的前台筛选条件不应直接套用到总用量或总成本统计。
+
+Token 用量按逐次 `llm` 汇总一次；根 `invoke_agent` 的汇总用量仅用于展示，不能再与其子 `llm` 相加。金额估算由计费侧结合 provider/model 以及普通输入、缓存输入和输出的对应价格计算；完整 input 已包含缓存子集，不能将完整 input 与缓存再次相加计费。本插件的内部任务分类修复保留用量，不额外生成金额估算指标。
+
 新采集数据的指标 `status` 仅使用 `ok` / `error`：正常完成映射为 `ok`；失败、取消、中断和超时映射为 `error`，详细原因仍由 Trace 原始字段表达。`final_status`、`tool_result_status` 和 Trace 业务状态保留原语义，不直接复制为指标 `status`，Token 用量指标不新增 `status`。
 
 无法确认结果时，不默认成功，也不生成猜测的结果指标采样。原生调用使用自身终态，transcript / synthetic 模型路径使用对应 assistant turn 的 `stopReason`（`stop/length/toolUse` 为成功，`error/aborted` 为失败）。缺失模型结果的旧 `model.usage` 聚合事件和 transcript 仍可保留已有 Token 用量，但不产生带猜测状态的 operation count/duration；缺失 workflow 结果时也不产生 workflow duration。
