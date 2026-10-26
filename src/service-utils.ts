@@ -226,6 +226,9 @@ export function loadSnapshotForEvent(
 
 export function isHeartbeatSessionSnapshot(snapshot: SessionSnapshot | undefined): boolean {
   return resolveRequestClassification({
+    sessionKey: snapshot?.sessionKey,
+    sessionId: snapshot?.sessionId,
+    runId: snapshot?.runId,
     lastUserText: snapshot?.lastUserText,
     lastAssistantText: snapshot?.lastAssistantText,
     inputPreview: snapshot?.lastRunAssistantTurns?.at(-1)?.inputPreview,
@@ -300,15 +303,33 @@ export function modelStopReasonStatus(stopReason: string | undefined): "ok" | "e
 }
 
 export function resolveRequestClassification(input: {
+  sessionKey?: string;
+  sessionId?: string;
+  runId?: string;
   lastUserText?: string;
   lastAssistantText?: string;
   inputPreview?: string;
   outputPreview?: string;
 }): {
   requestType: "user_request" | "internal_request";
-  requestCategory?: "heartbeat" | "runtime_continue";
+  requestCategory?: "heartbeat" | "runtime_continue" | "session_effects" | "skill_workshop_review";
   isInternalRequest: boolean;
 } {
+  // Reserved identities come from OpenClaw's hidden internal-effects sessions.
+  // A user prompt or an arbitrary run ID mentioning these names is not evidence.
+  const sessionKey = input.sessionKey?.trim();
+  const internalIdentity = /^agent:[^:]+:/i.test(sessionKey ?? "")
+    ? /^agent:[^:]+:internal-session-effects:(.+)$/i.exec(sessionKey ?? "")?.[1]
+    : /^internal-session-effects-(.+)$/i.exec(input.sessionId?.trim() ?? sessionKey ?? "")?.[1];
+  if (internalIdentity) {
+    const review = /^skill-workshop-review:/.test(input.runId ?? "")
+      || /^(?:(?:incognito|legacy)-)?skill-workshop-review_/.test(internalIdentity);
+    return {
+      requestType: "internal_request",
+      requestCategory: review ? "skill_workshop_review" : "session_effects",
+      isInternalRequest: true,
+    };
+  }
   const normalizedInputs = [
     input.lastUserText,
     input.inputPreview,

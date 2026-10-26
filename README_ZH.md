@@ -184,6 +184,8 @@ Get-Content "$HOME\.openclaw\logs\gateway.log" -Tail 50
 [otel-plugin] metric export succeeded -> ...
 ```
 
+OpenClaw 的部分后台任务（例如 Skill Workshop 自动复盘）使用隐藏会话，输入/输出正文可能不可用，但仍记录真实模型耗时和 Token 用量。这类链路标记为 `request_type=internal_request`，复盘任务使用 `request_category=skill_workshop_review`。用户对话列表可选择 `request_type=user_request`。分类详情见 [Trace 字段](./docs/gen-ai-trace-tags.md)。
+
 ## 文档
 
 新采集指标的结果维度 `status` 使用 `ok/error`，历史数据可能仍有旧值。首块延迟 Histogram 可通过 `sum / count` 展示平均值。新增 `gen_ai.client.operation.time_per_output_token` Histogram，仅对能唯一确认流式进度的成功原生模型调用，估算非首 Token 平均耗时；缺少流式证据时没有采样。验证及看板聚合口径见 [指标说明](./docs/gen-ai-metrics.md)。

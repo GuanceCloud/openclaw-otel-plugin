@@ -2,6 +2,11 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-10-26 (unreleased)
+
+- Classify reserved hidden `internal-session-effects` identities as internal requests, with a specific `skill_workshop_review` category for autonomous Skill Workshop reviews, even when their transcript is unavailable. Keep their real model-call durations and token usage without presenting them as user conversations.
+- Omit empty assistant spans for these hidden internal sessions when no output was captured. Do not infer content from the originating foreground session; ordinary user requests and legacy identity handling remain unchanged.
+
 ## 2026-10-26
 
 Release: `v0.8.1` (stable).
