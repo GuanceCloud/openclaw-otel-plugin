@@ -263,7 +263,7 @@ SQLite trajectory 中，同一 `run_id` 的外部 harness 尝试失败可能紧�
 | `prev_state` | 前一状态 |
 | `reason` | 状态变化或结束原因 |
 | `request_type` | 请求大类，默认 `user_request`；内部控制流为 `internal_request` |
-| `request_category` | 请求细分类型；例如 `runtime_continue`、`heartbeat` |
+| `request_category` | 请求细分类型；例如 `runtime_continue`、`heartbeat`、`session_effects`、`skill_workshop_review` |
 | `is_internal_request` | 是否内部请求，便于直接过滤内部控制流 |
 | `queue_depth` | 当前关联队列深度 |
 | `runtime_phase` | 当前 runtime 阶段 |
@@ -330,7 +330,12 @@ SQLite trajectory 中，同一 `run_id` 的外部 harness 尝试失败可能紧�
 - 当前内部请求会进一步通过 `request_category` 区分，例如：
   - `runtime_continue`
   - `heartbeat`
+  - `session_effects`：使用 OpenClaw 保留身份 `agent:<agent>:internal-session-effects:<id>` 的隐藏运行会话；缺少 session key 时，可用保留 session ID 前缀识别
+  - `skill_workshop_review`：上述隐藏会话中的 Skill Workshop 后台复盘
 - 需要筛掉非用户可见链路时，优先使用 `is_internal_request = true` 或 `request_type = internal_request`
+- 内部隐藏会话可能不提供可读取的 transcript，或会在任务结束后清理。此时保留真实模型调用、耗时和 Token 用量，输入/输出字段保持缺失，不从前台会话补写正文；没有已采集输出时也不生成空的 `assistant` Span。用户对话列表应选择 `request_type=user_request`，后台成本排查可单独选择 `internal_request`。
+- 总用量和总成本需要同时包含前台与后台的实际模型调用，不应按 `user_request` 排除内部任务。逐次 `llm` 是用量累计依据；根 Span 的汇总字段不再重复累计，分类或正文缺失不会免除真实用量。
+- 识别基于保留的运行时身份；用户正文提及这些名称、普通会话名或单独的 run ID 不会使用户请求被标为内部任务。未使用这些保留身份的旧版路径保持原分类行为。
 
 ## Model 相关字段
 

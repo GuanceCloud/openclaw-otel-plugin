@@ -349,6 +349,10 @@ export function createOtelPluginService(
         delete nextAttrs.__min_snapshot_user_ts;
         const snapshot = loadSessionSnapshot(sessionKey);
         const requestClassification = resolveRequestClassification({
+          sessionKey,
+          sessionId: typeof nextAttrs.session_id === "string" ? nextAttrs.session_id
+            : typeof nextAttrs["openclaw.sessionId"] === "string" ? nextAttrs["openclaw.sessionId"] : snapshot?.sessionId,
+          runId: typeof nextAttrs.run_id === "string" ? nextAttrs.run_id : snapshot?.runId,
           lastUserText: snapshot?.lastUserText,
           lastAssistantText: snapshot?.lastAssistantText,
           inputPreview:
@@ -1111,6 +1115,9 @@ export function createOtelPluginService(
             total: trajectoryRun.usage?.total,
           });
           const requestClassification = resolveRequestClassification({
+            sessionKey,
+            sessionId,
+            runId: trajectoryRun.runId,
             lastUserText: userText,
             lastAssistantText: assistantText,
             inputPreview: userText,

@@ -559,6 +559,37 @@ test("resolveRequestClassification marks heartbeat probes as internal requests",
   );
 });
 
+test("reserved internal session identities classify reviews even without a transcript", () => {
+  const expected = { requestType: "internal_request", requestCategory: "skill_workshop_review", isInternalRequest: true };
+  for (const input of [
+    { sessionKey: "agent:main:internal-session-effects:skill-workshop-review_fixture-hash" },
+    { sessionKey: "agent:ops:internal-session-effects:incognito-skill-workshop-review_fixture-hash" },
+    { sessionId: "internal-session-effects-skill-workshop-review_fixture-hash" },
+    { sessionKey: "internal-session-effects-skill-workshop-review_fixture-hash", sessionId: "internal-session-effects-skill-workshop-review_fixture-hash" },
+    { sessionKey: "agent:main:internal-session-effects:opaque-id", runId: "skill-workshop-review:fixture" },
+  ]) assert.deepEqual(resolveRequestClassification(input), expected);
+  assert.deepEqual(resolveRequestClassification({
+    sessionKey: "agent:main:internal-session-effects:skill-workshop-review_fixture-hash",
+    lastAssistantText: "HEARTBEAT_OK",
+  }), expected, "explicit identity takes precedence over text heuristics");
+});
+
+test("other reserved internal effects sessions remain observable with a general category", () => {
+  assert.deepEqual(resolveRequestClassification({ sessionKey: "agent:main:internal-session-effects:probe-fixture" }), {
+    requestType: "internal_request", requestCategory: "session_effects", isInternalRequest: true,
+  });
+});
+
+test("user content, run IDs and non-reserved session names do not imply an internal review", () => {
+  for (const input of [
+    { lastUserText: "Explain internal-session-effects and skill-workshop-review" },
+    { runId: "skill-workshop-review:fixture" },
+    { sessionKey: "agent:main:dashboard:skill-workshop-review_fixture" },
+    { sessionKey: "agent:main:internal-session-effects-extra:fixture" },
+    { sessionKey: "agent:main:dashboard:fixture", sessionId: "internal-session-effects-skill-workshop-review_fixture" },
+  ]) assert.deepEqual(resolveRequestClassification(input), { requestType: "user_request", isInternalRequest: false });
+});
+
 test("loadSnapshotForEvent resolves snapshots through sessionId when sessionKey is absent", () => {
   const calls = [];
   const snapshot = { sessionId: "sid-1", lastUserText: "delete folder" };

@@ -184,6 +184,8 @@ If logs are enabled, you should also see:
 [otel-plugin] metric export succeeded -> ...
 ```
 
+Some OpenClaw background jobs, including autonomous Skill Workshop reviews, use hidden sessions whose input/output text may be unavailable. Their model duration and token usage are still recorded. They are marked `request_type=internal_request`; reviews use `request_category=skill_workshop_review`. Select `request_type=user_request` for user-conversation views. Total usage and cost must include both user and internal model calls; count each model call once and do not add root summaries again. See [Trace fields](./docs/gen-ai-trace-tags.md) for classification details.
+
 ## Documents
 
 For newly collected metrics, result `status` is `ok` or `error`; historical data can retain older values. The first-chunk latency Histogram supports a mean through `sum / count`. The new `gen_ai.client.operation.time_per_output_token` Histogram estimates time per output token after the first, only for successful native calls with unambiguous observed streaming progress. Missing stream evidence produces no estimate. See the [metric definitions and sampling requirements](./docs/gen-ai-metrics.md) for verification and dashboard aggregation.
