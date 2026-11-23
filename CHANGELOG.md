@@ -2,11 +2,25 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
-## 2026-10-26 (unreleased)
+## 2026-11-23 (unreleased)
 
 - Classify reserved hidden `internal-session-effects` identities as internal requests, with a specific `skill_workshop_review` category for autonomous Skill Workshop reviews, even when their transcript is unavailable. Keep their real model-call durations and token usage without presenting them as user conversations.
 - Omit empty assistant spans for these hidden internal sessions when no output was captured. Do not infer content from the originating foreground session; ordinary user requests and legacy identity handling remain unchanged.
 - Clarify that total usage/cost includes both foreground and internal model calls. Request classification and missing content do not remove real usage; root summaries must not be counted again alongside their model spans.
+
+## 2026-11-23
+
+Release: `v0.8.2` (stable).
+
+- Promote the native LLM token recovery validated in `v0.8.2-rc.1`: recover missing/all-zero diagnostic usage from the matched transcript turn, preserve known usage and deduplication, and omit unknown token attributes. Telemetry implementation is unchanged from the candidate.
+- Update stable installation guidance to `v0.8.2`. Real-host validation covers OpenClaw `2026.6.1` with a local streaming provider and OTLP/protobuf receiver; customer remote providers and Windows execution remain unverified.
+
+## 2026-11-23 (release candidate)
+
+Release: `v0.8.2-rc.1` (pre-release; stable latest remains `v0.8.1`).
+
+- Backfill missing or all-zero native LLM token usage from the already matched transcript turn, including token metrics, without duplicating calls or assigning aggregate usage to individual spans. Omit unknown native span token attributes when diagnostics contain no usage, and tolerate absent usage during request aggregation.
+- Validate the packaged plugin on a real OpenClaw `2026.6.1` gateway with a local OpenAI-compatible provider and OTLP/protobuf receiver: two requests, three native LLM calls, one tool call, and input/output token totals of 350/70. Native completion diagnostics omit usage on this host; the matching transcript supplies the recovered per-call values. This does not validate a customer's remote model provider or Windows execution.
 
 ## 2026-10-26
 

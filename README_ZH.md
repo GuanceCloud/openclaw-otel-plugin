@@ -70,7 +70,7 @@ GitHub 的 `latest` 指向正式版。通过 obs-agent-connector 安装或升级
 obs-agent-connector install openclaw
 ```
 
-固定本次正式版时，添加 `--static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1`。安装候选版时，将该 URL 中的版本换成对应 RC tag。已发布的 RC 安装器会把传入的 `latest` 解析为安装器自身所属的候选版本，因此兼容连接器的现有调用方式。
+固定本次正式版时，添加 `--static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.2`。安装候选版时，将该 URL 中的版本换成对应 RC tag。已发布的 RC 安装器会把传入的 `latest` 解析为安装器自身所属的候选版本，因此兼容连接器的现有调用方式。
 
 ### 源码安装
 

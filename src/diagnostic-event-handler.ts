@@ -1,5 +1,5 @@
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
-import type { ActiveRootSpan, ActiveRunSpan, MetricInstruments, SessionSnapshot } from "./service-types.js";
+import type { ActiveRootSpan, ActiveRunSpan, MetricInstruments, SessionSnapshot, TranscriptAssistantTurn } from "./service-types.js";
 import {
   addEvent,
   buildGenAiClientTokenMetricAttrs,
@@ -153,6 +153,7 @@ type DiagnosticEventHandlerDeps = {
     minUserTs?: number;
     provider?: string;
     model?: string;
+    usage?: TranscriptAssistantTurn["usage"];
     endTime: Date;
     finalize(): void;
   }): void;
@@ -572,6 +573,8 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
         }
         const resolvedSessionKey = resolveSessionKey?.(evt) ?? evt.sessionKey;
         const usageTotals = resolveUsageTokenTotals(evt.usage);
+        const hasUsage = evt.usage && Object.values(evt.usage).some((value) =>
+          typeof value === "number" && Number.isFinite(value) && value >= 0);
         let emittedNativeModelSpan = false;
         if (runHasId(run, evt.runId) && evt.callId && Number.isFinite(evt.ts)
           && Number.isFinite(evt.durationMs) && evt.durationMs >= 0) {
@@ -608,15 +611,15 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                 "openclaw.model.transport": evt.transport,
                 "openclaw.context.limit": evt.contextTokenBudget,
                 "span.kind": "model",
-                "openclaw.tokens.input": usageTotals.inputTokens,
-                "openclaw.tokens.output": usageTotals.outputTokens,
-                "openclaw.tokens.total": usageTotals.totalTokens,
-                "openclaw.tokens.cache_read": usageTotals.cacheReadTokens,
-                "openclaw.tokens.cache_write": usageTotals.cacheWriteTokens,
+                "openclaw.tokens.input": hasUsage ? usageTotals.inputTokens : undefined,
+                "openclaw.tokens.output": hasUsage ? usageTotals.outputTokens : undefined,
+                "openclaw.tokens.total": hasUsage ? usageTotals.totalTokens : undefined,
+                "openclaw.tokens.cache_read": hasUsage ? usageTotals.cacheReadTokens : undefined,
+                "openclaw.tokens.cache_write": hasUsage ? usageTotals.cacheWriteTokens : undefined,
                 "llm.provider": evt.provider,
                 "llm.model": evt.model,
-                "llm.input_tokens": usageTotals.inputTokens,
-                "llm.output_tokens": usageTotals.outputTokens,
+                "llm.input_tokens": hasUsage ? usageTotals.inputTokens : undefined,
+                "llm.output_tokens": hasUsage ? usageTotals.outputTokens : undefined,
                 ...(validLatency
                   ? { "gen_ai.response.time_to_first_chunk": latencyMs! / 1000 }
                   : {}),
@@ -647,6 +650,7 @@ export function createDiagnosticEventHandler(deps: DiagnosticEventHandlerDeps) {
                   minUserTs: run.messageQueuedTs,
                   provider: evt.provider,
                   model: evt.model,
+                  usage: evt.usage,
                   endTime: resolvedEndTime,
                   finalize: finalizeNativeModelSpan,
                 });

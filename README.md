@@ -70,7 +70,7 @@ GitHub `latest` selects the stable release. Install or upgrade through obs-agent
 obs-agent-connector install openclaw
 ```
 
-To pin this release, add `--static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.1`. For a candidate, use its RC tag in that URL. Published RC installers resolve an incoming `latest` argument to their own candidate version, including when called by the connector.
+To pin this release, add `--static-base https://github.com/GuanceCloud/openclaw-otel-plugin/releases/download/v0.8.2`. For a candidate, use its RC tag in that URL. Published RC installers resolve an incoming `latest` argument to their own candidate version, including when called by the connector.
 
 ### Source Install
 
