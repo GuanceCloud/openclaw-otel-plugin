@@ -2,6 +2,13 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-11-23 (release candidate)
+
+Release: `v0.8.2-rc.1` (pre-release; stable latest remains `v0.8.1`).
+
+- Backfill missing or all-zero native LLM token usage from the already matched transcript turn, including token metrics, without duplicating calls or assigning aggregate usage to individual spans. Omit unknown native span token attributes when diagnostics contain no usage, and tolerate absent usage during request aggregation.
+- Validate the packaged plugin on a real OpenClaw `2026.6.1` gateway with a local OpenAI-compatible provider and OTLP/protobuf receiver: two requests, three native LLM calls, one tool call, and input/output token totals of 350/70. Native completion diagnostics omit usage on this host; the matching transcript supplies the recovered per-call values. This does not validate a customer's remote model provider or Windows execution.
+
 ## 2026-10-26
 
 Release: `v0.8.1` (stable).

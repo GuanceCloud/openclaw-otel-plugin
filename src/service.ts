@@ -1869,7 +1869,7 @@ export function createOtelPluginService(
         run.aggregate.cacheReadTokens += usageTotals.cacheReadTokens;
         run.aggregate.cacheWriteTokens += usageTotals.cacheWriteTokens;
         run.aggregate.totalTokens += usageTotals.totalTokens;
-        run.aggregate.promptTokens += evt.usage.promptTokens ?? 0;
+        run.aggregate.promptTokens += evt.usage?.promptTokens ?? 0;
         run.aggregate.costUsd += evt.costUsd ?? 0;
         run.aggregate.modelCalls += 1;
         run.aggregate.lastProvider = evt.provider ?? run.aggregate.lastProvider;
@@ -1993,6 +1993,7 @@ export function createOtelPluginService(
           minUserTs,
           provider,
           model,
+          usage,
           endTime,
           finalize,
         }) {
@@ -2039,6 +2040,26 @@ export function createOtelPluginService(
             const sameCall = turn && (!provider || turn.provider === provider) && (!model || turn.model === model)
               && (typeof turn.endedAt !== "number" || turn.endedAt <= endTime.getTime());
             if (sameRun && freshUser && turn && sameCall) {
+              // Older hosts can omit per-call usage from diagnostics while
+              // persisting it on the matching transcript turn. Never spread a
+              // run-level aggregate across native calls or recount known usage.
+              const nativeUsage = resolveUsageTokenTotals(usage);
+              const turnUsage = resolveUsageTokenTotals(turn.usage);
+              if (nativeUsage.totalTokens === 0 && turnUsage.totalTokens > 0) {
+                span.setAttributes(traceAttrs({
+                  usage_input_tokens: turnUsage.inputTokens,
+                  usage_output_tokens: turnUsage.outputTokens,
+                  usage_total_tokens: turnUsage.totalTokens,
+                  usage_cache_read_input_tokens: turnUsage.cacheReadTokens,
+                  usage_cache_write_input_tokens: turnUsage.cacheWriteTokens,
+                }));
+                for (const [tokenType, value] of [["input", turnUsage.inputTokens], ["output", turnUsage.outputTokens]] as const) {
+                  if (value > 0) {
+                    instruments.genAiClientTokenUsage?.record(value,
+                      buildGenAiClientTokenMetricAttrs(provider, model, { session_id: sessionId, token_type: tokenType }));
+                  }
+                }
+              }
               span.setAttributes(traceAttrs(enrichWithTranscript(sessionKey, {
                 __min_snapshot_user_ts: minUserTs,
                 "openclaw.sessionId": sessionId,

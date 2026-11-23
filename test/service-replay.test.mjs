@@ -28,21 +28,31 @@ if (!workerScenario) {
   }
   for (const scenario of ["queued-duplicate", "processing-duplicate", "transcript-before-native",
     "idle-before-native", "active-trajectory", "revised-terminal", "independent-turns",
+    "usage-missing", "usage-empty", "usage-zero", "usage-native-priority", "usage-unavailable", "usage-wrong-model", "usage-multiple",
     "sqlite-native", "sqlite-replay", "sqlite-empty-attempt", "sqlite-provider-fallback", "sqlite-provider-fallback-sweep", "sqlite-provider-fallback-artifact"]) {
     test(`service replay ownership: ${scenario}`, { timeout: 15000 }, async () => {
       const result = await run(scenario);
       try {
         const expected = scenario === "independent-turns" ? 2 : 1;
         const failover = scenario.startsWith("sqlite-provider-fallback");
-        const models = failover ? 5 : expected;
+        const multipleUsage = scenario === "usage-multiple";
+        const models = failover ? 5 : multipleUsage ? 7 : expected;
+        const unknownUsage = ["usage-unavailable", "usage-wrong-model"].includes(scenario);
+        const recoveredUsage = ["usage-missing", "usage-empty", "usage-zero", "usage-multiple"].includes(scenario);
         assert.equal(result.roots, expected, JSON.stringify(result));
         assert.equal(result.models, models, JSON.stringify(result));
         const replayOnly = scenario === "sqlite-replay";
         assert.equal(result.nativeModels, replayOnly ? 0 : models, JSON.stringify(result));
-        assert.equal(result.operationCount, failover ? 9 : expected, JSON.stringify(result));
-        assert.equal(result.outputTokens, failover ? 20 : expected * 5, JSON.stringify(result));
+        assert.equal(result.operationCount, failover ? 9 : models, JSON.stringify(result));
+        assert.equal(result.outputTokens, unknownUsage ? 0 : multipleUsage ? 140 : failover ? 20 : expected * 5, JSON.stringify(result));
         assert.equal(result.firstChunkCount, replayOnly ? 0 : models, JSON.stringify(result));
-        assert.equal(result.perTokenCount, replayOnly ? 0 : failover ? 4 : expected, JSON.stringify(result));
+        assert.equal(result.perTokenCount, replayOnly || recoveredUsage || unknownUsage ? 0 : failover ? 4 : expected, JSON.stringify(result));
+        if (scenario.startsWith("usage-")) {
+          assert.equal(result.inputTokens, unknownUsage ? 0 : multipleUsage ? 560 : 20, JSON.stringify(result));
+          assert.deepEqual(result.modelTokenPairs, multipleUsage
+            ? Array.from({ length: 7 }, (_, i) => [(i + 1) * 20, (i + 1) * 5])
+            : [unknownUsage ? [null, null] : [20, 5]], JSON.stringify(result));
+        }
         assert.equal(result.zeroDurationRoots, 0, JSON.stringify(result));
         if (failover) {
           assert.equal(result.rootOutputs[0], "answer-3", JSON.stringify(result));
@@ -164,6 +174,24 @@ if (!workerScenario) {
         const processing = { type: "session.state", ts: ts + 1, state: "processing", prevState: "idle", reason: "run_started" };
         if (workerScenario !== "processing-duplicate") await event(queued);
         await event(processing);
+        if (workerScenario === "usage-multiple") {
+          for (let call = 1; call <= 7; call++) {
+            const callEnd = ts + call * 20;
+            const completed = { type: "model.call.completed", runId, callId: `${runId}:model:${call}`,
+              ts: callEnd, durationMs: 10, timeToFirstByteMs: 1, provider: "p", model: "m" };
+            await event(completed);
+            await event(completed);
+            writeMessage({ type: "message", timestamp: callEnd, message: {
+              role: "assistant", provider: "p", model: "m", content: [{ type: "text", text: `answer-${call}` }],
+              stopReason: call === 7 ? "stop" : "toolUse", usage: { input: call * 20, output: call * 5 },
+            } });
+          }
+          transcriptUpdated({ sessionFile: file });
+          await event({ type: "model.usage", ts: ts + 141, provider: "p", model: "m", usage: { input: 9999, output: 9999 } });
+          await event({ type: "session.state", ts: ts + 150, state: "idle", prevState: "processing", reason: "run_completed" });
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          continue;
+        }
         if (workerScenario.startsWith("sqlite-provider-fallback")) {
           database.exec("CREATE TABLE trajectory_runtime_events(session_id TEXT,seq INTEGER,run_id TEXT,event_json TEXT)");
           let trajectorySeq = 0;
@@ -211,8 +239,10 @@ if (!workerScenario) {
         await event({ type: "run.progress", runId, reason: "model_call:stream_progress", ts: ts + 20 });
         const answer = (delta = 0, text = "answer") => {
           writeMessage({ type: "message", timestamp: ts + 100 + delta, message: {
-            role: "assistant", provider: "p", model: "m", content: [{ type: "text", text }],
-            stopReason: "stop", usage: { input: 20, output: 5 },
+            role: "assistant", provider: "p", model: workerScenario === "usage-wrong-model" ? "other" : "m", content: [{ type: "text", text }],
+            stopReason: "stop", usage: workerScenario === "usage-unavailable" ? undefined
+              : workerScenario === "usage-empty" ? { input: 2, cacheRead: 18, promptTokens: 20, output: 5 }
+              : { input: workerScenario === "usage-native-priority" ? 999 : 20, output: 5 },
           } }); transcriptUpdated({ sessionFile: file });
         };
         const idle = { type: "session.state", ts: ts + 120, state: "idle", prevState: "processing", reason: "run_completed" };
@@ -226,12 +256,19 @@ if (!workerScenario) {
           await new Promise((resolve) => setTimeout(resolve, 1100));
         }
         if (workerScenario !== "sqlite-replay") await event({ type: "model.call.completed", runId, callId: "call", provider: "p", model: "m",
-          ts: ts + 100, durationMs: 90, timeToFirstByteMs: 10, usage: { input: 20, output: 5 } });
+          ts: ts + 100, durationMs: 90, timeToFirstByteMs: 10,
+          usage: workerScenario === "usage-zero" ? { input: 0, output: 0 }
+            : workerScenario === "usage-empty" ? {}
+            : workerScenario.startsWith("usage-") && workerScenario !== "usage-native-priority" ? undefined
+            : { input: 20, output: 5 } });
         if (!earlyTranscript) answer();
         if (workerScenario !== "idle-before-native") await event(idle);
         if (workerScenario === "queued-duplicate") { await event(queued); await event(idle); }
         if (workerScenario === "processing-duplicate") { await event(processing); await event(idle); }
         if (workerScenario === "revised-terminal") answer(30, "late revised answer");
+        // Let enrichment retry after the request has closed; late usage must
+        // reach the existing span and metric without reopening a request.
+        if (workerScenario.startsWith("usage-")) await new Promise((resolve) => setTimeout(resolve, 150));
       }
     }
   } finally {
@@ -276,6 +313,11 @@ if (!workerScenario) {
     historicalModels: spans.filter((s) => s.name === "llm" && attrs(s).output_preview === "historical answer").length,
     oneMsModels: spans.filter((s) => s.name === "llm" && s.endTimeUnixNano - s.startTimeUnixNano <= 1000000).length,
     models: spans.filter((s) => s.name === "llm").length,
+    modelTokenPairs: spans.filter((s) => s.name === "llm").map((s) =>
+      ["gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens"].map((key) => {
+        const value = s.attributes?.find((attribute) => attribute.key === key)?.value;
+        return value?.intValue ?? value?.doubleValue ?? null;
+      })),
     nativeModels: logs.filter((l) => l.includes('"source":"native_model_span"')).length,
     operationCount, outputTokens,
     firstChunkCount: (latest.get("gen_ai.client.operation.time_to_first_chunk")?.histogram.dataPoints ?? [])
