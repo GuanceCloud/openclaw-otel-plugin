@@ -2,6 +2,13 @@
 
 Current work is recorded by calendar day. Historical entries before the current day are backfilled by week.
 
+## 2026-11-23
+
+Release: `v0.8.2` (stable).
+
+- Promote the native LLM token recovery validated in `v0.8.2-rc.1`: recover missing/all-zero diagnostic usage from the matched transcript turn, preserve known usage and deduplication, and omit unknown token attributes. Telemetry implementation is unchanged from the candidate.
+- Update stable installation guidance to `v0.8.2`. Real-host validation covers OpenClaw `2026.6.1` with a local streaming provider and OTLP/protobuf receiver; customer remote providers and Windows execution remain unverified.
+
 ## 2026-11-23 (release candidate)
 
 Release: `v0.8.2-rc.1` (pre-release; stable latest remains `v0.8.1`).
